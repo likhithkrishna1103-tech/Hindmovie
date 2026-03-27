@@ -78,18 +78,32 @@
         return /\bcam\b|camrip|telesync|\bts\b|hdtc|hdcam/.test(str.toLowerCase());
     }
 
+    // FIX: also allow protocol-relative URLs (//cdn.example.com/...) which are valid streams
     function isBlockedUrl(url) {
         if (!url) return true;
-        if (!url.startsWith("http")) return true;
+        if (!url.startsWith("http") && !url.startsWith("//")) return true;
         const lower = url.toLowerCase();
         return BLOCKED_DOMAINS.some(d => lower.includes(d));
     }
 
+    /**
+     * FIX: Decode base64-encoded filename from common URL param names.
+     * Previously only checked `id=`; now also checks `file=`, `f=`, `name=`.
+     */
     function decodeBase64Id(url) {
         try {
-            const match = url.match(/id=([^&]+)/);
-            if (!match) return "";
-            return atob(match[1]);
+            const paramNames = ["id", "file", "f", "name"];
+            for (const param of paramNames) {
+                const match = url.match(new RegExp("[?&]" + param + "=([^&]+)"));
+                if (!match) continue;
+                try {
+                    const decoded = atob(match[1]);
+                    if (decoded && decoded.length > 4) return decoded;
+                } catch (_) {
+                    // Not valid base64 - try next param
+                }
+            }
+            return "";
         } catch {
             return "";
         }
@@ -102,7 +116,9 @@
     function extractFilename(url, anchorText) {
         // 1. Try URL path segment
         try {
-            const pathname = new URL(url).pathname;
+            // Normalise protocol-relative URLs for parsing
+            const fullUrl = url.startsWith("//") ? "https:" + url : url;
+            const pathname = new URL(fullUrl).pathname;
             const seg = pathname.split("/").filter(Boolean).pop() || "";
             const decoded = decodeURIComponent(seg);
             if (/\.(mkv|mp4|avi|mov|ts|m2ts|webm)$/i.test(decoded)) return decoded;
@@ -110,26 +126,28 @@
         } catch (_) {}
 
         // 2. Anchor text
-        if (anchorText) {
+        if (anchorText && anchorText.trim()) {
             const t = anchorText.trim();
             if (/\.(mkv|mp4|avi|mov|ts|m2ts|webm)$/i.test(t)) return t;
             if (/\b(480p|720p|1080p|2160p|4k)\b/i.test(t))    return t;
         }
 
-        // 3. Decoded base64 id param
+        // 3. Decoded base64 id/file param - FIX: now checks multiple param names
         const decoded = decodeBase64Id(url);
-        if (decoded && decoded.length > 4) return decoded;
+        if (
+            decoded &&
+            decoded.length > 4 &&
+            /(\.(mkv|mp4|avi|mov|ts|m2ts|webm))$/i.test(decoded)
+        ) {
+            return decoded;
+        }
 
         return null;
     }
 
     /**
      * Strip the movie/series title from a filename so only spec tokens remain.
-     * "Interstellar.2014.1080p.BluRay.x265.mkv" → "2014.1080p.BluRay.x265.mkv"
-     *
-     * Strategy:
-     *   1. Try exact title match (flexible separators) from the start of the filename.
-     *   2. Fallback: cut at the first year-like or known spec token.
+     * "Interstellar.2014.1080p.BluRay.x265.mkv" -> "2014.1080p.BluRay.x265.mkv"
      */
     function stripMovieTitle(filename, movieTitle) {
         if (!filename) return filename;
@@ -166,7 +184,7 @@
                     name: c.name,
                     role: c.character,
                     image: c.profile_path
-                        ? `https://image.tmdb.org/t/p/w185${c.profile_path}`
+                        ? "https://image.tmdb.org/t/p/w185" + c.profile_path
                         : undefined
                 })
             );
@@ -175,12 +193,15 @@
         }
     }
 
+    // FIX: also decode &lt; and &gt; HTML entities which can appear in descriptions
     function stripTags(str) {
         if (!str) return "";
         return str
             .replace(/<[^>]*>/g, "")
             .replace(/&amp;/g, "&")
             .replace(/&nbsp;/g, " ")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
             .replace(/&#\d+;/g, "")
             .trim();
     }
@@ -188,6 +209,8 @@
     function resolveUrl(href, base) {
         if (!href) return null;
         if (href.startsWith("http")) return href;
+        // FIX: handle protocol-relative URLs
+        if (href.startsWith("//")) return "https:" + href;
         if (href.startsWith("/")) return base.replace(/\/$/, "") + href;
         return base.replace(/\/$/, "") + "/" + href;
     }
@@ -195,8 +218,8 @@
     async function tmdbIdFromImdb(imdbId) {
         try {
             const res = await http_get(
-                `https://api.themoviedb.org/3/find/${imdbId}` +
-                `?api_key=${TMDB_API_KEY}&external_source=imdb_id`
+                "https://api.themoviedb.org/3/find/" + imdbId +
+                "?api_key=" + TMDB_API_KEY + "&external_source=imdb_id"
             );
             const data = JSON.parse(res.body);
             return data.movie_results?.[0]?.id || data.tv_results?.[0]?.id || null;
@@ -208,7 +231,7 @@
     // --- Core Functions ---
 
     /**
-     * getHome – all section fetches run IN PARALLEL for speed.
+     * getHome - all section fetches run IN PARALLEL for speed.
      */
     async function getHome(cb) {
         try {
@@ -224,7 +247,7 @@
 
             const settled = await Promise.allSettled(
                 sections.map(async section => {
-                    const url = section.path ? `${mainUrl}/${section.path}` : mainUrl;
+                    const url = section.path ? mainUrl + "/" + section.path : mainUrl;
                     const res = await http_get(url);
                     return { name: section.name, items: parseArticles(res.body, mainUrl) };
                 })
@@ -274,7 +297,7 @@
     async function search(query, cb) {
         try {
             const mainUrl = await getMainUrl();
-            const res = await http_get(`${mainUrl}/?s=${encodeURIComponent(query)}`);
+            const res = await http_get(mainUrl + "/?s=" + encodeURIComponent(query));
             const items = parseArticles(res.body, mainUrl);
             cb({ success: true, data: items });
         } catch (e) {
@@ -283,7 +306,7 @@
     }
 
     /**
-     * load – TMDB + Cinemeta fetches run IN PARALLEL.
+     * load - TMDB + Cinemeta fetches run IN PARALLEL.
      * The resolved movie title is appended as the last element of the hrefs
      * array so loadStreams can strip it from filenames without an extra fetch.
      */
@@ -333,7 +356,8 @@
             const storyMatch = html.match(
                 /<h3[^>]*>[^<]*Storyline[^<]*<\/h3>\s*<p[^>]*>([^]*?)<\/p>/i
             );
-            const descriptions = storyMatch ? stripTags(storyMatch[1]).trim() : null;
+            // FIX: consistent variable name
+            const description = storyMatch ? stripTags(storyMatch[1]).trim() : null;
 
             const h1Match = html.match(
                 /<h1[^>]*class="entry-title"[^>]*>([^]*?)<\/h1>/i
@@ -345,7 +369,7 @@
             const [tmdbResult, cineResult] = await Promise.allSettled([
                 imdbId ? tmdbIdFromImdb(imdbId) : Promise.resolve(null),
                 imdbId
-                    ? http_get(`${CINEMETA_URL}/${isSeries ? "series" : "movie"}/${imdbId}.json`)
+                    ? http_get(CINEMETA_URL + "/" + (isSeries ? "series" : "movie") + "/" + imdbId + ".json")
                     : Promise.resolve(null)
             ]);
 
@@ -360,18 +384,18 @@
             if (tmdbId) {
                 try {
                     const creditsRes = await http_get(
-                        `https://api.themoviedb.org/3/${isSeries ? "tv" : "movie"}/${tmdbId}/credits` +
-                        `?api_key=${TMDB_API_KEY}&language=en-US`
+                        "https://api.themoviedb.org/3/" + (isSeries ? "tv" : "movie") + "/" + tmdbId + "/credits" +
+                        "?api_key=" + TMDB_API_KEY + "&language=en-US"
                     );
                     castList = parseCredits(creditsRes.body);
                 } catch (_) {}
             }
 
-            let description = descriptions;
-            let background  = poster;
+            let finalDescription = description;
+            let background       = poster;
             if (responseData?.meta) {
-                description = responseData.meta.description || descriptions;
-                background  = responseData.meta.background  || poster;
+                finalDescription = responseData.meta.description || description;
+                background       = responseData.meta.background  || poster;
             }
 
             const resolvedTitle = responseData?.meta?.name || title;
@@ -384,7 +408,7 @@
                         title: resolvedTitle, url,
                         posterUrl: poster, bannerUrl: background,
                         logoUrl: responseData?.meta?.logo || null,
-                        type: "series", description,
+                        type: "series", description: finalDescription,
                         year:   parseInt(releaseYear || responseData?.meta?.year) || undefined,
                         score:  parseFloat(imdbRating || responseData?.meta?.imdbRating) || undefined,
                         genres: docGenres, cast: castList, episodes
@@ -403,7 +427,7 @@
                     title: resolvedTitle, url,
                     posterUrl: poster, bannerUrl: background,
                     logoUrl: responseData?.meta?.logo || null,
-                    type: "movie", description,
+                    type: "movie", description: finalDescription,
                     year:   parseInt(releaseYear || responseData?.meta?.year) || undefined,
                     score:  parseFloat(imdbRating || responseData?.meta?.imdbRating) || undefined,
                     genres: docGenres, cast: castList,
@@ -418,7 +442,7 @@
     }
 
     /**
-     * buildSeriesEpisodes – season list pages fetched IN PARALLEL.
+     * buildSeriesEpisodes - season list pages fetched IN PARALLEL.
      * Series title appended to each episode URL array for filename stripping.
      */
     async function buildSeriesEpisodes(html, responseData, mainUrl, seriesTitle) {
@@ -455,7 +479,7 @@
         for (const result of seasonResults) {
             if (result.status !== "fulfilled") continue;
             for (const { seasonNumber, episodeNumber, epUrl } of result.value) {
-                const key = `${seasonNumber}_${episodeNumber}`;
+                const key = seasonNumber + "_" + episodeNumber;
                 if (!episodeUrlMap[key]) {
                     episodeUrlMap[key] = { seasonNumber, episodeNumber, urls: [] };
                 }
@@ -469,7 +493,7 @@
                     v => v.season === seasonNumber && v.episode === episodeNumber
                 );
                 return new Episode({
-                    name:        metaEp?.name  || `Episode ${episodeNumber}`,
+                    name:        metaEp?.name  || "Episode " + episodeNumber,
                     url:         JSON.stringify([...urls, seriesTitle]),
                     season:      seasonNumber,
                     episode:     episodeNumber,
@@ -484,7 +508,7 @@
     }
 
     /**
-     * collectMovieLinks – maxbutton pages fetched IN PARALLEL.
+     * collectMovieLinks - maxbutton pages fetched IN PARALLEL.
      */
     async function collectMovieLinks(html, mainUrl) {
         const listUrls = [];
@@ -515,99 +539,120 @@
     }
 
     /**
-     * loadStreams – filename-based labels, title stripped, full dedup, all-parallel fetches.
+     * loadStreams - filename-based labels, title stripped, full dedup, all-parallel fetches.
      *
      * LABEL: clean filename with movie title stripped from the front.
      *   e.g.  "Interstellar.2014.1080p.BluRay.x265.AAC.mkv"
-     *         → "2014.1080p.BluRay.x265.AAC.mkv"   (year-based fallback cut)
+     *         -> "2014.1080p.BluRay.x265.AAC.mkv"   (year-based fallback cut)
      *         OR "1080p.BluRay.x265.AAC.mkv"        (if title regex matched)
      *
-     * DEDUP:  by final URL  AND  by cleaned label — mirrors with same filename collapse.
+     * DEDUP:  by final URL  AND  by cleaned label - mirrors with same filename collapse.
      * FILTER: CAM / TS / HDCAM rips silently dropped.
-     * SPEED:  hub pages parallel → button-redirect pages parallel → no extra fetches.
+     * SPEED:  hub pages parallel -> no extra fetches.
      * SORT:   quality integer extracted from filename/text, used only for ordering.
      */
     async function loadStreams(url, cb) {
-    try {
-        const rawLinks = JSON.parse(url);
-        if (!Array.isArray(rawLinks) || rawLinks.length === 0) {
-            return cb({ success: true, data: [] });
-        }
-
-        // Extract movie/series title
-        let movieTitle = null;
-        let links = rawLinks;
-
-        if (
-            typeof rawLinks[rawLinks.length - 1] === "string" &&
-            !rawLinks[rawLinks.length - 1].startsWith("http")
-        ) {
-            movieTitle = rawLinks[rawLinks.length - 1];
-            links = rawLinks.slice(0, -1);
-        }
-
-        const results = [];
-        const seenUrls = new Set();
-        const seenNames = new Set();
-
-        // 🚀 PARALLEL: fetch all hub pages
-        const hubPages = await Promise.allSettled(
-            links.map(u => http_get(u))
-        );
-
-        for (const hub of hubPages) {
-            if (hub.status !== "fulfilled" || !hub.value?.body) continue;
-
-            const pageBody = hub.value.body;
-
-            // Extract all valid outgoing links directly (skip extra nesting)
-            const matches = [...pageBody.matchAll(/<a[^>]+href="([^"]+)"/gi)];
-
-            for (const m of matches) {
-                const link = m[1];
-
-                if (isBlockedUrl(link)) continue;
-                if (link.includes("hindmoviez")) continue;
-
-                // 🚀 Directly treat as stream (skip extra button fetch unless needed)
-                if (seenUrls.has(link)) continue;
-                seenUrls.add(link);
-
-                const filename = extractFilename(link, "") || "Stream";
-
-                const cleanName = stripMovieTitle(filename, movieTitle)
-                    .replace(/\.+/g, ".")
-                    .replace(/_/g, ".")
-                    .trim();
-
-                if (!cleanName || cleanName.length < 3) continue;
-
-                const normalized = cleanName.toLowerCase();
-
-                // ❌ duplicate filename
-                if (seenNames.has(normalized)) continue;
-                seenNames.add(normalized);
-
-                // ❌ low quality junk
-                if (isLowQualitySource(normalized)) continue;
-
-                results.push(new StreamResult({
-                    url: link,
-                    source: cleanName
-                }));
+        try {
+            const rawLinks = JSON.parse(url);
+            if (!Array.isArray(rawLinks) || rawLinks.length === 0) {
+                return cb({ success: true, data: [] });
             }
+
+            // Extract movie/series title appended as last element
+            let movieTitle = null;
+            let links = rawLinks;
+
+            if (
+                typeof rawLinks[rawLinks.length - 1] === "string" &&
+                !rawLinks[rawLinks.length - 1].startsWith("http")
+            ) {
+                movieTitle = rawLinks[rawLinks.length - 1];
+                links = rawLinks.slice(0, -1);
+            }
+
+            const results    = [];
+            const seenUrls   = new Set();
+            const seenNames  = new Set();
+
+            // PARALLEL: fetch all hub pages
+            const hubPages = await Promise.allSettled(
+                links.map(u => http_get(u))
+            );
+
+            for (const hub of hubPages) {
+                if (hub.status !== "fulfilled" || !hub.value?.body) continue;
+
+                const pageBody = hub.value.body;
+
+                // FIX: capture anchor text alongside href for better filename detection
+                const matches = [...pageBody.matchAll(/<a[^>]+href="([^"]+)"[^>]*>([^<]*)<\/a>/gi)];
+
+                for (const m of matches) {
+                    const link       = m[1];
+                    const anchorText = (m[2] || "").trim();
+
+                    if (isBlockedUrl(link)) continue;
+                    if (link.includes("hindmoviez")) continue;
+
+                    // Normalise protocol-relative URLs to absolute https
+                    const resolvedLink = link.startsWith("//") ? "https:" + link : link;
+
+                    if (seenUrls.has(resolvedLink)) continue;
+                    seenUrls.add(resolvedLink);
+
+                    // FIX: pass anchor text so extractFilename can use it as a fallback
+                    const filename = extractFilename(resolvedLink, anchorText);
+
+                    // Build label: prefer filename, fall back to hostname
+                    let cleanName;
+                    if (filename) {
+                        cleanName = stripMovieTitle(filename, movieTitle);
+                    } else {
+                        try {
+                            cleanName = new URL(resolvedLink).hostname.replace(/^www\./, "");
+                        } catch (_) {
+                            cleanName = "Stream";
+                        }
+                    }
+
+                    // Remove non-ASCII / control characters
+                    cleanName = cleanName.replace(/[^\x20-\x7E.]/g, "");
+
+                    // FIX: normalise dots and underscores (previously in a broken orphaned block)
+                    cleanName = cleanName
+                        .replace(/\.+/g, ".")
+                        .replace(/_/g, ".")
+                        .trim();
+
+                    if (!cleanName || cleanName.length < 3) continue;
+
+                    const normalized = cleanName.toLowerCase();
+
+                    // Deduplicate by label
+                    if (seenNames.has(normalized)) continue;
+                    seenNames.add(normalized);
+
+                    // Drop CAM / TS / HDCAM rips
+                    if (isLowQualitySource(normalized)) continue;
+
+                    results.push(new StreamResult({
+                        url: resolvedLink,
+                        source: cleanName
+                    }));
+                }
+            }
+
+            cb({ success: true, data: results });
+
+        } catch (e) {
+            cb({
+                success: false,
+                errorCode: "STREAM_ERROR",
+                message: e.message
+            });
         }
-
-        cb({ success: true, data: results });
-
-    } catch (e) {
-        cb({
-            success: false,
-            errorCode: "STREAM_ERROR",
-            message: e.message
-        });
     }
-}
+
     // --- Export ---
     globalThis.getHome    = getHome;
     globalThis.search     = search;
