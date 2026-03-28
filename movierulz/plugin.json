@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.movierulz",
   "name": "movierulz",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://example.com",
   "description": "movierulz plugin for hindmovie",
   "authors": [

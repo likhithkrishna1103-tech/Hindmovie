@@ -28,22 +28,46 @@
         "https://www.5movierulz.army",
         "https://www.5movierulz.skin",
         "https://www.5movierulz.mobi",
-        "https://www.5movierulz.com"
+        "https://www.5movierulz.com",
+        "https://www.5movierulz.haus",
+        "https://www.5movierulz.net",
+        "https://www.5movierulz.tel",
+        "https://www.5movierulz.show"
     ];
     var DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
 
+    // Bing search URLs — tried in order if all other methods fail
+    var BING_SEARCH_URLS = [
+        "https://www.bing.com/search?q=5movierulz+watch+movies+online+free&count=10",
+        "https://www.bing.com/search?q=5movierulz+telugu+hindi+movies+download&count=10",
+        "https://www.bing.com/search?q=site%3A5movierulz+movies&count=10"
+    ];
+
+    // A response from the real site always contains this string
+    var SITE_FINGERPRINT = "movie-watch-online-free";
+
+    // Pattern that a 5movierulz domain must match
+    var DOMAIN_PATTERN = /https?:\/\/(?:www\.)?5movierulz\.\w{2,10}/i;
+
     var cachedMainUrl = null;
 
+    // ============================================================
+    // DOMAIN DISCOVERY — 4 level waterfall:
+    //   1. cachedMainUrl (memory)
+    //   2. domains.json  (GitHub)
+    //   3. Known TLD fallback list
+    //   4. Bing search   (last resort — scrapes top results)
+    // ============================================================
     function getMainUrl() {
         if (cachedMainUrl) return Promise.resolve(cachedMainUrl);
+
+        // Level 1 & 2: domains.json
         return http_get(DOMAINS_URL).then(function (res) {
             var data = JSON.parse(res.body);
             var c = data["5movierulz"] || data["movierulz"] || null;
             if (c) {
-                return http_get(c + "/").then(function () {
-                    cachedMainUrl = c;
-                    return c;
-                }).catch(function () {
+                return testDomain(c).then(function (ok) {
+                    if (ok) { cachedMainUrl = c; return c; }
                     return tryFallbacks(0);
                 });
             }
@@ -53,16 +77,134 @@
         });
     }
 
+    // Level 3: try each known TLD one by one
     function tryFallbacks(i) {
         if (i >= FALLBACK_DOMAINS.length) {
+            log("All fallbacks failed — trying Bing search discovery");
+            return tryBingSearch(0);
+        }
+        log("Trying fallback: " + FALLBACK_DOMAINS[i]);
+        return testDomain(FALLBACK_DOMAINS[i]).then(function (ok) {
+            if (ok) {
+                cachedMainUrl = FALLBACK_DOMAINS[i];
+                log("Fallback OK: " + cachedMainUrl);
+                return cachedMainUrl;
+            }
+            return tryFallbacks(i + 1);
+        }).catch(function () {
+            return tryFallbacks(i + 1);
+        });
+    }
+
+    // Level 4: Bing search — try each search query until we find candidates
+    function tryBingSearch(i) {
+        if (i >= BING_SEARCH_URLS.length) {
+            // Absolute last resort — return first fallback and hope for the best
+            warn("Bing search exhausted — using first fallback as last resort");
             cachedMainUrl = FALLBACK_DOMAINS[0];
             return Promise.resolve(cachedMainUrl);
         }
-        return http_get(FALLBACK_DOMAINS[i] + "/").then(function () {
-            cachedMainUrl = FALLBACK_DOMAINS[i];
-            return cachedMainUrl;
+        log("Bing search attempt " + (i + 1) + ": " + BING_SEARCH_URLS[i]);
+        return http_get(BING_SEARCH_URLS[i]).then(function (res) {
+            var candidates = extractDomainCandidates(res.body);
+            log("Bing returned " + candidates.length + " candidates: " + candidates.join(", "));
+            if (candidates.length === 0) return tryBingSearch(i + 1);
+            return tryBingCandidates(candidates, 0, i);
+        }).catch(function (e) {
+            err("Bing search failed:", e.message);
+            return tryBingSearch(i + 1);
+        });
+    }
+
+    // Test each Bing candidate domain
+    function tryBingCandidates(candidates, i, searchIdx) {
+        if (i >= candidates.length) {
+            // This search query's candidates all failed — try next search query
+            return tryBingSearch(searchIdx + 1);
+        }
+        var candidate = candidates[i];
+        log("Testing Bing candidate: " + candidate);
+        return testDomain(candidate).then(function (ok) {
+            if (ok) {
+                cachedMainUrl = candidate;
+                log("Bing discovery success: " + cachedMainUrl);
+                return cachedMainUrl;
+            }
+            return tryBingCandidates(candidates, i + 1, searchIdx);
         }).catch(function () {
-            return tryFallbacks(i + 1);
+            return tryBingCandidates(candidates, i + 1, searchIdx);
+        });
+    }
+
+    // Extract all 5movierulz domain candidates from a Bing results page
+    // Bing wraps result links in: <a href="https://www.5movierulz.xxx/...">
+    // Also checks <cite> tags which show the domain cleanly
+    function extractDomainCandidates(html) {
+        var found   = [];
+        var seen    = {};
+        var pos     = 0;
+
+        // Strategy 1: scan all href= values for matching domains
+        while (true) {
+            var hIdx = html.indexOf('href="', pos);
+            if (hIdx === -1) break;
+            var hStart = hIdx + 6;
+            var hEnd   = html.indexOf('"', hStart);
+            if (hEnd === -1) break;
+            var href = html.substring(hStart, hEnd);
+            var match = href.match(DOMAIN_PATTERN);
+            if (match) {
+                // Extract just the origin (scheme + host)
+                var origin = extractOrigin(href);
+                if (origin && !seen[origin]) {
+                    seen[origin] = true;
+                    found.push(origin);
+                }
+            }
+            pos = hEnd + 1;
+        }
+
+        // Strategy 2: Bing <cite> tags contain clean domain text
+        pos = 0;
+        while (true) {
+            var cIdx = html.indexOf("<cite", pos);
+            if (cIdx === -1) break;
+            var cClose = html.indexOf(">", cIdx);
+            var cEnd   = html.indexOf("</cite>", cClose);
+            if (cClose === -1 || cEnd === -1) break;
+            var citeText = stripTags(html.substring(cClose + 1, cEnd)).trim();
+            // citeText might be "www.5movierulz.army › movies" etc.
+            var cMatch = citeText.match(DOMAIN_PATTERN);
+            if (cMatch) {
+                var origin = extractOrigin(cMatch[0]);
+                if (origin && !seen[origin]) {
+                    seen[origin] = true;
+                    found.push(origin);
+                }
+            }
+            pos = cEnd + 7;
+        }
+
+        return found;
+    }
+
+    // Get "https://www.5movierulz.army" from a full URL
+    function extractOrigin(url) {
+        if (!url) return null;
+        var m = url.match(/^(https?:\/\/[^\/]+)/);
+        return m ? m[1] : null;
+    }
+
+    // Test a domain by fetching its homepage and checking for site fingerprint
+    // Returns Promise<boolean>
+    function testDomain(domain) {
+        return http_get(domain + "/").then(function (res) {
+            var ok = res.body && res.body.indexOf(SITE_FINGERPRINT) !== -1;
+            log("testDomain " + domain + " -> " + (ok ? "OK" : "FAIL (wrong content)"));
+            return ok;
+        }).catch(function (e) {
+            log("testDomain " + domain + " -> FAIL (" + e.message + ")");
+            return false;
         });
     }
 
