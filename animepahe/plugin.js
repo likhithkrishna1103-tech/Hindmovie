@@ -7,16 +7,21 @@
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     };
 
+    // TMDB API key (from reference)
+    const TMDB_API_KEY = "1865f43a0549ca50d341dd9ab8b29f49";
+    const TMDB_BASE    = "https://api.themoviedb.org/3";
+    const TMDB_IMG     = "https://image.tmdb.org/t/p/w500";
+
     // ─────────────────────────────────────────────
     // Data models
     // ─────────────────────────────────────────────
 
     function AiringData(json) {
-        this.animeTitle = json.anime_title;
-        this.episode    = json.episode;
-        this.snapshot   = json.snapshot;
+        this.animeTitle   = json.anime_title;
+        this.episode      = json.episode;
+        this.snapshot     = json.snapshot;
         this.animeSession = json.anime_session;
-        this.createdAt  = json.created_at;
+        this.createdAt    = json.created_at;
     }
 
     function AiringResponse(json) {
@@ -86,6 +91,7 @@
             posterUrl: item.snapshot || item.poster,
             type:      getType(item.type),
             year:      item.year,
+            score:     item.score,
             headers:   HEADERS
         });
         if (episodeInfo && item.episode) {
@@ -95,37 +101,219 @@
     }
 
     // ─────────────────────────────────────────────
-    // Kwik extractor  (mirrors Kotlin Kwik class)
+    // TMDB Helpers
     // ─────────────────────────────────────────────
-    /**
-     * Unpacks a dean.edwards P,A,C,K,E,D script.
-     *
-     * Uses character-walking to parse the call-site arguments — immune to
-     * changes in quote style, whitespace, or Kwik script updates.
-     *
-     * Packed scripts always end with:
-     *   }('p_string', radix, count, 'k1|k2|...'.split('|'), 0, {}))
-     *    ^--- we find the last ( and walk forward from there
-     */
+
+    async function tmdbAnimeSearch(query) {
+        try {
+            var url = TMDB_BASE + "/search/tv?api_key=" + TMDB_API_KEY
+                    + "&query=" + encodeURIComponent(query)
+                    + "&with_genres=16&with_origin_country=JP&language=en-US";
+            var res  = await http_get(url);
+            var data = JSON.parse(res.body);
+            return data.results || [];
+        } catch(e) {
+            console.error("[TMDB] search error:", e.message);
+            return [];
+        }
+    }
+
+    async function tmdbAnimeByCategory(endpoint, extraParams) {
+        try {
+            var params = "&api_key=" + TMDB_API_KEY
+                       + "&with_genres=16&with_origin_country=JP&language=en-US"
+                       + (extraParams || "");
+            var url  = TMDB_BASE + endpoint + "?" + params.replace(/^&/, "");
+            var res  = await http_get(url);
+            var data = JSON.parse(res.body);
+            return (data.results || []).slice(0, 20);
+        } catch(e) {
+            console.error("[TMDB] category error:", e.message);
+            return [];
+        }
+    }
+
+    function tmdbToMultimediaItem(item) {
+        var title   = item.name || item.original_name || item.title || "Unknown";
+        var poster  = item.poster_path  ? (TMDB_IMG + item.poster_path)  : null;
+        var banner  = item.backdrop_path? (TMDB_IMG + item.backdrop_path): poster;
+        var year    = item.first_air_date ? parseInt(item.first_air_date.split("-")[0]) : null;
+        var score   = item.vote_average  ? parseFloat(item.vote_average.toFixed(1)) : null;
+        var mediaType = (item.media_type === "movie") ? "movie" : "anime";
+
+        return new MultimediaItem({
+            title:       title,
+            url:         JSON.stringify({
+                tmdb_id:     item.id,
+                media_type:  mediaType,
+                name:        title,
+                sessionDate: Math.floor(Date.now() / 1000)
+            }),
+            posterUrl:   poster,
+            bannerUrl:   banner,
+            type:        mediaType,
+            year:        year,
+            score:       score,
+            description: item.overview || null
+        });
+    }
+
+    // ─────────────────────────────────────────────
+    // HOME — IMDb-style, 6 curated rows, all JP Anime
+    // ─────────────────────────────────────────────
+    //
+    // Row 1: 🔴 Now Airing          — live AnimePahe airing feed
+    // Row 2: ⭐ Top Rated Anime      — TMDB top-rated JP anime TV
+    // Row 3: 🔥 Trending This Week  — TMDB trending anime (week)
+    // Row 4: 🎬 Anime Movies        — TMDB popular JP anime movies
+    // Row 5: 🗓 Upcoming Anime      — TMDB upcoming/on-the-air JP anime
+    // Row 6: 🏆 All-Time Classics   — TMDB highest-voted JP anime (sort by votes)
+    // ─────────────────────────────────────────────
+
+    async function getHome(cb) {
+        try {
+            var homeData = {};
+
+            // ── Row 1: Now Airing (live AnimePahe feed) ───────────────
+            try {
+                var url  = PROXY + MAIN_URL + "/api?m=airing&page=1";
+                var res  = await http_get(url, HEADERS);
+                var data = JSON.parse(res.body);
+                var airing = new AiringResponse(data);
+                var airingItems = airing.data.map(function(item) {
+                    var m = toMultimediaItem(item, true);
+                    m.description = "Episode " + item.episode;
+                    return m;
+                });
+                if (airingItems.length) homeData["🔴 Now Airing"] = airingItems;
+            } catch(e) { console.error("[Home] Row 1 error:", e.message); }
+
+            // ── Row 2: Top Rated Anime ─────────────────────────────────
+            try {
+                var topRated = await tmdbAnimeByCategory(
+                    "/discover/tv",
+                    "&api_key=" + TMDB_API_KEY
+                    + "&with_genres=16&with_origin_country=JP"
+                    + "&sort_by=vote_average.desc&vote_count.gte=500"
+                    + "&language=en-US"
+                );
+                var topRatedItems = topRated.map(tmdbToMultimediaItem);
+                if (topRatedItems.length) homeData["⭐ Top Rated Anime"] = topRatedItems;
+            } catch(e) { console.error("[Home] Row 2 error:", e.message); }
+
+            // ── Row 3: Trending This Week ──────────────────────────────
+            try {
+                var trendRes  = await http_get(
+                    TMDB_BASE + "/trending/tv/week?api_key=" + TMDB_API_KEY + "&language=en-US"
+                );
+                var trendData = JSON.parse(trendRes.body);
+                var trendItems = (trendData.results || [])
+                    .filter(function(r) {
+                        return r.origin_country && r.origin_country.indexOf("JP") !== -1
+                            && (r.genre_ids || []).indexOf(16) !== -1;
+                    })
+                    .slice(0, 20)
+                    .map(function(r) { r.media_type = "anime"; return tmdbToMultimediaItem(r); });
+                if (trendItems.length) homeData["🔥 Trending This Week"] = trendItems;
+            } catch(e) { console.error("[Home] Row 3 error:", e.message); }
+
+            // ── Row 4: Anime Movies ────────────────────────────────────
+            try {
+                var movRes  = await http_get(
+                    TMDB_BASE + "/discover/movie?api_key=" + TMDB_API_KEY
+                    + "&with_genres=16&with_origin_country=JP"
+                    + "&sort_by=popularity.desc&language=en-US"
+                );
+                var movData = JSON.parse(movRes.body);
+                var movItems = (movData.results || []).slice(0, 20).map(function(r) {
+                    r.media_type = "movie";
+                    r.name = r.title || r.original_title;
+                    return tmdbToMultimediaItem(r);
+                });
+                if (movItems.length) homeData["🎬 Anime Movies"] = movItems;
+            } catch(e) { console.error("[Home] Row 4 error:", e.message); }
+
+            // ── Row 5: Upcoming / On The Air ──────────────────────────
+            try {
+                var onAirRes  = await http_get(
+                    TMDB_BASE + "/tv/on_the_air?api_key=" + TMDB_API_KEY + "&language=en-US&page=1"
+                );
+                var onAirData = JSON.parse(onAirRes.body);
+                var onAirItems = (onAirData.results || [])
+                    .filter(function(r) {
+                        return r.origin_country && r.origin_country.indexOf("JP") !== -1
+                            && (r.genre_ids || []).indexOf(16) !== -1;
+                    })
+                    .slice(0, 20)
+                    .map(tmdbToMultimediaItem);
+                if (onAirItems.length) homeData["🗓 Currently Airing Season"] = onAirItems;
+            } catch(e) { console.error("[Home] Row 5 error:", e.message); }
+
+            // ── Row 6: All-Time Classics (highest vote count) ─────────
+            try {
+                var classicRes  = await http_get(
+                    TMDB_BASE + "/discover/tv?api_key=" + TMDB_API_KEY
+                    + "&with_genres=16&with_origin_country=JP"
+                    + "&sort_by=vote_count.desc&language=en-US"
+                );
+                var classicData = JSON.parse(classicRes.body);
+                var classicItems = (classicData.results || []).slice(0, 20).map(tmdbToMultimediaItem);
+                if (classicItems.length) homeData["🏆 All-Time Classics"] = classicItems;
+            } catch(e) { console.error("[Home] Row 6 error:", e.message); }
+
+            cb({ success: true, data: homeData });
+
+        } catch(e) {
+            cb({ success: false, errorCode: "HOME_ERROR", message: e.message });
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    // Search — AnimePahe primary, TMDB fallback
+    // ─────────────────────────────────────────────
+
+    async function search(query, cb) {
+        try {
+            // Primary: AnimePahe API
+            var url = PROXY + MAIN_URL + "/api?m=search&l=8&q=" + encodeURIComponent(query);
+            var res = await http_get(url, HEADERS);
+            var data = JSON.parse(res.body);
+            var searchRes = new SearchResponse(data);
+            var items = searchRes.data.map(function(item) {
+                return toMultimediaItem(item, false);
+            });
+
+            // Supplement with TMDB if AnimePahe returns too few results
+            if (items.length < 4) {
+                try {
+                    var tmdbResults = await tmdbAnimeSearch(query);
+                    var tmdbItems   = tmdbResults.slice(0, 10).map(tmdbToMultimediaItem);
+                    items = items.concat(tmdbItems);
+                } catch(te) { console.error("[Search] TMDB fallback error:", te.message); }
+            }
+
+            cb({ success: true, data: items });
+        } catch(e) {
+            cb({ success: false, errorCode: "SEARCH_ERROR", message: e.message });
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    // Kwik extractor
+    // ─────────────────────────────────────────────
+
     function unpackJS(script) {
         try {
             if (!script.includes("function(p,a,c,k,e")) {
                 console.error("[unpackJS] Not a packed script");
                 return null;
             }
-
-            // Find the LAST opening paren of the outer call — i.e. the ( in }(
             var bracePos = script.lastIndexOf('}(');
-            if (bracePos === -1) {
-                console.error("[unpackJS] Cannot find call site }(");
-                return null;
-            }
-            var pos = bracePos + 2; // right after }(
+            if (bracePos === -1) { console.error("[unpackJS] Cannot find call site }("); return null; }
+            var pos = bracePos + 2;
             var slen = script.length;
 
-            function skipWS() {
-                while (pos < slen && /\s/.test(script[pos])) pos++;
-            }
+            function skipWS() { while (pos < slen && /\s/.test(script[pos])) pos++; }
 
             function readString() {
                 var q = script[pos]; pos++;
@@ -150,18 +338,9 @@
                 return parseInt(script.slice(s, pos), 10);
             }
 
-            function skipComma() {
-                skipWS();
-                if (pos < slen && script[pos] === ',') pos++;
-                skipWS();
-            }
+            function skipComma() { skipWS(); if (pos < slen && script[pos] === ',') pos++; skipWS(); }
+            function skipPastChar(ch) { while (pos < slen && script[pos] !== ch) pos++; if (pos < slen) pos++; }
 
-            function skipPastChar(ch) {
-                while (pos < slen && script[pos] !== ch) pos++;
-                if (pos < slen) pos++;
-            }
-
-            // Arg 1: p (encoded body string)
             skipWS();
             if (script[pos] !== "'" && script[pos] !== '"') {
                 console.error("[unpackJS] p not a string, char='" + script[pos] + "' pos=" + pos);
@@ -169,21 +348,17 @@
             }
             var p = readString();
 
-            // Arg 2: a (radix)
             skipComma();
             var a = readInt();
 
-            // Arg 3: c (word count)
             skipComma();
             var c = readInt();
 
-            // Arg 4: k (keyword list as string or array)
             skipComma();
             var k;
             if (script[pos] === "'" || script[pos] === '"') {
                 k = readString().split('|');
                 skipWS();
-                // skip optional .split('|')
                 if (pos < slen && script[pos] === '.') skipPastChar(')');
             } else if (script[pos] === '[') {
                 pos++; k = [];
@@ -199,15 +374,8 @@
                 return null;
             }
 
-            // Radix can legally be 62 (Kwik uses base-62); only reject truly invalid values
-            if (isNaN(a) || a < 2) {
-                console.error("[unpackJS] invalid radix=" + a);
-                return null;
-            }
-            if (isNaN(c) || c < 0) {
-                console.error("[unpackJS] bad word count c=" + c);
-                return null;
-            }
+            if (isNaN(a) || a < 2) { console.error("[unpackJS] invalid radix=" + a); return null; }
+            if (isNaN(c) || c < 0) { console.error("[unpackJS] bad word count c=" + c); return null; }
 
             console.log("[unpackJS] a=" + a + " c=" + c + " k.len=" + k.length + " p.len=" + p.length);
             return _decode(p, a, c, k);
@@ -218,8 +386,6 @@
         }
     }
 
-    // Custom base encoder: JS .toString() only goes to base-36,
-    // but Kwik uses base-62 (0-9 + a-z + A-Z).
     function _toBase(n, a) {
         var chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
         if (a <= 36) return n.toString(a);
@@ -238,107 +404,31 @@
         return p;
     }
 
-
-    /**
-     * Fetches a kwik.cx/e/{id} embed page and extracts the m3u8 URL.
-     * Mirrors the Kotlin Kwik.getUrl() exactly:
-     *   1. GET the embed URL  (referer = the embed URL itself, as Kotlin does)
-     *   2. Find the eval(function(p,a,c,k,e,d){…}) script block
-     *   3. Unpack it
-     *   4. Regex out  source='…m3u8…'
-     */
     async function extractKwikStream(kwikUrl) {
         try {
             console.log("[Kwik] Fetching embed: " + kwikUrl);
-
-            // FIX: referer must be the embed URL itself (matches Kotlin: referer=url)
-            var res = await http_get(kwikUrl, {
-                ...HEADERS,
-                "Referer": kwikUrl
-            });
-
+            var res = await http_get(kwikUrl, { ...HEADERS, "Referer": kwikUrl });
             var html = res.body;
 
-            // Find the packed <script> block
             var scriptMatch = html.match(/<script[^>]*>\s*(eval\(function\(p,a,c,k,e[,d]*\)[\s\S]*?)<\/script>/);
-            if (!scriptMatch) {
-                console.error("[Kwik] No packed script found in embed page");
-                return null;
-            }
+            if (!scriptMatch) { console.error("[Kwik] No packed script found in embed page"); return null; }
 
             var unpacked = unpackJS(scriptMatch[1]);
-            if (!unpacked) {
-                console.error("[Kwik] Failed to unpack script");
-                return null;
-            }
+            if (!unpacked) { console.error("[Kwik] Failed to unpack script"); return null; }
 
             console.log("[Kwik] Unpacked (first 300 chars):", unpacked.substring(0, 300));
 
-            // FIX: regex uses single-quotes to match  source='https://…m3u8…'
-            // The old regex had a stray extra quote character in the character class
             var m3u8Match = unpacked.match(/source\s*=\s*'([^']*\.m3u8[^']*)'/);
-            if (m3u8Match) {
-                console.log("[Kwik] Found m3u8:", m3u8Match[1]);
-                return m3u8Match[1];
-            }
+            if (m3u8Match) { console.log("[Kwik] Found m3u8:", m3u8Match[1]); return m3u8Match[1]; }
 
-            // Fallback: any bare https URL ending in .m3u8 (with possible query string)
             var bare = unpacked.match(/(https?:\/\/[^\s'"]+\.m3u8[^\s'"]*)/);
-            if (bare) {
-                console.log("[Kwik] Found m3u8 (bare):", bare[1]);
-                return bare[1];
-            }
+            if (bare) { console.log("[Kwik] Found m3u8 (bare):", bare[1]); return bare[1]; }
 
             console.error("[Kwik] m3u8 not found in unpacked script");
             return null;
-
         } catch(e) {
             console.error("[Kwik] Error:", e.message);
             return null;
-        }
-    }
-
-
-    // ─────────────────────────────────────────────
-    // Home
-    // ─────────────────────────────────────────────
-
-    async function getHome(cb) {
-        try {
-            var url = PROXY + MAIN_URL + "/api?m=airing&page=1";
-            var res = await http_get(url, HEADERS);
-            var data = JSON.parse(res.body);
-            var airing = new AiringResponse(data);
-
-            var items = airing.data.map(function(item) {
-                var multimedia = toMultimediaItem(item, true);
-                multimedia.description = "Episode " + item.episode;
-                return multimedia;
-            });
-
-            cb({ success: true, data: { "Latest Releases": items } });
-        } catch(e) {
-            cb({ success: false, errorCode: "HOME_ERROR", message: e.message });
-        }
-    }
-
-    // ─────────────────────────────────────────────
-    // Search
-    // ─────────────────────────────────────────────
-
-    async function search(query, cb) {
-        try {
-            var url = PROXY + MAIN_URL + "/api?m=search&l=8&q=" + encodeURIComponent(query);
-            var res = await http_get(url, HEADERS);
-            var data = JSON.parse(res.body);
-            var searchRes = new SearchResponse(data);
-
-            var items = searchRes.data.map(function(item) {
-                return toMultimediaItem(item, false);
-            });
-            cb({ success: true, data: items });
-        } catch(e) {
-            cb({ success: false, errorCode: "SEARCH_ERROR", message: e.message });
         }
     }
 
@@ -349,19 +439,58 @@
     async function load(url, cb) {
         try {
             var loadData = JSON.parse(url);
-            var session  = loadData.session;
-            var name     = loadData.name;
 
-            // Refresh session if older than 10 minutes (mirrors Kotlin sessionDate check)
+            // If this came from a TMDB item, try to find on AnimePahe first
+            if (loadData.tmdb_id && !loadData.session) {
+                var title = loadData.name || "";
+                try {
+                    var searchResult = await new Promise(function(resolve, reject) {
+                        search(title, function(r) {
+                            if (r.success && r.data.length > 0) resolve(r.data[0]);
+                            else reject(new Error("Not found on AnimePahe"));
+                        });
+                    });
+                    loadData = JSON.parse(searchResult.url);
+                } catch(e) {
+                    // Fallback: load TMDB detail and return with empty episodes
+                    console.warn("[load] AnimePahe not found, using TMDB metadata for:", title);
+                    try {
+                        var mediaType = loadData.media_type === "movie" ? "movie" : "tv";
+                        var tmdbDetail = await http_get(
+                            TMDB_BASE + "/" + mediaType + "/" + loadData.tmdb_id
+                            + "?api_key=" + TMDB_API_KEY + "&language=en-US"
+                        );
+                        var td = JSON.parse(tmdbDetail.body);
+                        cb({ success: true, data: new MultimediaItem({
+                            title:       td.name || td.title || title,
+                            url:         url,
+                            posterUrl:   td.poster_path  ? (TMDB_IMG + td.poster_path)  : null,
+                            bannerUrl:   td.backdrop_path? (TMDB_IMG + td.backdrop_path): null,
+                            type:        mediaType === "movie" ? "movie" : "anime",
+                            year:        td.first_air_date ? parseInt(td.first_air_date.split("-")[0])
+                                        : (td.release_date ? parseInt(td.release_date.split("-")[0]) : null),
+                            score:       td.vote_average ? parseFloat(td.vote_average.toFixed(1)) : null,
+                            description: td.overview || null,
+                            genres:      (td.genres || []).map(function(g) { return g.name; }),
+                            episodes:    []
+                        }) });
+                    } catch(te) {
+                        cb({ success: false, errorCode: "LOAD_ERROR", message: te.message });
+                    }
+                    return;
+                }
+            }
+
+            var session = loadData.session;
+            var name    = loadData.name;
+
+            // Refresh session if older than 10 minutes
             var now = Math.floor(Date.now() / 1000);
             if (loadData.sessionDate && (loadData.sessionDate + 600 < now)) {
                 var searchRes = await new Promise(function(resolve, reject) {
                     search(name, function(result) {
-                        if (result.success && result.data.length > 0) {
-                            resolve(result.data[0]);
-                        } else {
-                            reject(new Error("Session refresh failed"));
-                        }
+                        if (result.success && result.data.length > 0) resolve(result.data[0]);
+                        else reject(new Error("Session refresh failed"));
                     });
                 });
                 var freshData = JSON.parse(searchRes.url);
@@ -397,10 +526,10 @@
                               .map(function(m) { return m[1].trim(); });
             }
 
-            var malId    = null;
+            var malId     = null;
             var anilistId = null;
-            var malMatch = html.match(/myanimelist\.net\/anime\/(\d+)/);
-            var aniMatch = html.match(/anilist\.co\/anime\/(\d+)/);
+            var malMatch  = html.match(/myanimelist\.net\/anime\/(\d+)/);
+            var aniMatch  = html.match(/anilist\.co\/anime\/(\d+)/);
             if (malMatch) malId     = malMatch[1];
             if (aniMatch) anilistId = aniMatch[1];
 
@@ -456,7 +585,6 @@
                 });
             }
 
-            // Sort by episode number and re-index from 1
             episodes.sort(function(a, b) { return a.episode - b.episode; });
             episodes.forEach(function(ep, idx) { ep.episode = idx + 1; });
 
@@ -511,7 +639,7 @@
     }
 
     // ─────────────────────────────────────────────
-    // loadStreams  (the main entry point for playing)
+    // loadStreams
     // ─────────────────────────────────────────────
 
     async function loadStreams(url, cb) {
@@ -526,23 +654,15 @@
 
             var streams = [];
 
-            // ── Kwik stream buttons (#resolutionMenu) ──────────────────────────
-            // The play page has buttons like:
-            //   <button data-src="https://kwik.cx/e/XXXX">…1080p…</button>
             var kwikRegex = /<button[^>]*data-src="(https:\/\/kwik\.cx\/e\/[^"]*)"[^>]*>([\s\S]*?)<\/button>/g;
             var match;
-
-            // dubStatus from episode url payload: "sub" or "dub"
             var wantDub = (data.dubStatus === "dub");
 
             while ((match = kwikRegex.exec(html)) !== null) {
                 var kwikHref = match[1];
                 var btnText  = match[2].replace(/<[^>]+>/g, ' ').trim();
+                var isDub    = btnText.toLowerCase().includes('eng');
 
-                // AnimePahe marks dub streams with "eng" in the <span> inside the button
-                var isDub = btnText.toLowerCase().includes('eng');
-
-                // Only extract streams that match the requested dubStatus
                 if (isDub !== wantDub) continue;
 
                 var qualityMatch = btnText.match(/(\d{3,4})p/);
@@ -557,16 +677,12 @@
                         url:     streamUrl,
                         quality: quality,
                         source:  "AnimePahe " + label + " [" + (isDub ? 'DUB' : 'SUB') + "]",
-                        headers: {
-                            ...HEADERS,
-                            "Referer": "https://kwik.cx/"
-                        }
+                        headers: { ...HEADERS, "Referer": "https://kwik.cx/" }
                     }));
                 } else {
                     console.error("[loadStreams] Failed to extract stream for:", kwikHref);
                 }
             }
-
 
             console.log("[loadStreams] Total streams found:", streams.length);
             cb({ success: true, data: streams });
@@ -581,10 +697,10 @@
     // Exports
     // ─────────────────────────────────────────────
 
-    globalThis.getHome    = getHome;
-    globalThis.search     = search;
-    globalThis.load       = load;
-    globalThis.loadStreams = loadStreams;
+    globalThis.getHome     = getHome;
+    globalThis.search      = search;
+    globalThis.load        = load;
+    globalThis.loadStreams  = loadStreams;
 
-    console.log("AnimePahe plugin loaded");
+    console.log("AnimePahe plugin loaded — IMDb-style home with 6 JP Anime rows");
 })();
