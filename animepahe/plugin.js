@@ -441,7 +441,8 @@
             var firstPage = new EpisodeResponse(data);
 
             firstPage.data.forEach(function(ep) {
-                episodes.push(createEpisode(ep, session, 1));
+                episodes.push(createEpisode(ep, session, 1, "sub"));
+                episodes.push(createEpisode(ep, session, 1, "dub"));
             });
 
             if (firstPage.lastPage > 1) {
@@ -472,32 +473,39 @@
             var res      = await http_get(url, HEADERS);
             var data     = JSON.parse(res.body);
             var pageData = new EpisodeResponse(data);
-            return pageData.data.map(function(ep) { return createEpisode(ep, session, page); });
+            var episodes = [];
+            pageData.data.forEach(function(ep) {
+                episodes.push(createEpisode(ep, session, page, "sub"));
+                episodes.push(createEpisode(ep, session, page, "dub"));
+            });
+            return episodes;
         } catch(e) {
             console.error("[fetchEpisodePage] page " + page + " error:", e.message);
             return [];
         }
     }
 
-    function createEpisode(epData, animeSession, page) {
+    function createEpisode(epData, animeSession, page, dubStatus) {
         var title      = epData.title || "Episode " + epData.episode;
+        var suffix     = dubStatus === "dub" ? " (Dub)" : "";
         var urlPayload = JSON.stringify({
             mainUrl:         MAIN_URL,
             is_play_page:    true,
             episode_num:     epData.episode,
             page:            page - 1,
             session:         animeSession,
-            episode_session: epData.session
+            episode_session: epData.session,
+            dubStatus:       dubStatus
         });
 
         return new Episode({
-            name:      title,
+            name:      title + suffix,
             url:       urlPayload,
             season:    1,
             episode:   epData.episode,
             posterUrl: epData.snapshot,
             airDate:   epData.createdAt,
-            dubStatus: "subbed",
+            dubStatus: dubStatus,
             headers:   HEADERS
         });
     }
@@ -524,16 +532,24 @@
             var kwikRegex = /<button[^>]*data-src="(https:\/\/kwik\.cx\/e\/[^"]*)"[^>]*>([\s\S]*?)<\/button>/g;
             var match;
 
+            // dubStatus from episode url payload: "sub" or "dub"
+            var wantDub = (data.dubStatus === "dub");
+
             while ((match = kwikRegex.exec(html)) !== null) {
                 var kwikHref = match[1];
                 var btnText  = match[2].replace(/<[^>]+>/g, ' ').trim();
 
+                // AnimePahe marks dub streams with "eng" in the <span> inside the button
+                var isDub = btnText.toLowerCase().includes('eng');
+
+                // Only extract streams that match the requested dubStatus
+                if (isDub !== wantDub) continue;
+
                 var qualityMatch = btnText.match(/(\d{3,4})p/);
                 var quality      = qualityMatch ? parseInt(qualityMatch[1]) : 0;
-                var isDub        = btnText.toLowerCase().includes('eng');
                 var label        = (btnText.split('·')[0] || "").trim() || "Kwik";
 
-                console.log("[loadStreams] Extracting Kwik:", kwikHref);
+                console.log("[loadStreams] Extracting Kwik [" + (isDub ? "DUB" : "SUB") + "]:", kwikHref);
                 var streamUrl = await extractKwikStream(kwikHref);
 
                 if (streamUrl) {
