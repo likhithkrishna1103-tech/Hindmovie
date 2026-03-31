@@ -34,6 +34,7 @@
             .replace(/&lt;/g, "<")
             .replace(/&gt;/g, ">")
             .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
             .replace(/&#039;/g, "'")
             .replace(/&nbsp;/g, " ");
     }
@@ -346,9 +347,13 @@
             // Anime ID (last segment of path, after last "-")
             var animeId = url.replace(/\?.*$/, "").split("-").pop().replace(/\/.*$/, "");
 
-            // Sub/Dub counts from .tick-sub / .tick-dub on detail page
-            var subCountMatch = html.match(/<span[^>]*class=["'][^"']*tick-sub[^"']*["'][^>]*>(\d+)<\/span>/i);
-            var dubCountMatch = html.match(/<span[^>]*class=["'][^"']*tick-dub[^"']*["'][^>]*>(\d+)<\/span>/i);
+            // Sub/Dub counts must come from the main detail header only.
+            // If we scan the whole page we can accidentally read counts from
+            // recommendation cards and create fake dub episodes.
+            var statsBlockMatch = html.match(/<div[^>]*class=["'][^"']*film-stats[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<div[^>]*class=["'][^"']*film-buttons/i);
+            var statsHtml = statsBlockMatch ? statsBlockMatch[1] : html;
+            var subCountMatch = statsHtml.match(/<(?:div|span)[^>]*class=["'][^"']*tick-sub[^"']*["'][^>]*>[\s\S]*?(\d+)\s*<\/(?:div|span)>/i);
+            var dubCountMatch = statsHtml.match(/<(?:div|span)[^>]*class=["'][^"']*tick-dub[^"']*["'][^>]*>[\s\S]*?(\d+)\s*<\/(?:div|span)>/i);
             var subCount = subCountMatch ? parseInt(subCountMatch[1]) : null;
             var dubCount = dubCountMatch ? parseInt(dubCountMatch[1]) : null;
 
@@ -370,7 +375,7 @@
 
             // ── Recommendations ──────────────────────────────────────────
             var recoHtml = "";
-            var recoMatch = html.match(/<div[^>]*class=["'][^"']*block_area_category[^"']*["'][^>]*>([\s\S]*?)<\/section>/i);
+            var recoMatch = html.match(/<section[^>]*class=["'][^"']*block_area_category[^"']*["'][^>]*>([\s\S]*?)<\/section>/i);
             if (recoMatch) recoHtml = recoMatch[1];
             var recommendations = recoHtml ? parseFlwItems(recoHtml) : [];
 
