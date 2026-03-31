@@ -128,13 +128,15 @@
 
         if (!title || !href) return null;
 
-        return new MultimediaItem({
-            title:         title,
-            url:           href,
-            posterUrl:     poster,
-            type:          type,
-            japaneseTitle: japaneseTitle || undefined
+        var item = new MultimediaItem({
+            title:     title,
+            url:       href,
+            posterUrl: poster || "",
+            type:      type
         });
+        // Only set japaneseTitle when we actually have one — avoids passing null to a non-nullable String field
+        if (japaneseTitle) item.japaneseTitle = japaneseTitle;
+        return item;
     }
 
     // ─────────────────────────────────────────────
@@ -374,20 +376,20 @@
 
             // ── Build result ─────────────────────────────────────────────
             var result = new MultimediaItem({
-                title: title,
-                url: url,
-                posterUrl: poster,
-                bannerUrl: poster,
-                type: type,
-                year: year,
-                description: description,
-                status: status,
-                genres: genres,
-                actors: actors,
+                title:           title || "Unknown",
+                url:             url,
+                posterUrl:       poster || "",
+                bannerUrl:       poster || "",
+                type:            type,
+                year:            year || null,
+                description:     description || "",
+                status:          status || "unknown",
+                genres:          genres,
+                actors:          actors,
                 recommendations: recommendations,
-                episodes: episodes,
-                syncData: { mal: malId, anilist: anilistId },
-                headers: HEADERS
+                episodes:        episodes,
+                syncData:        { mal: malId || "", anilist: anilistId || "" },
+                headers:         HEADERS
             });
 
             cb({ success: true, data: result });
@@ -457,15 +459,15 @@
                         href: ep.href
                     });
                     return new Episode({
-                        name: epTitle + (dubStatus === "dub" ? " (Dub)" : ""),
-                        url: urlPayload,
-                        season: 1,
-                        episode: ep.epNum,
-                        posterUrl: epPoster,
-                        description: epDesc,
-                        airDate: airDate,
-                        dubStatus: dubStatus,
-                        headers: HEADERS
+                        name:        (epTitle || ("Episode " + ep.epNum)) + (dubStatus === "dub" ? " (Dub)" : ""),
+                        url:         urlPayload,
+                        season:      1,
+                        episode:     ep.epNum,
+                        posterUrl:   epPoster || "",
+                        description: epDesc || "No summary available",
+                        airDate:     airDate || "",
+                        dubStatus:   dubStatus,
+                        headers:     HEADERS
                     });
                 }
 
