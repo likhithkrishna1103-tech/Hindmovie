@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.kaido",
+  "name": "Kaido",
+  "version": 1,
+  "baseUrl": "https://example.com",
+  "description": "Kaido plugin for hindmovie",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}
