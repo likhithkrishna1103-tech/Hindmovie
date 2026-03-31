@@ -11,9 +11,55 @@
     const TMDB_API_KEY = "1865f43a0549ca50d341dd9ab8b29f49";
     const TMDB_BASE    = "https://api.themoviedb.org/3";
     const TMDB_IMG     = "https://image.tmdb.org/t/p/w500";
-    // TMDB is called directly — the AnimePahe proxy rejects non-pahe domains
-    function tmdbGet(url) {
-        return http_get(url);
+    // Poster lookup:
+    // AnimePahe's search API returns a proper "poster" cover image for each anime.
+    // We search by title and take the first result's poster — same proxy, always works.
+    // Falls back to TMDB direct if AnimePahe search returns nothing.
+    async function getPoster(title) {
+        if (!title) return null;
+
+        // Source 1: AnimePahe search API — returns proper cover poster, not episode snapshot
+        try {
+            var apUrl = PROXY + MAIN_URL + "/api?m=search&l=1&q=" + encodeURIComponent(title);
+            var apRes = await http_get(apUrl, HEADERS);
+            if (apRes && apRes.body) {
+                var apData = JSON.parse(apRes.body);
+                var hit = apData.data && apData.data[0];
+                // poster field is the cover art (e.g. https://i.animepahe.ru/posters/...)
+                // Only accept it if it is NOT a snapshot (snapshots contain "/snapshots/")
+                if (hit && hit.poster && hit.poster.indexOf("/snapshots/") === -1) {
+                    return hit.poster;
+                }
+            }
+        } catch(e) { /* try next */ }
+
+        // Source 2: TMDB direct search
+        try {
+            var tUrl = TMDB_BASE + "/search/tv?api_key=" + TMDB_API_KEY
+                     + "&query=" + encodeURIComponent(title) + "&language=en-US";
+            var tRes = await http_get(tUrl);
+            if (tRes && tRes.body) {
+                var tData = JSON.parse(tRes.body);
+                var r = tData.results && tData.results[0];
+                if (r && r.poster_path) return TMDB_IMG + r.poster_path;
+            }
+        } catch(e) { /* try next */ }
+
+        // Source 3: TMDB via proxy (last resort)
+        try {
+            var tpUrl = PROXY + encodeURIComponent(
+                TMDB_BASE + "/search/tv?api_key=" + TMDB_API_KEY
+                + "&query=" + encodeURIComponent(title) + "&language=en-US"
+            );
+            var tpRes = await http_get(tpUrl);
+            if (tpRes && tpRes.body && tpRes.body.indexOf("{") === 0) {
+                var tpData = JSON.parse(tpRes.body);
+                var rp = tpData.results && tpData.results[0];
+                if (rp && rp.poster_path) return TMDB_IMG + rp.poster_path;
+            }
+        } catch(e) { /* all failed */ }
+
+        return null;
     }
 
     // ─────────────────────────────────────────────
@@ -182,26 +228,63 @@
         try {
             var homeData = {};
 
-            // Helper: fetch one airing page and return MultimediaItems
+            // Helper: fetch one airing page, enrich posters from Jikan (MAL)
             async function fetchAiringPage(page) {
                 var url = PROXY + MAIN_URL + "/api?m=airing&page=" + page;
                 var res = await http_get(url, HEADERS);
                 if (!res || !res.body) throw new Error("Empty response");
                 var data = new AiringResponse(JSON.parse(res.body));
-                return data.data.map(function(item) {
+                var items = data.data.map(function(item) {
                     var m = toMultimediaItem(item, true);
                     m.description = "Episode " + item.episode;
                     return m;
                 });
+                // Enrich posters in parallel using session (fastest) or title fallback
+                var enriched = await Promise.all(items.map(async function(m, idx) {
+                    var rawItem = data.data[idx];
+                    var session = rawItem && rawItem.animeSession;
+                    var title   = m.title || "";
+
+                    // Try session-based lookup first (most accurate — direct anime page)
+                    if (session) {
+                        try {
+                            var spUrl = PROXY + MAIN_URL + "/api?m=search&l=1&q=" + encodeURIComponent(title);
+                            var spRes = await http_get(spUrl, HEADERS);
+                            if (spRes && spRes.body) {
+                                var spData = JSON.parse(spRes.body);
+                                // Find result whose session matches exactly
+                                var match = (spData.data || []).find(function(d) {
+                                    return d.session === session;
+                                }) || spData.data && spData.data[0];
+                                if (match && match.poster && match.poster.indexOf("/snapshots/") === -1) {
+                                    m.posterUrl = match.poster;
+                                    return m;
+                                }
+                            }
+                        } catch(e) { /* fall through */ }
+                    }
+
+                    // Fallback: getPoster by title
+                    var poster = await getPoster(title);
+                    if (poster) m.posterUrl = poster;
+                    return m;
+                }));
+                return enriched;
             }
 
-            // Helper: fetch one search page for anime type
+            // Helper: fetch one search page for anime type, enrich posters from Jikan
             async function fetchSearchPage(query, page) {
                 var url = PROXY + MAIN_URL + "/api?m=search&l=12&q=" + encodeURIComponent(query) + "&page=" + (page||1);
                 var res = await http_get(url, HEADERS);
                 if (!res || !res.body) throw new Error("Empty response");
                 var data = new SearchResponse(JSON.parse(res.body));
-                return data.data.map(function(item) { return toMultimediaItem(item, false); });
+                var items = data.data.map(function(item) { return toMultimediaItem(item, false); });
+                var enriched = await Promise.all(items.map(async function(m) {
+                    var poster = await getPoster(m.title || "");
+                    if (poster) m.posterUrl = poster;
+                    return m;
+                }));
+                return enriched;
             }
 
             // ── Row 1: Latest Releases ─────────────────────────────────
