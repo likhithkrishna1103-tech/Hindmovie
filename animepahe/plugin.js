@@ -11,6 +11,10 @@
     const TMDB_API_KEY = "1865f43a0549ca50d341dd9ab8b29f49";
     const TMDB_BASE    = "https://api.themoviedb.org/3";
     const TMDB_IMG     = "https://image.tmdb.org/t/p/w500";
+    // TMDB is called directly — the AnimePahe proxy rejects non-pahe domains
+    function tmdbGet(url) {
+        return http_get(url);
+    }
 
     // ─────────────────────────────────────────────
     // Data models
@@ -109,7 +113,8 @@
             var url = TMDB_BASE + "/search/tv?api_key=" + TMDB_API_KEY
                     + "&query=" + encodeURIComponent(query)
                     + "&with_genres=16&with_origin_country=JP&language=en-US";
-            var res  = await http_get(url);
+            var res  = await tmdbGet(url);
+            if (!res || !res.body) throw new Error("Empty response");
             var data = JSON.parse(res.body);
             return data.results || [];
         } catch(e) {
@@ -120,11 +125,15 @@
 
     async function tmdbAnimeByCategory(endpoint, extraParams) {
         try {
-            var params = "&api_key=" + TMDB_API_KEY
-                       + "&with_genres=16&with_origin_country=JP&language=en-US"
-                       + (extraParams || "");
-            var url  = TMDB_BASE + endpoint + "?" + params.replace(/^&/, "");
-            var res  = await http_get(url);
+            // Build URL cleanly — api_key always first, no duplicates
+            var url = TMDB_BASE + endpoint
+                    + "?api_key=" + TMDB_API_KEY
+                    + "&language=en-US"
+                    + "&with_genres=16"
+                    + "&with_origin_country=JP"
+                    + (extraParams || "");
+            var res  = await tmdbGet(url);
+            if (!res || !res.body) throw new Error("Empty response");
             var data = JSON.parse(res.body);
             return (data.results || []).slice(0, 20);
         } catch(e) {
@@ -159,107 +168,74 @@
     }
 
     // ─────────────────────────────────────────────
-    // HOME — IMDb-style, 6 curated rows, all JP Anime
+    // HOME — IMDb-style, 5 curated rows, all from AnimePahe API
     // ─────────────────────────────────────────────
     //
-    // Row 1: 🔴 Now Airing          — live AnimePahe airing feed
-    // Row 2: ⭐ Top Rated Anime      — TMDB top-rated JP anime TV
-    // Row 3: 🔥 Trending This Week  — TMDB trending anime (week)
-    // Row 4: 🎬 Anime Movies        — TMDB popular JP anime movies
-    // Row 5: 🗓 Upcoming Anime      — TMDB upcoming/on-the-air JP anime
-    // Row 6: 🏆 All-Time Classics   — TMDB highest-voted JP anime (sort by votes)
+    // Row 1: 🔴 Latest Releases     — airing page 1 (newest episodes)
+    // Row 2: 🎌 New This Season     — airing page 2
+    // Row 3: 🔥 Popular Right Now   — airing page 3
+    // Row 4: 🎬 Anime Movies        — search "movie" filter (type=movie)
+    // Row 5: ⭐ Recently Added       — airing page 4
     // ─────────────────────────────────────────────
 
     async function getHome(cb) {
         try {
             var homeData = {};
 
-            // ── Row 1: Now Airing (live AnimePahe feed) ───────────────
-            try {
-                var url  = PROXY + MAIN_URL + "/api?m=airing&page=1";
-                var res  = await http_get(url, HEADERS);
-                var data = JSON.parse(res.body);
-                var airing = new AiringResponse(data);
-                var airingItems = airing.data.map(function(item) {
+            // Helper: fetch one airing page and return MultimediaItems
+            async function fetchAiringPage(page) {
+                var url = PROXY + MAIN_URL + "/api?m=airing&page=" + page;
+                var res = await http_get(url, HEADERS);
+                if (!res || !res.body) throw new Error("Empty response");
+                var data = new AiringResponse(JSON.parse(res.body));
+                return data.data.map(function(item) {
                     var m = toMultimediaItem(item, true);
                     m.description = "Episode " + item.episode;
                     return m;
                 });
-                if (airingItems.length) homeData["🔴 Now Airing"] = airingItems;
+            }
+
+            // Helper: fetch one search page for anime type
+            async function fetchSearchPage(query, page) {
+                var url = PROXY + MAIN_URL + "/api?m=search&l=12&q=" + encodeURIComponent(query) + "&page=" + (page||1);
+                var res = await http_get(url, HEADERS);
+                if (!res || !res.body) throw new Error("Empty response");
+                var data = new SearchResponse(JSON.parse(res.body));
+                return data.data.map(function(item) { return toMultimediaItem(item, false); });
+            }
+
+            // ── Row 1: Latest Releases ─────────────────────────────────
+            try {
+                var row1 = await fetchAiringPage(1);
+                if (row1.length) homeData["🔴 Latest Releases"] = row1;
             } catch(e) { console.error("[Home] Row 1 error:", e.message); }
 
-            // ── Row 2: Top Rated Anime ─────────────────────────────────
+            // ── Row 2: New This Season ─────────────────────────────────
             try {
-                var topRated = await tmdbAnimeByCategory(
-                    "/discover/tv",
-                    "&api_key=" + TMDB_API_KEY
-                    + "&with_genres=16&with_origin_country=JP"
-                    + "&sort_by=vote_average.desc&vote_count.gte=500"
-                    + "&language=en-US"
-                );
-                var topRatedItems = topRated.map(tmdbToMultimediaItem);
-                if (topRatedItems.length) homeData["⭐ Top Rated Anime"] = topRatedItems;
+                var row2 = await fetchAiringPage(2);
+                if (row2.length) homeData["🎌 New This Season"] = row2;
             } catch(e) { console.error("[Home] Row 2 error:", e.message); }
 
-            // ── Row 3: Trending This Week ──────────────────────────────
+            // ── Row 3: Popular Right Now ───────────────────────────────
             try {
-                var trendRes  = await http_get(
-                    TMDB_BASE + "/trending/tv/week?api_key=" + TMDB_API_KEY + "&language=en-US"
-                );
-                var trendData = JSON.parse(trendRes.body);
-                var trendItems = (trendData.results || [])
-                    .filter(function(r) {
-                        return r.origin_country && r.origin_country.indexOf("JP") !== -1
-                            && (r.genre_ids || []).indexOf(16) !== -1;
-                    })
-                    .slice(0, 20)
-                    .map(function(r) { r.media_type = "anime"; return tmdbToMultimediaItem(r); });
-                if (trendItems.length) homeData["🔥 Trending This Week"] = trendItems;
+                var row3 = await fetchAiringPage(3);
+                if (row3.length) homeData["🔥 Popular Right Now"] = row3;
             } catch(e) { console.error("[Home] Row 3 error:", e.message); }
 
             // ── Row 4: Anime Movies ────────────────────────────────────
             try {
-                var movRes  = await http_get(
-                    TMDB_BASE + "/discover/movie?api_key=" + TMDB_API_KEY
-                    + "&with_genres=16&with_origin_country=JP"
-                    + "&sort_by=popularity.desc&language=en-US"
-                );
-                var movData = JSON.parse(movRes.body);
-                var movItems = (movData.results || []).slice(0, 20).map(function(r) {
-                    r.media_type = "movie";
-                    r.name = r.title || r.original_title;
-                    return tmdbToMultimediaItem(r);
-                });
-                if (movItems.length) homeData["🎬 Anime Movies"] = movItems;
+                var row4 = await fetchSearchPage("movie");
+                // Filter to only movie-type items
+                var movies = row4.filter(function(i) { return i.type === "movie"; });
+                if (!movies.length) movies = row4; // fallback: show all if none tagged movie
+                if (movies.length) homeData["🎬 Anime Movies"] = movies;
             } catch(e) { console.error("[Home] Row 4 error:", e.message); }
 
-            // ── Row 5: Upcoming / On The Air ──────────────────────────
+            // ── Row 5: Recently Added ──────────────────────────────────
             try {
-                var onAirRes  = await http_get(
-                    TMDB_BASE + "/tv/on_the_air?api_key=" + TMDB_API_KEY + "&language=en-US&page=1"
-                );
-                var onAirData = JSON.parse(onAirRes.body);
-                var onAirItems = (onAirData.results || [])
-                    .filter(function(r) {
-                        return r.origin_country && r.origin_country.indexOf("JP") !== -1
-                            && (r.genre_ids || []).indexOf(16) !== -1;
-                    })
-                    .slice(0, 20)
-                    .map(tmdbToMultimediaItem);
-                if (onAirItems.length) homeData["🗓 Currently Airing Season"] = onAirItems;
+                var row5 = await fetchAiringPage(4);
+                if (row5.length) homeData["⭐ Recently Added"] = row5;
             } catch(e) { console.error("[Home] Row 5 error:", e.message); }
-
-            // ── Row 6: All-Time Classics (highest vote count) ─────────
-            try {
-                var classicRes  = await http_get(
-                    TMDB_BASE + "/discover/tv?api_key=" + TMDB_API_KEY
-                    + "&with_genres=16&with_origin_country=JP"
-                    + "&sort_by=vote_count.desc&language=en-US"
-                );
-                var classicData = JSON.parse(classicRes.body);
-                var classicItems = (classicData.results || []).slice(0, 20).map(tmdbToMultimediaItem);
-                if (classicItems.length) homeData["🏆 All-Time Classics"] = classicItems;
-            } catch(e) { console.error("[Home] Row 6 error:", e.message); }
 
             cb({ success: true, data: homeData });
 
@@ -268,7 +244,7 @@
         }
     }
 
-    // ─────────────────────────────────────────────
+        // ─────────────────────────────────────────────
     // Search — AnimePahe primary, TMDB fallback
     // ─────────────────────────────────────────────
 
@@ -456,7 +432,7 @@
                     console.warn("[load] AnimePahe not found, using TMDB metadata for:", title);
                     try {
                         var mediaType = loadData.media_type === "movie" ? "movie" : "tv";
-                        var tmdbDetail = await http_get(
+                        var tmdbDetail = await tmdbGet(
                             TMDB_BASE + "/" + mediaType + "/" + loadData.tmdb_id
                             + "?api_key=" + TMDB_API_KEY + "&language=en-US"
                         );
