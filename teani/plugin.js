@@ -10,7 +10,10 @@ var DEBUG = false;
     var NOTORRENT = "https://addon-osvh.onrender.com";
     var ANIZIP = "https://api.ani.zip";
     var ANIMETOSHO = "https://feed.animetosho.org";
-    var TMV_BASE = "https://www.1tamilmv.immo";
+    var FLIXINDIA_BASE = "https://flixindia.xyz";
+    var MOVIES4U_BASE = "https://www.movies-4u.com";
+    var RTALLY_BASE = "https://rtally.site";
+    var CINEMAOS_BASE = "https://cinemaos.tech";
 
     var HOME_CONFIG = {
         animeAiring: { key: "Anime Airing Now", source: "kitsu", url: KITSU_BASE + "/catalog/anime/kitsu-anime-airing.json", limit: 18 },
@@ -71,10 +74,17 @@ var DEBUG = false;
         return Object.keys(out).length ? out : null;
     }
 
-    function request(url, headers) {
+    function request(url, options) {
+        options = options || {};
+        var method = options.method || "GET";
+        var headers = options.headers || { "User-Agent": "Mozilla/5.0" };
+        var data = options.data;
         if (typeof axios !== "undefined" && axios && typeof axios.get === "function") {
-            return axios.get(url, {
-                headers: headers || { "User-Agent": "Mozilla/5.0" },
+            return axios({
+                url: url,
+                method: method,
+                headers: headers,
+                data: data,
                 proxy: false,
                 responseType: "text",
                 transformResponse: [function (data) { return data; }]
@@ -94,18 +104,38 @@ var DEBUG = false;
                 };
             });
         }
+        if (method !== "GET") {
+            return Promise.reject(new Error("POST requests require axios in this runtime"));
+        }
         return http_get(url, headers);
     }
 
     function httpText(url, headers) {
-        return request(url, headers).then(function (res) {
+        return request(url, { headers: headers }).then(function (res) {
             return (res && res.body) || "";
         });
     }
 
     function httpJson(url, headers) {
-        return request(url, headers).then(function (res) {
+        return request(url, { headers: headers }).then(function (res) {
             return JSON.parse((res && res.body) || "{}");
+        });
+    }
+
+    function httpPostForm(url, form, headers) {
+        var body = [];
+        for (var key in form) {
+            if (!form.hasOwnProperty(key)) continue;
+            body.push(encodeURIComponent(key) + "=" + encodeURIComponent(form[key]));
+        }
+        return request(url, {
+            method: "POST",
+            headers: Object.assign({
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+            }, headers || {}),
+            data: body.join("&")
+        }).then(function (res) {
+            return (res && res.body) || "";
         });
     }
 
@@ -218,12 +248,73 @@ var DEBUG = false;
             .replace(/&gt;/g, ">"));
     }
 
-    function toAbsoluteUrl(url) {
+    function toAbsoluteUrl(url, base) {
         if (!url) return "";
         if (/^https?:\/\//i.test(url)) return url;
         if (url.indexOf("//") === 0) return "https:" + url;
-        if (url.charAt(0) === "/") return TMV_BASE + url;
-        return TMV_BASE + "/" + url.replace(/^\.\//, "");
+        if (!base) return url;
+        if (url.charAt(0) === "/") return base + url;
+        return base + "/" + url.replace(/^\.\//, "");
+    }
+
+    function slugify(value) {
+        return trim(String(value || "").toLowerCase())
+            .replace(/&/g, " and ")
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "");
+    }
+
+    function getEpisodeTag(season, episode) {
+        function pad(num) {
+            num = Number(num || 0);
+            return num < 10 ? "0" + num : String(num);
+        }
+        return "S" + pad(season) + "E" + pad(episode);
+    }
+
+    function decodeHtmlEntities(text) {
+        return trim(String(text || "")
+            .replace(/&amp;/g, "&")
+            .replace(/&quot;/g, "\"")
+            .replace(/&#39;/g, "'")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&#x2F;/gi, "/")
+            .replace(/&#x3D;/gi, "="));
+    }
+
+    function makeAbsoluteFromBase(base, href) {
+        if (!href) return "";
+        if (/^https?:\/\//i.test(href)) return href;
+        if (href.indexOf("//") === 0) return "https:" + href;
+        if (href.charAt(0) === "/") return base + href;
+        return base + "/" + href.replace(/^\.\//, "");
+    }
+
+    function collectCandidateUrls(text, base) {
+        var results = [];
+        var seen = {};
+        var pattern = /https?:\/\/[^\s"'<>\\]+|(?:href|src)=["']([^"'#]+)["']|\\u002F\\u002F[^"'\\\s<]+/gi;
+        var match;
+        while ((match = pattern.exec(String(text || "")))) {
+            var raw = match[1] || match[0] || "";
+            raw = decodeHtmlEntities(raw)
+                .replace(/\\\//g, "/")
+                .replace(/^href=|^src=/, "")
+                .replace(/^["']|["']$/g, "");
+            if (raw.indexOf("\\u002F\\u002F") === 0) raw = "https://" + raw.slice(8);
+            raw = makeAbsoluteFromBase(base || "", raw);
+            if (!/^https?:\/\//i.test(raw)) continue;
+            if (seen[raw]) continue;
+            seen[raw] = true;
+            results.push(raw);
+        }
+        return results;
+    }
+
+    function isLikelyStreamUrl(url) {
+        return /\.(m3u8|mp4|mkv)(?:$|[?#])/i.test(url) ||
+            /streamwish|filemoon|vidhide|lulustream|strmup|dood|streamtape|hubcloud|hubdrive|pixeldrain|workers\.dev|vidcloud|vidsrc|mixdrop|mp4upload|streamruby/i.test(url);
     }
 
     function interleaveLists(lists, limit) {
@@ -283,99 +374,21 @@ var DEBUG = false;
         ].join(" "));
     }
 
-    function buildTamilMvPayload(item) {
-        return JSON.stringify({
-            provider: "1tamilmv",
-            url: item.url,
-            title: item.title,
-            type: item.type
-        });
+    function extractDirectLikeUrls(text, base) {
+        return collectCandidateUrls(text, base).filter(isLikelyStreamUrl);
     }
 
-    function createTamilMvItem(item) {
-        return {
-            title: item.title,
-            url: buildTamilMvPayload(item),
-            posterUrl: item.posterUrl || undefined,
-            type: item.type,
-            description: item.description || undefined
-        };
-    }
-
-    function parseTamilMvTopicList(html) {
-        var results = [];
-        var seen = {};
-        var re = /<a[^>]+href="([^"]*\/forums\/topic\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-        var match;
-        while ((match = re.exec(html))) {
-            var href = toAbsoluteUrl(match[1]);
-            var title = cleanHtmlText(match[2]);
-            if (!href || !title || title.length < 4) continue;
-            if (seen[href]) continue;
-            if (/^(home|forums|leaderboard|languages|watch online)$/i.test(title)) continue;
-            if (/^(sign in|existing user)/i.test(title)) continue;
-            seen[href] = true;
-            results.push({
-                title: title,
-                url: href,
-                type: isSeriesTitle(title) ? "series" : "movie"
-            });
-        }
-        return results;
-    }
-
-    function fetchTamilMvForum(url, limit, preferSeries) {
-        return httpText(url).then(function (body) {
-            var items = parseTamilMvTopicList(body || "");
-            if (preferSeries) {
-                items = items.filter(function (item) { return item.type === "series"; });
+    function filterUrlsByTitle(urls, payload) {
+        var title = normalizeTitle(payload.title || "");
+        var words = significantWords(payload.title || "");
+        return urls.filter(function (url) {
+            var hay = normalizeTitle(url);
+            var score = wordOverlap(title, hay);
+            for (var i = 0; i < words.length; i++) {
+                if (hay.indexOf(words[i]) !== -1) score += 0.2;
             }
-            return items.slice(0, limit || items.length);
-        });
-    }
-
-    function fetchTamilMvSearch(query) {
-        var q = encodeURIComponent(trim(query));
-        var urls = [
-            TMV_BASE + "/index.php?/search/&q=" + q + "&type=forums_topic",
-            TMV_BASE + "/index.php?/search/?q=" + q + "&type=forums_topic"
-        ];
-
-        function tryAt(index) {
-            if (index >= urls.length) return Promise.resolve([]);
-            return httpText(urls[index]).then(function (body) {
-                var items = parseTamilMvTopicList(body || "");
-                if (items.length) return items;
-                return tryAt(index + 1);
-            }).catch(function () {
-                return tryAt(index + 1);
-            });
-        }
-
-        return tryAt(0);
-    }
-
-    function fetchTamilMvCandidates(payload) {
-        var queries = [];
-        var title = trim(payload.title || "");
-        var sig = significantWords(title);
-        if (title) queries.push(title);
-        if (title && payload.year) queries.push(title + " " + payload.year);
-        if (sig.length >= 2) queries.push(sig.slice(0, 2).join(" "));
-        if (sig.length >= 3) queries.push(sig.slice(0, 3).join(" "));
-        if (sig.length >= 1) queries.push(sig[0]);
-        queries = uniqueBy(queries.filter(function (q) { return trim(q).length >= 2; }), function (q) { return q.toLowerCase(); });
-
-        return settled(queries.map(function (query) {
-            return fetchTamilMvSearch(query);
-        })).then(function (results) {
-            var items = [];
-            for (var i = 0; i < results.length; i++) {
-                if (results[i].ok && Array.isArray(results[i].value)) {
-                    items = items.concat(results[i].value);
-                }
-            }
-            return uniqueBy(items, function (item) { return item.url; });
+            if (payload.year && hay.indexOf(String(payload.year)) !== -1) score += 0.2;
+            return score >= 0.2 || /\.(m3u8|mp4|mkv)(?:$|[?#])/i.test(url);
         });
     }
 
@@ -442,9 +455,6 @@ var DEBUG = false;
             }),
             httpJson(KITSU_BASE + "/catalog/anime/kitsu-anime-trending/search=" + q + ".json").then(function (json) {
                 return buildCatalogSection(json, "kitsu", 30);
-            }),
-            fetchTamilMvSearch(query).then(function (items) {
-                return items.slice(0, 20).map(createTamilMvItem);
             })
         ];
 
@@ -583,43 +593,11 @@ var DEBUG = false;
         return entries;
     }
 
-    function loadTamilMvItem(payload, cb) {
-        httpText(payload.url).then(function (html) {
-            var h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-            var title = cleanHtmlText(h1Match ? h1Match[1] : payload.title || "1TamilMV");
-            var posterMatch = html.match(/property="og:image"[^>]*content="([^"]+)"/i);
-            var descMatch = html.match(/property="og:description"[^>]*content="([^"]+)"/i);
-            var magnets = extractMagnets(html);
-
-            cb({
-                success: true,
-                data: new MultimediaItem({
-                    title: title,
-                    url: payload.raw,
-                    posterUrl: posterMatch ? posterMatch[1] : undefined,
-                    type: payload.type || (isSeriesTitle(title) ? "series" : "movie"),
-                    description: descMatch ? cleanHtmlText(descMatch[1]) : undefined,
-                    episodes: [new Episode({
-                        name: title,
-                        url: JSON.stringify({
-                            provider: "1tamilmv_direct",
-                            title: title,
-                            magnets: magnets
-                        })
-                    })]
-                })
-            });
-        }).catch(function (e) {
-            cb({ success: false, errorCode: "LOAD_ERROR", message: e.message });
-        });
-    }
-
     function load(url, cb) {
         var payload = parseJsonSafe(url, null);
         if (!payload) return cb({ success: false, errorCode: "LOAD_ERROR", message: "Invalid payload: " + String(url || "").slice(0, 200) });
         payload.raw = url;
 
-        if (payload.provider === "1tamilmv") return loadTamilMvItem(payload, cb);
         return loadMetaItem(payload, cb);
     }
 
@@ -760,61 +738,140 @@ var DEBUG = false;
         });
     }
 
-    function selectTamilMvMatch(items, payload) {
-        var target = normalizeTitle(payload.title);
-        var targetWords = significantWords(payload.title);
-        var best = null;
-        var bestScore = 0;
-        for (var i = 0; i < items.length; i++) {
-            var item = items[i];
-            var score = wordOverlap(target, item.title);
-            var itemWords = significantWords(item.title);
-            var matchedWords = 0;
-            for (var j = 0; j < targetWords.length; j++) {
-                if (itemWords.indexOf(targetWords[j]) !== -1) matchedWords++;
-            }
-            if (targetWords.length) score += matchedWords / targetWords.length;
-            if (targetWords.length >= 2 && matchedWords < Math.min(2, targetWords.length)) score -= 1.25;
-            if (payload.year && item.title.indexOf(String(payload.year)) !== -1) score += 0.45;
-            if (payload.type === "series" && item.type === "series") score += 0.2;
-            if (payload.type === "movie" && item.type === "movie") score += 0.1;
-            if (/\bseason\b/i.test(item.title) && payload.type !== "series") score -= 0.4;
-            if (score > bestScore) {
-                best = item;
-                bestScore = score;
-            }
+    function pushNamedUrls(results, urls, providerName, payload) {
+        urls = filterUrlsByTitle(uniqueBy(urls, function (url) { return url; }), payload);
+        for (var i = 0; i < urls.length; i++) {
+            var url = urls[i];
+            var label = "[" + providerName + "] " + cleanStreamLabel(payload.title || providerName);
+            pushStream(results, url, label, getQuality(url), {});
         }
-        return bestScore >= 0.9 ? best : null;
     }
 
-    function appendTamilMvStreams(payload, results) {
+    function appendFlixIndiaStreams(payload, results) {
         if (!payload.title) return Promise.resolve();
-        return fetchTamilMvCandidates(payload).then(function (items) {
-            var match = selectTamilMvMatch(items, payload);
-            if (!match) return;
-            return httpText(match.url).then(function (body) {
-                var magnets = extractMagnets(body || "");
-                for (var i = 0; i < magnets.length; i++) {
-                    var entry = magnets[i];
-                    var label = "[1TamilMV] " + cleanStreamLabel(match.title);
-                    if (entry.size) label += " [" + entry.size + "]";
-                    pushStream(results, entry.url, label, entry.quality || getQuality(entry.title), {});
-                }
+        return httpText(FLIXINDIA_BASE + "/").then(function (body) {
+            var csrfMatch = body.match(/window\.CSRF_TOKEN\s*=\s*['"]([a-f0-9]{64})['"]/i);
+            if (!csrfMatch) return;
+            var searchTitle = payload.type === "series" && payload.season && payload.episode
+                ? payload.title.replace(/:/g, "") + " " + getEpisodeTag(payload.season, payload.episode)
+                : payload.title.replace(/:/g, "") + (payload.year ? " " + payload.year : "");
+            return httpPostForm(FLIXINDIA_BASE + "/", {
+                action: "search",
+                csrf_token: csrfMatch[1],
+                q: trim(searchTitle)
+            }, {
+                "Accept": "*/*",
+                "Referer": FLIXINDIA_BASE + "/",
+                "Origin": FLIXINDIA_BASE,
+                "X-Requested-With": "XMLHttpRequest",
+                "User-Agent": "Mozilla/5.0"
+            }).then(function (text) {
+                var json = parseJsonSafe(text, {});
+                var entries = json && json.results ? json.results : [];
+                return settled(entries.map(function (entry) {
+                    return httpText(entry.url).then(function (html) {
+                        return extractDirectLikeUrls(html, FLIXINDIA_BASE).concat(collectCandidateUrls(html, FLIXINDIA_BASE));
+                    });
+                })).then(function (pages) {
+                    var urls = [];
+                    for (var i = 0; i < pages.length; i++) {
+                        if (pages[i].ok) urls = urls.concat(pages[i].value);
+                    }
+                    pushNamedUrls(results, urls, "FlixIndia", payload);
+                });
             });
         }).catch(function (e) {
-            log("1TamilMV provider failed:", e.message);
+            log("FlixIndia failed:", e.message);
         });
     }
 
-    function appendDirectTamilMvPayload(payload, results) {
-        var magnets = payload.magnets || [];
-        for (var i = 0; i < magnets.length; i++) {
-            var entry = magnets[i];
-            var label = "[1TamilMV] " + cleanStreamLabel(payload.title || "1TamilMV");
-            if (entry.size) label += " [" + entry.size + "]";
-            pushStream(results, entry.url, label, entry.quality || getQuality(entry.title), {});
+    function appendRtallyStreams(payload, results) {
+        if (!payload.title || payload.type !== "movie") return Promise.resolve();
+        return httpText(RTALLY_BASE + "/post/" + encodeURIComponent(slugify(payload.title))).then(function (body) {
+            var urls = collectCandidateUrls(body, RTALLY_BASE);
+            var servicePattern = /\\"(lulustream|strmup|filemoon|vidhide|streamwish)Url\\":\\"?([^\\"]+)/gi;
+            var match;
+            while ((match = servicePattern.exec(body || ""))) {
+                var service = String(match[1] || "").toLowerCase();
+                var id = decodeHtmlEntities(match[2] || "").replace(/\\\//g, "/");
+                if (!id || id === "null") continue;
+                if (service === "vidhide") urls.push("https://vidhideplus.com/v/" + id);
+                if (service === "lulustream") urls.push("https://lulustream.com/e/" + id);
+                if (service === "filemoon") urls.push("https://filemoon.sx/e/" + id);
+                if (service === "streamwish") urls.push("https://playerwish.com/e/" + id);
+                if (service === "strmup") urls.push("https://strmup.cc/" + id);
+            }
+            pushNamedUrls(results, urls, "Rtally", payload);
+        }).catch(function (e) {
+            log("Rtally failed:", e.message);
+        });
+    }
+
+    function appendMovies4uStreams(payload, results) {
+        if (!payload.title) return Promise.resolve();
+        var query = payload.type === "series" && payload.season
+            ? payload.title.replace(/\s+/g, "+") + "+season+" + payload.season
+            : payload.title.replace(/\s+/g, "+") + (payload.year ? "+" + payload.year : "");
+        var headers = {
+            "Cookie": "xla=s4t",
+            "Referer": MOVIES4U_BASE + "/",
+            "User-Agent": "Mozilla/5.0"
+        };
+        return httpText(MOVIES4U_BASE + "/?s=" + query, headers).then(function (searchBody) {
+            var links = [];
+            var re = /<article[\s\S]*?<h3[^>]*>\s*<a[^>]+href="([^"]+)"/gi;
+            var match;
+            while ((match = re.exec(searchBody || ""))) links.push(makeAbsoluteFromBase(MOVIES4U_BASE, match[1]));
+            links = uniqueBy(links, function (url) { return url; }).slice(0, 8);
+            return settled(links.map(function (url) {
+                return httpText(url, headers).then(function (html) {
+                    var urls = extractDirectLikeUrls(html, MOVIES4U_BASE).concat(collectCandidateUrls(html, MOVIES4U_BASE));
+                    var innerMatch = html.match(/<div[^>]+download-links-div[\s\S]*?<a[^>]+href="([^"]+)"/i);
+                    if (innerMatch) {
+                        return httpText(makeAbsoluteFromBase(MOVIES4U_BASE, innerMatch[1]), headers).then(function (innerHtml) {
+                            return urls.concat(extractDirectLikeUrls(innerHtml, MOVIES4U_BASE)).concat(collectCandidateUrls(innerHtml, MOVIES4U_BASE));
+                        }).catch(function () {
+                            return urls;
+                        });
+                    }
+                    return urls;
+                });
+            })).then(function (pages) {
+                var urls = [];
+                for (var i = 0; i < pages.length; i++) {
+                    if (pages[i].ok) urls = urls.concat(pages[i].value);
+                }
+                pushNamedUrls(results, urls, "Movies4u", payload);
+            });
+        }).catch(function (e) {
+            log("Movies4u failed:", e.message);
+        });
+    }
+
+    function appendCinemaOSStreams(payload, results) {
+        if (!payload.imdbId) return Promise.resolve();
+        var type = payload.type === "movie" ? "movie" : "tv";
+        var query = [
+            "type=" + encodeURIComponent(type),
+            "imdbId=" + encodeURIComponent(payload.imdbId),
+            "tmdbId=",
+            "t=",
+            "ry=",
+            "secret="
+        ];
+        if (payload.type !== "movie") {
+            query.push("seasonId=" + encodeURIComponent(payload.season || 1));
+            query.push("episodeId=" + encodeURIComponent(payload.episode || 1));
         }
-        return Promise.resolve();
+        return httpText(CINEMAOS_BASE + "/api/providerv3?" + query.join("&"), {
+            "Origin": CINEMAOS_BASE,
+            "Referer": CINEMAOS_BASE + "/",
+            "User-Agent": "Mozilla/5.0"
+        }).then(function (body) {
+            pushNamedUrls(results, extractDirectLikeUrls(body, CINEMAOS_BASE).concat(collectCandidateUrls(body, CINEMAOS_BASE)), "CinemaOS", payload);
+        }).catch(function (e) {
+            log("CinemaOS failed:", e.message);
+        });
     }
 
     function dedupeStreams(results) {
@@ -827,13 +884,16 @@ var DEBUG = false;
 
         var results = [];
 
-        if (payload.provider === "1tamilmv_direct") {
-            appendDirectTamilMvPayload(payload, results);
-            return cb({ success: true, data: dedupeStreams(results) });
-        }
-
         var jobs = [
-            appendTamilMvStreams(payload, results)
+            appendStremioStreams(STREAMVIX, "StreamVix", payload, results),
+            appendStremioStreams(WEBSTREAMR, "WebStreamr", payload, results),
+            appendNoTorrentStreams(payload, results),
+            appendTorrentioStreams(payload, results),
+            appendAnimeToshoStreams(payload, results),
+            appendCinemaOSStreams(payload, results),
+            appendFlixIndiaStreams(payload, results),
+            appendMovies4uStreams(payload, results),
+            appendRtallyStreams(payload, results)
         ];
 
         settled(jobs).then(function () {
