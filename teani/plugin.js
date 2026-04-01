@@ -15,6 +15,9 @@ var DEBUG = false;
     var HOME_CONFIG = {
         animeAiring: { key: "Anime Airing Now", source: "kitsu", url: KITSU_BASE + "/catalog/anime/kitsu-anime-airing.json", limit: 18 },
         animeTrending: { key: "Anime Trending", source: "kitsu", url: KITSU_BASE + "/catalog/anime/kitsu-anime-trending.json", limit: 18 },
+        tamilMovies: { key: "Tamil Movies", source: "cinemeta", url: CINEMETA_META + "/catalog/movie/top/search=tamil.json", limit: 18 },
+        teluguMovies: { key: "Telugu Movies", source: "cinemeta", url: CINEMETA_META + "/catalog/movie/top/search=telugu.json", limit: 18 },
+        hindiMovies: { key: "Hindi Movies", source: "cinemeta", url: CINEMETA_META + "/catalog/movie/top/search=hindi.json", limit: 18 },
         topMovies: { key: "Hollywood Blockbusters", source: "cinemeta", url: CINEMETA_CATALOG + "/top/catalog/movie/top.json", limit: 18 },
         topSeries: { key: "Hollywood Prestige Series", source: "cinemeta", url: CINEMETA_CATALOG + "/top/catalog/series/top.json", limit: 18 }
     };
@@ -167,6 +170,21 @@ var DEBUG = false;
         return a.length || b.length ? (matches / Math.max(a.length || 1, b.length || 1)) : 0;
     }
 
+    function significantWords(value) {
+        var stop = {
+            "the": true, "a": true, "an": true, "and": true, "of": true, "for": true, "to": true,
+            "in": true, "on": true, "part": true, "season": true, "series": true, "episode": true,
+            "ep": true, "movie": true, "web": true, "dl": true, "webrip": true, "webdl": true,
+            "hdrip": true, "bluray": true, "brrip": true, "x264": true, "x265": true, "hevc": true,
+            "aac": true, "dd": true, "org": true, "original": true, "audio": true, "audios": true,
+            "dubbed": true, "dual": true, "multi": true, "subs": true, "sub": true, "hq": true,
+            "hd": true, "true": true, "proper": true, "complete": true
+        };
+        return normalizeTitle(value).split(" ").filter(function (word) {
+            return word && !stop[word] && !/^\d+$/.test(word) && word.length > 2;
+        });
+    }
+
     function isSeriesTitle(title) {
         var lower = String(title || "").toLowerCase();
         return /\bs\d{1,2}\b/.test(lower) ||
@@ -265,20 +283,6 @@ var DEBUG = false;
         ].join(" "));
     }
 
-    function pickSection(items, predicate, limit, fallback) {
-        var filtered = items.filter(predicate);
-        if (!filtered.length && Array.isArray(fallback)) filtered = fallback.slice();
-        return uniqueBy(filtered, function (item) { return item.url; }).slice(0, limit || filtered.length);
-    }
-
-    function isIndianItem(item) {
-        return /\b(indian|india|hindi|tamil|telugu|malayalam|kannada|marathi|punjabi|bollywood|kollywood|tollywood|mollywood)\b/.test(itemText(item));
-    }
-
-    function isSouthRegionalItem(item) {
-        return /\b(tamil|telugu|malayalam|kannada|kollywood|tollywood|mollywood)\b/.test(itemText(item));
-    }
-
     function buildTamilMvPayload(item) {
         return JSON.stringify({
             provider: "1tamilmv",
@@ -351,6 +355,30 @@ var DEBUG = false;
         return tryAt(0);
     }
 
+    function fetchTamilMvCandidates(payload) {
+        var queries = [];
+        var title = trim(payload.title || "");
+        var sig = significantWords(title);
+        if (title) queries.push(title);
+        if (title && payload.year) queries.push(title + " " + payload.year);
+        if (sig.length >= 2) queries.push(sig.slice(0, 2).join(" "));
+        if (sig.length >= 3) queries.push(sig.slice(0, 3).join(" "));
+        if (sig.length >= 1) queries.push(sig[0]);
+        queries = uniqueBy(queries.filter(function (q) { return trim(q).length >= 2; }), function (q) { return q.toLowerCase(); });
+
+        return settled(queries.map(function (query) {
+            return fetchTamilMvSearch(query);
+        })).then(function (results) {
+            var items = [];
+            for (var i = 0; i < results.length; i++) {
+                if (results[i].ok && Array.isArray(results[i].value)) {
+                    items = items.concat(results[i].value);
+                }
+            }
+            return uniqueBy(items, function (item) { return item.url; });
+        });
+    }
+
     function getHome(cb) {
         var jobs = {
             animeAiring: httpJson(HOME_CONFIG.animeAiring.url).then(function (json) {
@@ -358,6 +386,15 @@ var DEBUG = false;
             }),
             animeTrending: httpJson(HOME_CONFIG.animeTrending.url).then(function (json) {
                 return buildCatalogSection(json, HOME_CONFIG.animeTrending.source, HOME_CONFIG.animeTrending.limit);
+            }),
+            tamilMovies: httpJson(HOME_CONFIG.tamilMovies.url).then(function (json) {
+                return buildCatalogSection(json, HOME_CONFIG.tamilMovies.source, HOME_CONFIG.tamilMovies.limit);
+            }),
+            teluguMovies: httpJson(HOME_CONFIG.teluguMovies.url).then(function (json) {
+                return buildCatalogSection(json, HOME_CONFIG.teluguMovies.source, HOME_CONFIG.teluguMovies.limit);
+            }),
+            hindiMovies: httpJson(HOME_CONFIG.hindiMovies.url).then(function (json) {
+                return buildCatalogSection(json, HOME_CONFIG.hindiMovies.source, HOME_CONFIG.hindiMovies.limit);
             }),
             topMovies: httpJson(HOME_CONFIG.topMovies.url).then(function (json) {
                 return buildCatalogSection(json, HOME_CONFIG.topMovies.source, 60);
@@ -367,26 +404,23 @@ var DEBUG = false;
             })
         };
 
-        Promise.allSettled([jobs.animeAiring, jobs.animeTrending, jobs.topMovies, jobs.topSeries]).then(function (results) {
+        Promise.allSettled([jobs.animeAiring, jobs.animeTrending, jobs.tamilMovies, jobs.teluguMovies, jobs.hindiMovies, jobs.topMovies, jobs.topSeries]).then(function (results) {
             var animeAiring = results[0].status === "fulfilled" ? results[0].value : [];
             var animeTrending = results[1].status === "fulfilled" ? results[1].value : [];
-            var topMovies = results[2].status === "fulfilled" ? results[2].value : [];
-            var topSeries = results[3].status === "fulfilled" ? results[3].value : [];
-
-            var indianMovies = pickSection(topMovies, isIndianItem, 18, topMovies.slice(0, 18));
-            var indianSeries = pickSection(topSeries, isIndianItem, 18, topSeries.slice(0, 18));
-            var southRegional = pickSection(topMovies, isSouthRegionalItem, 18, indianMovies);
-            var hollywoodMovies = pickSection(topMovies, function (item) { return !isIndianItem(item); }, 18, topMovies.slice(0, 18));
-            var hollywoodSeries = pickSection(topSeries, function (item) { return !isIndianItem(item); }, 18, topSeries.slice(0, 18));
+            var tamilMovies = results[2].status === "fulfilled" ? results[2].value : [];
+            var teluguMovies = results[3].status === "fulfilled" ? results[3].value : [];
+            var hindiMovies = results[4].status === "fulfilled" ? results[4].value : [];
+            var topMovies = results[5].status === "fulfilled" ? results[5].value : [];
+            var topSeries = results[6].status === "fulfilled" ? results[6].value : [];
 
             var homeData = {};
             if (animeAiring.length) homeData[HOME_CONFIG.animeAiring.key] = animeAiring;
             if (animeTrending.length) homeData[HOME_CONFIG.animeTrending.key] = animeTrending;
-            if (indianMovies.length) homeData["Indian Top Movies"] = indianMovies;
-            if (indianSeries.length) homeData["Indian Top Series"] = indianSeries;
-            if (southRegional.length) homeData["South Regional Picks"] = southRegional;
-            if (hollywoodMovies.length) homeData[HOME_CONFIG.topMovies.key] = hollywoodMovies;
-            if (hollywoodSeries.length) homeData[HOME_CONFIG.topSeries.key] = hollywoodSeries;
+            if (tamilMovies.length) homeData[HOME_CONFIG.tamilMovies.key] = tamilMovies;
+            if (teluguMovies.length) homeData[HOME_CONFIG.teluguMovies.key] = teluguMovies;
+            if (hindiMovies.length) homeData[HOME_CONFIG.hindiMovies.key] = hindiMovies;
+            if (topMovies.length) homeData[HOME_CONFIG.topMovies.key] = topMovies.slice(0, HOME_CONFIG.topMovies.limit);
+            if (topSeries.length) homeData[HOME_CONFIG.topSeries.key] = topSeries.slice(0, HOME_CONFIG.topSeries.limit);
 
             if (!Object.keys(homeData).length) {
                 return cb({ success: false, errorCode: "HOME_ERROR", message: "No homepage sections returned" });
@@ -535,7 +569,7 @@ var DEBUG = false;
         var re = /href="(magnet:[^"]+)"/gi;
         var match;
         while ((match = re.exec(html))) {
-            var magnet = match[1];
+            var magnet = String(match[1] || "").replace(/&amp;/g, "&");
             if (!magnet || seen[magnet]) continue;
             seen[magnet] = true;
             var decoded = decodeURIComponent(magnet);
@@ -728,24 +762,34 @@ var DEBUG = false;
 
     function selectTamilMvMatch(items, payload) {
         var target = normalizeTitle(payload.title);
+        var targetWords = significantWords(payload.title);
         var best = null;
         var bestScore = 0;
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
             var score = wordOverlap(target, item.title);
-            if (payload.year && item.title.indexOf(payload.year) !== -1) score += 0.3;
+            var itemWords = significantWords(item.title);
+            var matchedWords = 0;
+            for (var j = 0; j < targetWords.length; j++) {
+                if (itemWords.indexOf(targetWords[j]) !== -1) matchedWords++;
+            }
+            if (targetWords.length) score += matchedWords / targetWords.length;
+            if (targetWords.length >= 2 && matchedWords < Math.min(2, targetWords.length)) score -= 1.25;
+            if (payload.year && item.title.indexOf(String(payload.year)) !== -1) score += 0.45;
             if (payload.type === "series" && item.type === "series") score += 0.2;
+            if (payload.type === "movie" && item.type === "movie") score += 0.1;
+            if (/\bseason\b/i.test(item.title) && payload.type !== "series") score -= 0.4;
             if (score > bestScore) {
                 best = item;
                 bestScore = score;
             }
         }
-        return bestScore >= 0.35 ? best : null;
+        return bestScore >= 0.9 ? best : null;
     }
 
     function appendTamilMvStreams(payload, results) {
         if (!payload.title) return Promise.resolve();
-        return fetchTamilMvSearch(payload.title).then(function (items) {
+        return fetchTamilMvCandidates(payload).then(function (items) {
             var match = selectTamilMvMatch(items, payload);
             if (!match) return;
             return httpText(match.url).then(function (body) {
@@ -789,14 +833,8 @@ var DEBUG = false;
         }
 
         var jobs = [
-            appendStremioStreams(STREAMVIX, "StreamVix", payload, results),
-            appendStremioStreams(WEBSTREAMR, "WebStreamr", payload, results),
-            appendNoTorrentStreams(payload, results),
-            appendTorrentioStreams(payload, results),
             appendTamilMvStreams(payload, results)
         ];
-
-        if (payload.isAnime) jobs.push(appendAnimeToshoStreams(payload, results));
 
         settled(jobs).then(function () {
             cb({ success: true, data: dedupeStreams(results) });
