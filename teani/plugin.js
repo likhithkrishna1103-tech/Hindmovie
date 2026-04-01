@@ -118,7 +118,7 @@ var DEBUG = false;
 
     function extractYear(value) {
         var match = String(value || "").match(/\b(19|20)\d{2}\b/);
-        return match ? match[0] : undefined;
+        return match ? parseInt(match[0], 10) : undefined;
     }
 
     function getQuality(text) {
