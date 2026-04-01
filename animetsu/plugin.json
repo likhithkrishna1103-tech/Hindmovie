@@ -1,9 +1,9 @@
 {
-  "packageName": "com.igris.repo.tamilmv",
-  "name": "tamilmv",
-  "version": 4,
+  "packageName": "com.igris.repo.animetsu",
+  "name": "Animetsu",
+  "version": 1,
   "baseUrl": "https://example.com",
-  "description": "tamilmv plugin for hindmovie",
+  "description": "Animetsu plugin for hindmovie",
   "authors": [
     "Developer"
   ],
