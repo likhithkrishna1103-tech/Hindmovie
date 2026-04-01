@@ -43,6 +43,15 @@
             .trim();
     }
 
+    function stringOrEmpty(value) {
+        return value == null ? "" : String(value);
+    }
+
+    function optionalString(value) {
+        if (value == null || value === "") return undefined;
+        return String(value);
+    }
+
     function absoluteUrl(url) {
         if (!url) return "";
         if (url.indexOf("http://") === 0 || url.indexOf("https://") === 0) return url;
@@ -63,12 +72,12 @@
 
     function itemTitle(data) {
         if (!data || !data.title) return "";
-        return data.title.english || data.title.romaji || data.title.native || "";
+        return stringOrEmpty(data.title.english || data.title.romaji || data.title.native || "");
     }
 
     function itemSubtitle(data) {
         if (!data || !data.title) return "";
-        return data.title.native || data.title.romaji || "";
+        return stringOrEmpty(data.title.native || data.title.romaji || "");
     }
 
     function mapStatus(status) {
@@ -86,7 +95,29 @@
 
     function coverUrl(data) {
         if (!data || !data.cover_image) return "";
-        return data.cover_image.large || data.cover_image.medium || data.cover_image.small || "";
+        return stringOrEmpty(data.cover_image.large || data.cover_image.medium || data.cover_image.small || "");
+    }
+
+    function normalizeTag(tag) {
+        if (tag == null) return "";
+        if (typeof tag === "string" || typeof tag === "number" || typeof tag === "boolean") {
+            return String(tag);
+        }
+
+        if (typeof tag === "object") {
+            return stringOrEmpty(tag.name || tag.tag || tag.label || tag.value || tag.id || "");
+        }
+
+        return "";
+    }
+
+    function normalizeTags(info) {
+        return []
+            .concat((info && info.genres) || [])
+            .concat((info && info.tags) || [])
+            .map(normalizeTag)
+            .filter(function (tag) { return !!tag; })
+            .slice(0, 20);
     }
 
     function formatSourceLabel(serverName, quality, sourceType) {
@@ -139,6 +170,18 @@
         return out;
     }
 
+    function mapHomeItems(items, opts) {
+        opts = opts || {};
+        return uniqueByUrl(((items || []).map(function (entry) {
+            return toMultimediaItem(entry, {
+                url: opts.watchEpisode && entry && entry.next_airing_ep && entry.next_airing_ep.ep_num
+                    ? MAIN_URL + "/watch/" + entry.id + "?ep=" + entry.next_airing_ep.ep_num
+                    : MAIN_URL + "/anime/" + (entry && entry.id),
+                description: opts.descriptionField && entry ? entry[opts.descriptionField] : undefined
+            });
+        })));
+    }
+
     function parseEpisodeInput(url) {
         var match = String(url || "").match(/\/watch\/([^/?#]+)(?:\/([^/?#]+))?(?:\?([^#]+))?/i);
         if (!match) throw new Error("Invalid episode URL: " + url);
@@ -172,28 +215,21 @@
 
     async function getHome(cb) {
         try {
-            var recent = await httpJson(API_BASE + "/recent?page=1&per_page=24", HEADERS);
-            var recentResults = (recent && recent.results) || [];
-
-            var recentItems = uniqueByUrl(recentResults.map(function (entry) {
-                return toMultimediaItem(entry, {
-                    url: MAIN_URL + "/watch/" + entry.id + "?ep=" + entry.ep_num,
-                    description: entry.ep_name || ""
-                });
-            }));
-
-            var trendingItems = uniqueByUrl(recentResults.slice(0, 8).map(function (entry) {
-                return toMultimediaItem(entry, {
-                    url: MAIN_URL + "/anime/" + entry.id,
-                    description: entry.ep_name || ""
-                });
-            }));
+            var home = await httpJson(API_BASE + "/home", HEADERS);
+            var trendingItems = mapHomeItems((home && home.trending) || []).slice(0, 20);
+            var seasonalItems = mapHomeItems((home && home.seasonal) || []).slice(0, 20);
+            var popularItems = mapHomeItems((home && home.popular) || []).slice(0, 20);
+            var topItems = mapHomeItems((home && home.top) || []).slice(0, 20);
+            var upcomingItems = mapHomeItems((home && home.upcoming) || []).slice(0, 20);
 
             cb({
                 success: true,
                 data: {
-                    "Trending": trendingItems,
-                    "Recent Releases": recentItems
+                    "Trending Now": trendingItems,
+                    "Popular This Season": seasonalItems,
+                    "Most Popular": popularItems,
+                    "Top Rated": topItems,
+                    "Top Upcoming": upcomingItems
                 }
             });
         } catch (e) {
@@ -234,9 +270,9 @@
             var cast = [];
             ((info && info.characters) || []).slice(0, 20).forEach(function (character) {
                 cast.push(new Actor({
-                    name: character && character.name ? character.name : "",
-                    role: character && character.role ? character.role : "",
-                    image: character && character.image ? character.image : ""
+                    name: stringOrEmpty(character && character.name),
+                    role: stringOrEmpty(character && character.role),
+                    image: stringOrEmpty(character && character.image)
                 }));
             });
 
@@ -246,8 +282,8 @@
 
             var episodes = ((eps || [])).map(function (ep) {
                 return new Episode({
-                    name: ep.name || ("Episode " + ep.ep_num),
-                    url: MAIN_URL + "/watch/" + animeId + "?ep=" + ep.ep_num + "&server=default&source_type=sub",
+                    name: stringOrEmpty(ep.name || ("Episode " + ep.ep_num)),
+                    url: MAIN_URL + "/watch/" + animeId + "?ep=" + encodeURIComponent(stringOrEmpty(ep.ep_num)) + "&server=default&source_type=sub",
                     season: 1,
                     episode: ep.ep_num,
                     description: cleanText(ep.desc || ""),
@@ -272,17 +308,14 @@
                 status: mapStatus(info.status),
                 contentRating: info.is_adult ? "R18+" : undefined,
                 isAdult: !!info.is_adult,
-                tags: []
-                    .concat(info.genres || [])
-                    .concat(info.tags || [])
-                    .slice(0, 20),
+                tags: normalizeTags(info),
                 cast: cast,
                 trailers: trailers,
                 recommendations: recommendations,
                 playbackPolicy: "none",
                 syncData: {
-                    anilist_id: info.anilist_id,
-                    mal_id: info.mal_id
+                    anilist_id: optionalString(info.anilist_id),
+                    mal_id: optionalString(info.mal_id)
                 },
                 headers: HEADERS,
                 episodes: episodes

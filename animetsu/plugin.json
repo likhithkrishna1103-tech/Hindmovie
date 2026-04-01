@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.animetsu",
   "name": "Animetsu",
-  "version": 1,
+  "version": 2,
   "baseUrl": "https://example.com",
   "description": "Animetsu plugin for hindmovie",
   "authors": [
