@@ -8,6 +8,10 @@ var DEBUG = false;
     var ANIMETOSHO = "https://feed.animetosho.org";
     var MOVIES4U_BASE = "https://movies4u.direct";
     var RTALLY_BASE = "https://www.rtally.xyz";
+    var REQUEST_TIMEOUT_MS = 4000;
+    var MAX_MOVIES4U_MATCHES = 1;
+    var MAX_MOVIES4U_SEEDS = 3;
+    var MAX_MOVIES4U_QUALITY_PAGES = 2;
 
     var HOME_CONFIG = {
         animeAiring: { key: "Anime Airing Now", source: "kitsu", url: KITSU_BASE + "/catalog/anime/kitsu-anime-airing.json", limit: 18 },
@@ -74,6 +78,7 @@ var DEBUG = false;
         var method = options.method || "GET";
         var headers = options.headers || { "User-Agent": "Mozilla/5.0" };
         var data = options.data;
+        var timeoutMs = Number(options.timeoutMs || REQUEST_TIMEOUT_MS);
         if (typeof axios !== "undefined" && axios && typeof axios.get === "function") {
             return axios({
                 url: url,
@@ -81,6 +86,7 @@ var DEBUG = false;
                 headers: headers,
                 data: data,
                 proxy: false,
+                timeout: timeoutMs,
                 responseType: "text",
                 transformResponse: [function (data) { return data; }]
             }).then(function (res) {
@@ -99,15 +105,17 @@ var DEBUG = false;
                 };
             });
         }
-        if (method === "GET") {
-            return http_get(url, headers);
-        }
         if (typeof fetch === "function") {
+            var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+            var timer = controller ? setTimeout(function () {
+                controller.abort();
+            }, timeoutMs) : null;
             return fetch(url, {
                 method: method,
                 headers: headers,
                 body: method === "GET" || method === "HEAD" ? undefined : data,
-                redirect: "follow"
+                redirect: "follow",
+                signal: controller ? controller.signal : undefined
             }).then(function (res) {
                 return res.text().then(function (body) {
                     var outHeaders = {};
@@ -123,7 +131,11 @@ var DEBUG = false;
                         headers: outHeaders
                     };
                 });
+            }).then(function (result) {
+                if (timer) clearTimeout(timer);
+                return result;
             }).catch(function (e) {
+                if (timer) clearTimeout(timer);
                 return {
                     status: 500,
                     statusCode: 500,
@@ -131,6 +143,9 @@ var DEBUG = false;
                     headers: {}
                 };
             });
+        }
+        if (method === "GET" && typeof http_get === "function") {
+            return http_get(url, headers);
         }
         return Promise.reject(new Error(method + " requests require fetch or axios in this runtime"));
     }
@@ -211,6 +226,26 @@ var DEBUG = false;
             }).then(function (value) {
                 return { item: current, value: value };
             }).catch(function () {
+                return next();
+            });
+        }
+
+        return next();
+    }
+
+    function runProviderTasks(tasks, results) {
+        tasks = tasks || [];
+        var index = 0;
+
+        function next() {
+            if (index >= tasks.length || (results && results.length)) return Promise.resolve();
+            var task = tasks[index++];
+            return Promise.resolve().then(function () {
+                return task();
+            }).catch(function (error) {
+                log("Provider task failed:", error && error.message || error);
+            }).then(function () {
+                if (results && results.length) return;
                 return next();
             });
         }
@@ -500,8 +535,8 @@ var DEBUG = false;
         if (!url) return false;
         if (/\.m3u8(?:$|[?#])/i.test(url)) return true;
         if (/\.(mp4|mkv)(?:$|[?#])/i.test(url)) return true;
-        if (/https?:\/\/hub\.mayhem\.buzz\//i.test(url)) return true;
-        if (/https?:\/\/gpdl\.hubcdn\.fans\//i.test(url)) return true;
+        if (/https?:\/\/cdn\./i.test(url) && /[?&]token=/i.test(url)) return true;
+        if (/pixeldrain\.com\/api\/file\//i.test(url)) return true;
         return false;
     }
 
@@ -1036,9 +1071,15 @@ var DEBUG = false;
         return walk();
     }
 
-    function resolveFinalStreamEntries(url, providerName, payload) {
+    function resolveFinalStreamEntries(url, providerName, payload, depth, visited) {
         url = trim(url);
         if (!url) return Promise.resolve([]);
+        depth = Number(depth || 0);
+        visited = visited || {};
+        if (depth > 3 || visited[url]) {
+            return Promise.resolve([{ url: url, quality: getQuality(url) }]);
+        }
+        visited[url] = true;
 
         if (/\.m3u8(?:$|[?#])/i.test(url)) {
             return httpText(url, {
@@ -1056,7 +1097,7 @@ var DEBUG = false;
         }
 
         if (/vidhideplus\.com\/d\//i.test(url)) {
-            return resolveFinalStreamEntries(url.replace("/d/", "/v/"), providerName, payload);
+            return resolveFinalStreamEntries(url.replace("/d/", "/v/"), providerName, payload, depth + 1, visited);
         }
 
         return httpText(url, {
@@ -1067,7 +1108,7 @@ var DEBUG = false;
             var m3u8s = extractM3u8Urls(html, String(url).split("/").slice(0, 3).join("/"));
             if (m3u8s.length) {
                 return settled(m3u8s.map(function (m3u8) {
-                    return resolveFinalStreamEntries(m3u8, providerName, payload);
+                    return resolveFinalStreamEntries(m3u8, providerName, payload, depth + 1, visited);
                 })).then(function (items) {
                     var resolved = [];
                     for (var i = 0; i < items.length; i++) {
@@ -1089,7 +1130,7 @@ var DEBUG = false;
                     /href="(https:\/\/gamerxyt\.com\/hubcloud\.php[^"]+)"/i,
                     /var\s+url\s*=\s*'(https:\/\/gamerxyt\.com\/hubcloud\.php[^']+)'/i
                 ]);
-                if (generator) return resolveFinalStreamEntries(generator, providerName, payload);
+                if (generator) return resolveFinalStreamEntries(generator, providerName, payload, depth + 1, visited);
             }
 
             return [{ url: url, quality: pageQuality }];
@@ -1246,13 +1287,13 @@ var DEBUG = false;
             var yearDelta = Number(right.year || 0) - Number(left.year || 0);
             if (yearDelta) return yearDelta;
             return String(left.title || "").localeCompare(String(right.title || ""));
-        }).slice(0, 4);
+        }).slice(0, MAX_MOVIES4U_MATCHES);
     }
 
     function extractMovies4uMovieSeedUrls(html) {
-        return extractSectionAnchors(html, /downloads-btns-div/i, MOVIES4U_BASE).map(function (item) {
+        return uniqueBy(extractSectionAnchors(html, /downloads-btns-div/i, MOVIES4U_BASE).map(function (item) {
             return item.href;
-        });
+        }), function (item) { return item; }).slice(0, MAX_MOVIES4U_SEEDS);
     }
 
     function extractMovies4uSeriesSeedUrls(html, payload, headers) {
@@ -1273,7 +1314,7 @@ var DEBUG = false;
             }));
         }
 
-        var qualityLinks = uniqueBy([].concat.apply([], blocks), function (url) { return url; });
+        var qualityLinks = uniqueBy([].concat.apply([], blocks), function (url) { return url; }).slice(0, MAX_MOVIES4U_QUALITY_PAGES);
         if (!qualityLinks.length) return Promise.resolve([]);
 
         return settled(qualityLinks.map(function (qualityLink) {
@@ -1292,7 +1333,7 @@ var DEBUG = false;
                     }));
                 }
                 if (episodeBlocks.length) {
-                    return uniqueBy([].concat.apply([], episodeBlocks), function (url) { return url; });
+                    return uniqueBy([].concat.apply([], episodeBlocks), function (url) { return url; }).slice(0, MAX_MOVIES4U_SEEDS);
                 }
                 return [qualityLink];
             });
@@ -1301,7 +1342,7 @@ var DEBUG = false;
             for (var i = 0; i < resolved.length; i++) {
                 if (resolved[i].ok) out = out.concat(resolved[i].value || []);
             }
-            return uniqueBy(out, function (url) { return url; });
+            return uniqueBy(out, function (url) { return url; }).slice(0, MAX_MOVIES4U_SEEDS);
         });
     }
 
@@ -1533,6 +1574,15 @@ var DEBUG = false;
         });
     }
 
+    function filterActualDownloadEntries(entries) {
+        return (entries || []).filter(function (entry) {
+            var url = String(entry && entry.url || "");
+            if (!url) return false;
+            if (/gpdl\.hubcdn\.fans|hub\.mayhem\.buzz/i.test(url)) return false;
+            return isResolvedFinalUrl(url, entry && entry.quality || 0);
+        });
+    }
+
     function resolveAndPushEntries(results, entries, providerName, payload) {
         entries = uniqueBy((entries || []).filter(function (entry) {
             return entry && entry.url;
@@ -1540,7 +1590,7 @@ var DEBUG = false;
             return entry.url + "|" + JSON.stringify(entry.headers || {});
         });
         return settled(entries.map(function (entry) {
-            if (entry.headers && Object.keys(entry.headers).length && isResolvedFinalUrl(entry.url, entry.quality || 0)) {
+            if (isResolvedFinalUrl(entry.url, entry.quality || 0)) {
                 return [entry];
             }
             return resolveFinalStreamEntries(entry.url, providerName, payload).then(function (resolved) {
@@ -1557,9 +1607,7 @@ var DEBUG = false;
             for (var i = 0; i < items.length; i++) {
                 if (items[i].ok) out = out.concat(items[i].value || []);
             }
-            out = out.filter(function (item) {
-                return item && item.url && isResolvedFinalUrl(item.url, item.quality || 0);
-            });
+            out = filterActualDownloadEntries(out);
             out = uniqueBy(out, function (item) {
                 return item.url + "|" + JSON.stringify(item.headers || {});
             });
@@ -1591,7 +1639,7 @@ var DEBUG = false;
                 }).then(function (seedUrls) {
                     seedUrls = uniqueBy(seedUrls, function (item) { return item; }).filter(function (seedUrl) {
                         return !!seedUrl && !/movies4u\.direct/i.test(seedUrl);
-                    });
+                    }).slice(0, MAX_MOVIES4U_SEEDS);
                     return settled(seedUrls.map(function (seedUrl) {
                         return resolveMovies4uSeedUrl(seedUrl, headers, payload);
                     })).then(function (resolvedSeeds) {
@@ -1639,14 +1687,20 @@ var DEBUG = false;
         if (!payload) return cb({ success: false, errorCode: "STREAM_ERROR", message: "Invalid stream payload: " + String(url || "").slice(0, 200) });
 
         var results = [];
+        var tasks = [];
+        if (payload.isAnime && payload.kitsuId) {
+            tasks.push(function () {
+                return appendAnimeToshoStreams(payload, results);
+            });
+        }
+        tasks.push(function () {
+            return appendMovies4uStreams(payload, results);
+        });
+        tasks.push(function () {
+            return appendRtallyStreams(payload, results);
+        });
 
-        var jobs = [
-            withTimeout(appendAnimeToshoStreams(payload, results), 10000, "AnimeTosho"),
-            withTimeout(appendMovies4uStreams(payload, results), 12000, "Movies4u"),
-            withTimeout(appendRtallyStreams(payload, results), 8000, "Rtally")
-        ];
-
-        settled(jobs).then(function () {
+        runProviderTasks(tasks, results).then(function () {
             cb({ success: true, data: sortStreams(dedupeStreams(results)) });
         }).catch(function (e) {
             cb({ success: false, errorCode: "STREAM_ERROR", message: e.message });
