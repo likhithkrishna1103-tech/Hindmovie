@@ -254,6 +254,10 @@
         }, extra || {});
     }
 
+    function pageHeaders(mainUrl) {
+        return defaultHeaders({ "Referer": mainUrl + "/" });
+    }
+
     function parseAnchors(html, base) {
         var source = String(html || "");
         var out = [];
@@ -857,16 +861,17 @@
     async function getHome(cb) {
         try {
             var mainUrl = await getMainUrl();
+            var headers = pageHeaders(mainUrl);
             var results = {};
 
             for (var i = 0; i < MAIN_PAGE_SECTIONS.length; i++) {
                 var section = MAIN_PAGE_SECTIONS[i];
                 var url = absoluteUrl(mainUrl + "/", section.path);
-                var html = await getText(url, defaultHeaders({ "Referer": mainUrl + "/" }));
+                var html = await getText(url, headers);
                 results[section.title] = parseSearchResults(html, mainUrl, undefined);
             }
 
-            cb({ success: true, data: results });
+            cb({ success: true, data: results, headers: headers });
         } catch (error) {
             cb({ success: false, errorCode: "PARSE_ERROR", message: toErrorMessage(error) });
         }
@@ -875,11 +880,13 @@
     async function search(query, cb) {
         try {
             var mainUrl = await getMainUrl();
+            var headers = pageHeaders(mainUrl);
             var url = mainUrl + "/?s=" + encodeURIComponent(query || "");
-            var html = await getText(url, defaultHeaders({ "Referer": mainUrl + "/" }));
+            var html = await getText(url, headers);
             cb({
                 success: true,
-                data: parseSearchResults(html, mainUrl, undefined)
+                data: parseSearchResults(html, mainUrl, undefined),
+                headers: headers
             });
         } catch (error) {
             cb({ success: false, errorCode: "SEARCH_ERROR", message: toErrorMessage(error) });
