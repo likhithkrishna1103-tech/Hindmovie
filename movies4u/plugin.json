@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.movies4u",
+  "name": "Movies4u",
+  "version": 1,
+  "baseUrl": "https://example.com",
+  "description": "Movies4u plugin for hindmovie",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}
