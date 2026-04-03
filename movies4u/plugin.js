@@ -8,6 +8,7 @@
     var TMDB_API = "https://api.themoviedb.org/3";
     var TMDB_WORKER_API_KEY = "1865f43a0549ca50d341dd9ab8b29f49";
     var TMDB_LOGO_API_KEY = "98ae14df2b8d8f8f8136499daf79f0e0";
+    var MAIN_PAGE_COOKIE = "xla=s4t; ext_name=ojplmecpdpgccookcobabopnaifgidhf; cf_clearance=t8e4FnYNVLq5mnSM3STcq978u7YyAaAb_WiqmVmXkcI-1773985249-1.2.1.1-Sg.2ExY1ScnsVHPQ0nj5jSQ7aKuFzBaPOPn8WRH5i0JYxUTrGXNrowzFsl36zUeK9irU7RqVsRTLF9DoM25Rz1tyFLiGaVK6WlxZLkOyr0_xyAduok9mNr3ilfnSXx1FT6.g9jo4m2cAKY.AFbvLZ8AB.8VgL0Wv4BTn5EBGcKQo4s.grQTQ.Bd58bFWF0CQRYgxD0O2PrfIoveenO8wCQMqQ_R9h22MKBQdBqqLCgk";
 
     var runtimeManifest = (typeof manifest !== "undefined" && manifest) ? manifest : { baseUrl: DEFAULT_BASE_URL };
     var domainCache = null;
@@ -45,6 +46,10 @@
 
     function stripTags(value) {
         return decodeHtmlEntities(String(value || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, " "));
+    }
+
+    function snippet(value, max) {
+        return trim(stripTags(String(value || ""))).slice(0, max || 280);
     }
 
     function escapeRegExp(value) {
@@ -315,6 +320,14 @@
         return defaultHeaders({ "Referer": mainUrl + "/" });
     }
 
+    function mainPageHeaders(mainUrl) {
+        return {
+            "Cookie": MAIN_PAGE_COOKIE,
+            "User-Agent": "Mozilla/5.0",
+            "Referer": mainUrl + "/"
+        };
+    }
+
     function parseAnchors(html, base) {
         var source = String(html || "");
         var out = [];
@@ -404,6 +417,66 @@
     function parseSearchResults(html, base, defaultType) {
         return extractBlocks(html, "article").map(function (block) {
             return parseSearchCard(block, base, defaultType);
+        }).filter(Boolean);
+    }
+
+    function parseHomeResults(html, base) {
+        return extractBlocks(html, "article").map(function (block) {
+            var href = firstMatch(block, [
+                /<h2\b[^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i
+            ]);
+            var rawTitle = stripTags(firstMatch(block, [
+                /<h2\b[^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i
+            ]));
+            if (!href || !rawTitle) return null;
+
+            var title = trim(rawTitle.split(" (")[0]);
+            var year = rawTitle.match(/\((\d{4})\)/);
+            var lang = rawTitle.match(/\[([^\]]+)\]/);
+            var fullTitle = title;
+            if (year) fullTitle += " (" + year[1] + ")";
+            if (lang && trim(lang[1])) fullTitle += " [" + trim(lang[1]) + "]";
+
+            return new MultimediaItem({
+                title: fullTitle,
+                url: absoluteUrl(base, href),
+                posterUrl: getImageFromBlock(block, base),
+                type: "movie",
+                quality: getSearchQuality(rawTitle),
+                headers: defaultHeaders()
+            });
+        }).filter(Boolean);
+    }
+
+    function parseSearchResultsKotlin(html, base) {
+        return extractBlocks(html, "article").map(function (block) {
+            var href = firstMatch(block, [
+                /<h3\b[^>]*class=["'][^"']*entry-title[^"']*["'][^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i
+            ]);
+            var rawTitle = stripTags(firstMatch(block, [
+                /<h3\b[^>]*class=["'][^"']*entry-title[^"']*["'][^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i
+            ]));
+            if (!href || !rawTitle) return null;
+
+            var title = trim(rawTitle.split("(")[0]);
+            var year = rawTitle.match(/\((\d{4})\)/);
+            var lang = rawTitle.match(/\[([^\]]+)\]/);
+            var fullTitle = title;
+            if (year) fullTitle += " (" + year[1] + ")";
+            if (lang && trim(lang[1])) fullTitle += " [" + trim(lang[1]) + "]";
+
+            var type = "movie";
+            if (/season|series/i.test(rawTitle)) type = "series";
+            else if (/anime/i.test(rawTitle)) type = "anime";
+
+            return new MultimediaItem({
+                title: fullTitle,
+                url: absoluteUrl(base, href),
+                posterUrl: getImageFromBlock(block, base),
+                type: type,
+                quality: getSearchQuality(rawTitle),
+                headers: defaultHeaders()
+            });
         }).filter(Boolean);
     }
 
@@ -576,6 +649,7 @@
         return new StreamResult({
             url: url,
             source: quality ? (source + " [" + quality + "p]") : source,
+            quality: quality || undefined,
             headers: headers || {}
         });
     }
@@ -919,16 +993,28 @@
         try {
             var mainUrl = await getMainUrl();
             var results = {};
+            var firstHtml = "";
 
             for (var i = 0; i < MAIN_PAGE_SECTIONS.length; i++) {
                 var section = MAIN_PAGE_SECTIONS[i];
                 var url = absoluteUrl(mainUrl + "/", section.path);
                 try {
-                    var html = await getText(url, pageHeaders(mainUrl));
-                    results[section.title] = parseSearchResults(html, mainUrl, undefined);
+                    var html = await getText(url, mainPageHeaders(mainUrl));
+                    if (!firstHtml) firstHtml = html;
+                    results[section.title] = parseHomeResults(html, mainUrl);
                 } catch (_) {
                     results[section.title] = [];
                 }
+            }
+
+            var total = 0;
+            for (var key in results) {
+                if (!Object.prototype.hasOwnProperty.call(results, key)) continue;
+                total += (results[key] || []).length;
+            }
+            if (!total) {
+                cb({ success: false, errorCode: "HOME_EMPTY", message: "No home items parsed. Snippet: " + snippet(firstHtml, 320) });
+                return;
             }
 
             cb({ success: true, data: results });
@@ -941,10 +1027,15 @@
         try {
             var mainUrl = await getMainUrl();
             var url = mainUrl + "/?s=" + encodeURIComponent(query || "");
-            var html = await getText(url, pageHeaders(mainUrl));
+            var html = await getText(url, defaultHeaders());
+            var results = parseSearchResultsKotlin(html, mainUrl);
+            if (!results.length) {
+                cb({ success: false, errorCode: "SEARCH_EMPTY", message: "No search items parsed. Snippet: " + snippet(html, 320) });
+                return;
+            }
             cb({
                 success: true,
-                data: parseSearchResults(html, mainUrl, undefined)
+                data: results
             });
         } catch (error) {
             cb({ success: false, errorCode: "SEARCH_ERROR", message: toErrorMessage(error) });
@@ -954,19 +1045,22 @@
     async function load(url, cb) {
         try {
             var sourceUrl = String(url || "");
-            var mainUrl = await getMainUrl();
-            var html = await getText(sourceUrl, defaultHeaders({ "Referer": mainUrl + "/" }));
+            var html = await getText(sourceUrl, defaultHeaders());
 
             var rawOgTitle = extractMetaContent(html, "og:title") || "Unknown Title";
             var title = trim(rawOgTitle.split("(")[0]) || "Unknown Title";
             var plot = extractStoryline(html);
-            var poster = getImageFromBlock(firstMatch(html, [/<div\b[^>]*class=["'][^"']*post-thumbnail[^"']*["'][^>]*>([\s\S]*?)<\/div>/i]), mainUrl);
+            var poster = getImageFromBlock(firstMatch(html, [/<div\b[^>]*class=["'][^"']*post-thumbnail[^"']*["'][^>]*>([\s\S]*?)<\/div>/i]), sourceUrl);
             var typeRaw = extractPrimaryHeading(html);
             var type = /Series/i.test(typeRaw) ? "series" : "movie";
             if (/Anime/i.test(typeRaw)) type = "anime";
             var isMovie = type === "movie";
             var imdbId = extractImdbId(html);
             var downloadLinks = extractDownloadLinks(html, baseOrigin(sourceUrl));
+            if (title === "Unknown Title" && !downloadLinks.length) {
+                cb({ success: false, errorCode: "LOAD_EMPTY", message: "Load page not parsed. Snippet: " + snippet(html, 320) });
+                return;
+            }
 
             var tmdbId = await findTmdbId(imdbId, isMovie ? "movie" : "tv", title);
             var logoUrl = await fetchTmdbLogoUrl(isMovie ? "movie" : "tv", tmdbId);
@@ -1023,10 +1117,7 @@
                     success: true,
                     data: new MultimediaItem({
                         title: title,
-                        url: buildLoadPayload(sourceUrl, uniqueBy(downloadLinks, function (item) { return item; }), {
-                            title: title,
-                            type: "movie"
-                        }),
+                        url: JSON.stringify(uniqueBy(downloadLinks, function (item) { return item; })),
                         posterUrl: poster,
                         bannerUrl: bannerUrl,
                         logoUrl: logoUrl || undefined,
@@ -1053,12 +1144,7 @@
                 var isCompleteSeason = !(meta && meta.title);
                 return new Episode({
                     name: meta.title || (isCompleteSeason ? ("Complete Season " + season) : ("Episode " + episode)),
-                    url: buildLoadPayload(sourceUrl, uniqueBy(episodeLinksMap[key], function (item) { return item; }), {
-                        title: title,
-                        type: type,
-                        season: season,
-                        episode: episode
-                    }),
+                    url: JSON.stringify(uniqueBy(episodeLinksMap[key], function (item) { return item; })),
                     season: season,
                     episode: episode,
                     description: meta.overview || (isCompleteSeason ? ("Complete Season " + season) : plot),
@@ -1094,6 +1180,12 @@
     async function loadStreams(url, cb) {
         try {
             var payload = parseJsonSafe(url, null);
+            if (Array.isArray(payload)) {
+                payload = {
+                    sourceUrl: "",
+                    links: payload
+                };
+            }
             if (!payload || !payload.links || !payload.links.length) {
                 if (/^https?:\/\//i.test(String(url || ""))) {
                     var html = await getText(String(url), defaultHeaders());
