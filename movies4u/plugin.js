@@ -175,14 +175,20 @@
         var headers = options.headers || {};
         var body = options.body;
         var allowRedirects = options.allowRedirects !== false;
+        var timeout = options.timeout || 20000;
 
         if (typeof fetch === "function") {
-            return fetch(url, {
+            var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+            var timer = null;
+            var fetchOptions = {
                 method: method,
                 headers: headers,
                 body: body,
                 redirect: allowRedirects ? "follow" : "manual"
-            }).then(function (res) {
+            };
+            if (controller) fetchOptions.signal = controller.signal;
+
+            var fetchPromise = fetch(url, fetchOptions).then(function (res) {
                 return res.text().then(function (bodyText) {
                     return {
                         status: res.status,
@@ -191,6 +197,35 @@
                         finalUrl: res.url || url
                     };
                 });
+            });
+
+            if (controller) {
+                timer = setTimeout(function () {
+                    try { controller.abort(); } catch (_) {}
+                }, timeout);
+
+                return fetchPromise.then(function (result) {
+                    clearTimeout(timer);
+                    return result;
+                }).catch(function (error) {
+                    clearTimeout(timer);
+                    throw error;
+                });
+            }
+
+            return Promise.race([
+                fetchPromise,
+                new Promise(function (_, reject) {
+                    timer = setTimeout(function () {
+                        reject(new Error("Request timeout after " + timeout + "ms"));
+                    }, timeout);
+                })
+            ]).then(function (result) {
+                clearTimeout(timer);
+                return result;
+            }).catch(function (error) {
+                clearTimeout(timer);
+                throw error;
             });
         }
 
@@ -867,8 +902,12 @@
             for (var i = 0; i < MAIN_PAGE_SECTIONS.length; i++) {
                 var section = MAIN_PAGE_SECTIONS[i];
                 var url = absoluteUrl(mainUrl + "/", section.path);
-                var html = await getText(url, headers);
-                results[section.title] = parseSearchResults(html, mainUrl, undefined);
+                try {
+                    var html = await getText(url, headers);
+                    results[section.title] = parseSearchResults(html, mainUrl, undefined);
+                } catch (_) {
+                    results[section.title] = [];
+                }
             }
 
             cb({ success: true, data: results, headers: headers });
@@ -1070,9 +1109,15 @@
         }
     }
 
-    globalThis.getHome = getHome;
-    globalThis.search = search;
-    globalThis.load = load;
-    globalThis.loadStreams = loadStreams;
+    var root = typeof globalThis !== "undefined" ? globalThis
+        : typeof self !== "undefined" ? self
+        : typeof window !== "undefined" ? window
+        : typeof global !== "undefined" ? global
+        : this;
+
+    root.getHome = getHome;
+    root.search = search;
+    root.load = load;
+    root.loadStreams = loadStreams;
 
 })();
