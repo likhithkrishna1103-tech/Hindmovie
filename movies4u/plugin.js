@@ -1113,14 +1113,12 @@
             var score = tmdbDetails && typeof tmdbDetails.vote_average === "number" ? Number(tmdbDetails.vote_average.toFixed(1)) : undefined;
 
             if (isMovie) {
+                var movieLinks = uniqueBy(downloadLinks, function (item) { return item; });
                 cb({
                     success: true,
                     data: new MultimediaItem({
                         title: title,
-                        url: buildLoadPayload(sourceUrl, uniqueBy(downloadLinks, function (item) { return item; }), {
-                            title: title,
-                            type: "movie"
-                        }),
+                        url: sourceUrl,
                         posterUrl: poster,
                         bannerUrl: bannerUrl,
                         logoUrl: logoUrl || undefined,
@@ -1129,7 +1127,23 @@
                         year: year ? Number(year) : undefined,
                         score: score,
                         cast: cast,
-                        headers: defaultHeaders({ "Referer": sourceUrl })
+                        headers: defaultHeaders({ "Referer": sourceUrl }),
+                        episodes: [
+                            new Episode({
+                                name: "Movie",
+                                url: buildLoadPayload(sourceUrl, movieLinks, {
+                                    title: title,
+                                    type: "movie",
+                                    season: 1,
+                                    episode: 1
+                                }),
+                                season: 1,
+                                episode: 1,
+                                posterUrl: poster,
+                                description: description,
+                                headers: defaultHeaders({ "Referer": sourceUrl })
+                            })
+                        ]
                     })
                 });
                 return;
