@@ -10,7 +10,7 @@
     var TMDB_IMG_BASE = "https://image.tmdb.org/t/p/original";
     var tmdbCache     = {};
 
-    var DEBUG = true;
+    var DEBUG = false;
     function log() {
         if (!DEBUG) return;
         var a = Array.prototype.slice.call(arguments);
@@ -296,6 +296,7 @@
     }
 
     function parseTmdbJson(body) {
+        if (body && typeof body === "object") return body;
         try { return JSON.parse(body || "{}"); }
         catch (e) {
             warn("TMDB JSON parse failed:", e.message);
@@ -611,6 +612,7 @@
 
             seenHref[href] = true;
             var parsed = parseTopicTitle(rawTitle);
+            if (!parsed.displayTitle) { pos = closeStart + 4; continue; }
             items.push({
                 title:     parsed.displayTitle,
                 url:       resolveUrl(href, mainUrl),
@@ -684,6 +686,7 @@
 
             seenHref[topicHref] = true;
             var parsed = parseTopicTitle(rawTitle);
+            if (!parsed.displayTitle) continue;
             items.push({
                 title:     parsed.displayTitle,
                 url:       resolveUrl(topicHref, mainUrl),
@@ -1112,7 +1115,9 @@
 
                 var episodes = [new Episode({
                     name: displayTitle,
-                    url:  JSON.stringify(magnetPayload)
+                    url:  JSON.stringify(magnetPayload),
+                    season: 1,
+                    episode: 1
                 })];
 
                 var item = {
