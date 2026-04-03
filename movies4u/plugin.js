@@ -177,6 +177,28 @@
         var allowRedirects = options.allowRedirects !== false;
         var timeout = options.timeout || 20000;
 
+        if (method === "GET" && typeof http_get === "function") {
+            return Promise.resolve(http_get(url, headers)).then(function (res) {
+                return {
+                    status: res && typeof res.status !== "undefined" ? res.status : 200,
+                    body: res && typeof res.body !== "undefined" ? res.body : "",
+                    headers: parseHeaders(res && res.headers),
+                    finalUrl: (res && (res.url || res.finalUrl)) || url
+                };
+            });
+        }
+
+        if (method === "POST" && typeof http_post === "function") {
+            return Promise.resolve(http_post(url, body, headers)).then(function (res) {
+                return {
+                    status: res && typeof res.status !== "undefined" ? res.status : 200,
+                    body: res && typeof res.body !== "undefined" ? res.body : "",
+                    headers: parseHeaders(res && res.headers),
+                    finalUrl: (res && (res.url || res.finalUrl)) || url
+                };
+            });
+        }
+
         if (typeof fetch === "function") {
             var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
             var timer = null;
@@ -896,21 +918,20 @@
     async function getHome(cb) {
         try {
             var mainUrl = await getMainUrl();
-            var headers = pageHeaders(mainUrl);
             var results = {};
 
             for (var i = 0; i < MAIN_PAGE_SECTIONS.length; i++) {
                 var section = MAIN_PAGE_SECTIONS[i];
                 var url = absoluteUrl(mainUrl + "/", section.path);
                 try {
-                    var html = await getText(url, headers);
+                    var html = await getText(url, pageHeaders(mainUrl));
                     results[section.title] = parseSearchResults(html, mainUrl, undefined);
                 } catch (_) {
                     results[section.title] = [];
                 }
             }
 
-            cb({ success: true, data: results, headers: headers });
+            cb({ success: true, data: results });
         } catch (error) {
             cb({ success: false, errorCode: "PARSE_ERROR", message: toErrorMessage(error) });
         }
@@ -919,13 +940,11 @@
     async function search(query, cb) {
         try {
             var mainUrl = await getMainUrl();
-            var headers = pageHeaders(mainUrl);
             var url = mainUrl + "/?s=" + encodeURIComponent(query || "");
-            var html = await getText(url, headers);
+            var html = await getText(url, pageHeaders(mainUrl));
             cb({
                 success: true,
-                data: parseSearchResults(html, mainUrl, undefined),
-                headers: headers
+                data: parseSearchResults(html, mainUrl, undefined)
             });
         } catch (error) {
             cb({ success: false, errorCode: "SEARCH_ERROR", message: toErrorMessage(error) });
@@ -1116,6 +1135,8 @@
         : this;
 
     root.getHome = getHome;
+    root.loadHome = getHome;
+    root.loadhome = getHome;
     root.search = search;
     root.load = load;
     root.loadStreams = loadStreams;
