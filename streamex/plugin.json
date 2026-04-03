@@ -1,9 +1,9 @@
 {
-  "packageName": "com.igris.repo.tamilmv",
-  "name": "tamilmv",
-  "version": 6,
+  "packageName": "com.igris.repo.streamex",
+  "name": "StreameX",
+  "version": 1,
   "baseUrl": "https://example.com",
-  "description": "tamilmv plugin for hindmovie",
+  "description": "StreameX plugin for hindmovie",
   "authors": [
     "Developer"
   ],
