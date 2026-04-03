@@ -1117,7 +1117,10 @@
                     success: true,
                     data: new MultimediaItem({
                         title: title,
-                        url: JSON.stringify(uniqueBy(downloadLinks, function (item) { return item; })),
+                        url: buildLoadPayload(sourceUrl, uniqueBy(downloadLinks, function (item) { return item; }), {
+                            title: title,
+                            type: "movie"
+                        }),
                         posterUrl: poster,
                         bannerUrl: bannerUrl,
                         logoUrl: logoUrl || undefined,
@@ -1144,7 +1147,12 @@
                 var isCompleteSeason = !(meta && meta.title);
                 return new Episode({
                     name: meta.title || (isCompleteSeason ? ("Complete Season " + season) : ("Episode " + episode)),
-                    url: JSON.stringify(uniqueBy(episodeLinksMap[key], function (item) { return item; })),
+                    url: buildLoadPayload(sourceUrl, uniqueBy(episodeLinksMap[key], function (item) { return item; }), {
+                        title: title,
+                        type: type,
+                        season: season,
+                        episode: episode
+                    }),
                     season: season,
                     episode: episode,
                     description: meta.overview || (isCompleteSeason ? ("Complete Season " + season) : plot),
