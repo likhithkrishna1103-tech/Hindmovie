@@ -36,8 +36,8 @@
     //   3. Bing search for "1tamilmv" (last resort)
     // ============================================================
     var FALLBACK_DOMAINS = [
-        "https://www.1tamilmv.immo",
-        "https://www.1tamilmv.fi",
+        "https://www.1tamilmv.moda",
+        "https://www.1tamilmv.cymru",
         "https://www.1tamilmv.wf",
         "https://www.1tamilmv.eu",
         "https://www.1tamilmv.haus",
