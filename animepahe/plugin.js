@@ -531,7 +531,15 @@
                             score:       td.vote_average ? parseFloat(td.vote_average.toFixed(1)) : null,
                             description: td.overview || null,
                             genres:      (td.genres || []).map(function(g) { return g.name; }),
-                            episodes:    []
+                            episodes:    [
+                                new Episode({
+                                    name: "Movie",
+                                    url:  url,
+                                    season: 1,
+                                    episode: 1,
+                                    headers: HEADERS
+                                })
+                            ]
                         }) });
                     } catch(te) {
                         cb({ success: false, errorCode: "LOAD_ERROR", message: te.message });
