@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.hindmoviez",
   "name": "hindmoviez",
-  "version": 4,
+  "version": 5,
   "baseUrl": "https://example.com",
   "description": "hindmoviez plugin (Sky Gen 2)",
   "authors": [
