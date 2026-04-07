@@ -411,6 +411,8 @@
         const finalTarget = rewriteHgUrl(streamUrl);
         const { url: finalUrl, body } = await fetchFinal(finalTarget, 5, { ttl: HTTP_CACHE_TTL, allowBlocked: true });
         const mediaUrls = findMediaUrls(body, finalUrl);
+        const finalHost = parseHost(finalUrl);
+        const isHgFamily = /(?:^|\.)(hgcloud\.to|cavanhabg\.com|hglink\.to)$/.test(finalHost);
 
         if (mediaUrls.length > 0) {
             return mediaUrls.map(url => new StreamResult({
@@ -419,6 +421,10 @@
                 source: label || parseHost(finalTarget) || "Tamilblasters",
                 headers: { Referer: referer || finalTarget }
             }));
+        }
+
+        if (isHgFamily) {
+            return [];
         }
 
         return [new StreamResult({
@@ -439,6 +445,35 @@
             out.push(stream);
         }
         return out.sort((a, b) => (b.quality || 0) - (a.quality || 0));
+    }
+
+    function parseJsonLikeInput(value) {
+        const raw = String(value || "").trim();
+        const candidates = [raw];
+        if ((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith("\"") && raw.endsWith("\""))) {
+            candidates.push(raw.slice(1, -1));
+        }
+        candidates.push(raw.replace(/\\"/g, "\""));
+        candidates.push(raw.replace(/\\"/g, "\"").replace(/^"+|"+$/g, ""));
+
+        for (const candidate of unique(candidates)) {
+            try {
+                return JSON.parse(candidate);
+            } catch (_) {}
+        }
+
+        const objectLike = raw.match(/^\{\s*url\s*:\s*([^,}]+)\s*,\s*title\s*:\s*(.+)\s*\}$/i)
+            || raw.match(/^\{\s*title\s*:\s*([^,}]+)\s*,\s*url\s*:\s*(.+)\s*\}$/i);
+        if (objectLike) {
+            const firstIsUrl = /^\{\s*url\s*:/i.test(raw);
+            const first = decodeEntities(objectLike[1]).trim();
+            const second = decodeEntities(objectLike[2]).trim();
+            return firstIsUrl
+                ? { url: first, title: second }
+                : { title: first, url: second };
+        }
+
+        throw new Error("Invalid serialized episode payload");
     }
 
     async function getHome(cb) {
@@ -541,8 +576,8 @@
         try {
             let streamResults = [];
 
-            if (String(url || "").startsWith("{")) {
-                const loadData = JSON.parse(url);
+            if (/^[{'"]/.test(String(url || "").trim())) {
+                const loadData = parseJsonLikeInput(url);
                 if (loadData?.url) {
                     streamResults = await extractIframeStream(loadData.url, await getMainUrl(), loadData.title);
                     cb({ success: true, data: dedupeStreams(streamResults) });
