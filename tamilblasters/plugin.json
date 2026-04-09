@@ -1,9 +1,9 @@
 {
   "packageName": "com.igris.repo.tamilblasters",
   "name": "tamilblasters",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://example.com",
-  "description": "tamilblasters plugin for hindmovie",
+  "description": "tamilblasters plugin",
   "authors": [
     "Developer"
   ],
