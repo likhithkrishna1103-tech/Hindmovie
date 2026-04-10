@@ -403,9 +403,10 @@
         };
     }
 
-    async function collectEpisodes(details, securityKey) {
+    async function collectEpisodes(details, securityKey, fallbackMovieId) {
         var allEpisodes = [];
         var responseKey = securityKey;
+        var fallbackId = details && details.id ? details.id : fallbackMovieId;
 
         if (details && details.seasons && details.seasons.length > 1) {
             for (var i = 0; i < details.seasons.length; i++) {
@@ -441,10 +442,12 @@
             for (var k = 0; k < episodes.length; k++) {
                 var episode = episodes[k];
                 if (!episode || !episode.id) continue;
+                var episodeMovieId = fallbackId || fallbackMovieId;
+                if (!episodeMovieId) continue;
 
                 allEpisodes.push(new Episode({
                     name: episode.title || ("Episode " + (episode.number || (k + 1))),
-                    url: encodePlayUrl(details.id, episode.id),
+                    url: encodePlayUrl(episodeMovieId, episode.id),
                     season: details.seasonNumber || 1,
                     episode: episode.number || (k + 1),
                     description: undefined,
@@ -626,6 +629,8 @@
                 throw new Error("CastleTV returned empty media details");
             }
 
+            var detailsEpisodes = Array.isArray(details.episodes) ? details.episodes : [];
+            var detailsSeasons = Array.isArray(details.seasons) ? details.seasons : [];
             var title = details.title || "Unknown Title";
             var posterUrl = details.coverVerticalImage || details.coverHorizontalImage || undefined;
             var bannerUrl = details.coverHorizontalImage || details.coverVerticalImage || undefined;
@@ -635,21 +640,41 @@
             var score = details.score || undefined;
             var tags = details.tags || undefined;
             var genres = tags;
-            var cast = (details.actors || []).map(mapActor);
+            var cast = (Array.isArray(details.actors) ? details.actors : []).map(mapActor);
             var fallbackType = normalizeType(details.movieType);
             var recommendations = [];
-            var titbits = details.titbits || [];
+            var titbits = Array.isArray(details.titbits) ? details.titbits : [];
 
             for (var i = 0; i < titbits.length; i++) {
                 var recommendation = buildRecommendation(titbits[i], fallbackType);
                 if (recommendation) recommendations.push(recommendation);
             }
 
-            var isSeriesLike = !!SERIES_TYPES[String(details.movieType)] || ((details.episodes || []).length > 1);
+            var isSeriesLike = !!SERIES_TYPES[String(details.movieType)] || detailsEpisodes.length > 1 || detailsSeasons.length > 1;
 
             if (isSeriesLike) {
-                var collected = await collectEpisodes(details, securityKey);
-                var episodes = collected.episodes;
+                var episodes = [];
+                try {
+                    var collected = await collectEpisodes(details, securityKey, movieId);
+                    episodes = collected.episodes || [];
+                } catch (episodeError) {
+                    console.warn("CastleTV collectEpisodes failed:", toMessage(episodeError));
+                }
+
+                if (!episodes.length) {
+                    for (var epIndex = 0; epIndex < detailsEpisodes.length; epIndex++) {
+                        var fallbackEpisode = detailsEpisodes[epIndex];
+                        if (!fallbackEpisode || !fallbackEpisode.id) continue;
+                        episodes.push(new Episode({
+                            name: fallbackEpisode.title || ("Episode " + (fallbackEpisode.number || (epIndex + 1))),
+                            url: encodePlayUrl(details.id || movieId, fallbackEpisode.id),
+                            season: details.seasonNumber || 1,
+                            episode: fallbackEpisode.number || (epIndex + 1),
+                            posterUrl: fallbackEpisode.coverImage || undefined,
+                            headers: buildHeaders()
+                        }));
+                    }
+                }
 
                 cb({
                     success: true,
@@ -663,7 +688,7 @@
                         description: plot,
                         year: year,
                         score: score,
-                        duration: details.episodes && details.episodes[0] && details.episodes[0].duration ? Math.round(details.episodes[0].duration / 60) : undefined,
+                        duration: detailsEpisodes[0] && detailsEpisodes[0].duration ? Math.round(detailsEpisodes[0].duration / 60) : undefined,
                         status: details.seasonDescription && details.seasonDescription.toLowerCase().indexOf("season") !== -1 ? "ongoing" : "completed",
                         genres: genres,
                         tags: tags,
@@ -676,7 +701,7 @@
                 return;
             }
 
-            var firstEpisode = details.episodes && details.episodes.length ? details.episodes[0] : null;
+            var firstEpisode = detailsEpisodes.length ? detailsEpisodes[0] : null;
             if (!firstEpisode || !firstEpisode.id) {
                 throw new Error("CastleTV movie did not include a playable episode id");
             }
