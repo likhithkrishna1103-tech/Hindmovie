@@ -629,10 +629,12 @@
             var title = details.title || "Unknown Title";
             var posterUrl = details.coverVerticalImage || details.coverHorizontalImage || undefined;
             var bannerUrl = details.coverHorizontalImage || details.coverVerticalImage || undefined;
+            var backgroundPosterUrl = bannerUrl;
             var plot = details.briefIntroduction || undefined;
             var year = getYearFromTimestamp(details.publishTime);
             var score = details.score || undefined;
             var tags = details.tags || undefined;
+            var genres = tags;
             var cast = (details.actors || []).map(mapActor);
             var fallbackType = normalizeType(details.movieType);
             var recommendations = [];
@@ -656,12 +658,14 @@
                         url: encodeMediaUrl(details.id || movieId),
                         posterUrl: posterUrl,
                         bannerUrl: bannerUrl,
+                        backgroundPosterUrl: backgroundPosterUrl,
                         type: "series",
                         description: plot,
                         year: year,
                         score: score,
                         duration: details.episodes && details.episodes[0] && details.episodes[0].duration ? Math.round(details.episodes[0].duration / 60) : undefined,
                         status: details.seasonDescription && details.seasonDescription.toLowerCase().indexOf("season") !== -1 ? "ongoing" : "completed",
+                        genres: genres,
                         tags: tags,
                         cast: cast,
                         recommendations: recommendations,
@@ -681,18 +685,28 @@
                 success: true,
                 data: new MultimediaItem({
                     title: title,
-                    url: encodePlayUrl(details.id || movieId, firstEpisode.id),
+                    url: encodeMediaUrl(details.id || movieId),
                     posterUrl: posterUrl,
                     bannerUrl: bannerUrl,
+                    backgroundPosterUrl: backgroundPosterUrl,
                     type: "movie",
                     description: plot,
                     year: year,
                     score: score,
                     duration: firstEpisode.duration ? Math.round(firstEpisode.duration / 60) : undefined,
+                    genres: genres,
                     tags: tags,
                     cast: cast,
                     recommendations: recommendations,
-                    headers: buildHeaders()
+                    headers: buildHeaders(),
+                    episodes: [new Episode({
+                        name: "Movie",
+                        url: encodePlayUrl(details.id || movieId, firstEpisode.id),
+                        season: 0,
+                        episode: 0,
+                        posterUrl: posterUrl,
+                        headers: buildHeaders()
+                    })]
                 })
             });
         } catch (e) {
