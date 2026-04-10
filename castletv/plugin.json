@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.castletv",
   "name": "Castle Tv",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://example.com",
   "description": "Castle TV movies and series provider",
   "authors": [

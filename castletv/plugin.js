@@ -49,7 +49,15 @@
 
     function getApiBase() {
         if (typeof manifest !== "undefined" && manifest && manifest.baseUrl) {
-            return String(manifest.baseUrl).replace(/\/$/, "");
+            var runtimeBase = String(manifest.baseUrl).replace(/\/$/, "");
+            if (
+                runtimeBase &&
+                /^https?:\/\//i.test(runtimeBase) &&
+                runtimeBase.indexOf("example.com") === -1 &&
+                runtimeBase.indexOf("localhost") === -1
+            ) {
+                return runtimeBase;
+            }
         }
         return DEFAULT_API_BASE;
     }
@@ -112,13 +120,8 @@
     }
 
     function buildHeaders(extra) {
-        var apiBase = getApiBase();
         var headers = {
-            "Referer": apiBase + "/",
-            "Origin": apiBase,
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.9",
-            "User-Agent": DEFAULT_USER_AGENT
+            "Referer": getApiBase()
         };
         if (extra) {
             Object.keys(extra).forEach(function(key) {
@@ -128,24 +131,61 @@
         return headers;
     }
 
+    function buildApiHeaders(extra) {
+        if (!extra) return undefined;
+        var headers = {};
+        Object.keys(extra).forEach(function(key) {
+            headers[key] = extra[key];
+        });
+        return headers;
+    }
+
+    function getResponseStatus(res) {
+        if (!res) return 0;
+        if (typeof res.statusCode === "number") return res.statusCode;
+        if (typeof res.status === "number") return res.status;
+        return 0;
+    }
+
     async function httpGetText(url, headers) {
-        var res = await http_get(url, buildHeaders(headers));
-        if (!res || res.statusCode >= 400) {
-            throw new Error("GET failed (" + (res ? res.statusCode : "unknown") + "): " + url + " -> " + (res ? res.body : "no response"));
+        var requestHeaders = buildApiHeaders(headers);
+        var res = requestHeaders ? await http_get(url, requestHeaders) : await http_get(url);
+        var status = getResponseStatus(res);
+        if (!res || status >= 400) {
+            throw new Error("GET failed (" + (status || "unknown") + "): " + url + " -> " + (res ? res.body : "no response"));
         }
         return typeof res.body === "string" ? res.body : JSON.stringify(res.body);
     }
 
     async function httpPostText(url, body, headers) {
-        var res = await http_post(
-            url,
-            buildHeaders(Object.assign({
-                "Content-Type": "application/json; charset=utf-8"
-            }, headers || {})),
-            typeof body === "string" ? body : JSON.stringify(body)
-        );
-        if (!res || res.statusCode >= 400) {
-            throw new Error("POST failed (" + (res ? res.statusCode : "unknown") + "): " + url + " -> " + (res ? res.body : "no response"));
+        var mergedHeaders = Object.assign({
+            "Content-Type": "application/json; charset=utf-8"
+        }, headers || {});
+        var payload = typeof body === "string" ? body : JSON.stringify(body);
+        var attempts = [
+            function() { return http_post(url, buildApiHeaders(mergedHeaders), payload); },
+            function() { return http_post(url, payload, buildApiHeaders(mergedHeaders)); }
+        ];
+        var res = null;
+        var lastError = null;
+
+        for (var i = 0; i < attempts.length; i++) {
+            try {
+                res = await attempts[i]();
+                if (res && getResponseStatus(res) < 400) {
+                    break;
+                }
+            } catch (e) {
+                lastError = e;
+            }
+        }
+
+        var status = getResponseStatus(res);
+        if ((!res || status >= 400) && lastError) {
+            throw lastError;
+        }
+        if (!res || status >= 400) {
+            throw new Error("POST failed (" + (status || "unknown") + "): " + url + " -> " + (res ? res.body : "no response"));
         }
         return typeof res.body === "string" ? res.body : JSON.stringify(res.body);
     }
