@@ -1,8 +1,8 @@
 {
   "packageName": "com.igris.repo.castletv",
   "name": "Castle Tv",
-  "version": 1,
-  "baseUrl": "https://api.hlowb.com",
+  "version": 2,
+  "baseUrl": "https://example.com",
   "description": "Castle TV movies and series provider",
   "authors": [
     "Developer"

@@ -12,7 +12,7 @@
      */
     // var manifest is injected at runtime
 
-    var API_BASE = "https://api.hlowb.com";
+    var DEFAULT_API_BASE = "https://api.hlowb.com";
     var PACKAGE_NAME = "com.external.castle";
     var CHANNEL = "IndiaA";
     var CLIENT_TYPE = "1";
@@ -27,6 +27,7 @@
     var SKIP_HOME_ROWS = { "Hot Erotic Series": true, "Bollywood Star": true };
     var QUALITY_MAP = { "3": 1080, "2": 720, "1": 480 };
     var QUALITY_NAME_MAP = { "3": "1080p", "2": "720p", "1": "480p" };
+    var DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 
     function safeJsonParse(text) {
         try {
@@ -44,6 +45,20 @@
 
     function ensureString(value) {
         return value == null ? "" : String(value);
+    }
+
+    function getApiBase() {
+        if (typeof manifest !== "undefined" && manifest && manifest.baseUrl) {
+            return String(manifest.baseUrl).replace(/\/$/, "");
+        }
+        return DEFAULT_API_BASE;
+    }
+
+    function getPluginName() {
+        if (typeof manifest !== "undefined" && manifest && manifest.name) {
+            return String(manifest.name);
+        }
+        return "Castle TV";
     }
 
     function encodeMediaUrl(id) {
@@ -97,9 +112,13 @@
     }
 
     function buildHeaders(extra) {
+        var apiBase = getApiBase();
         var headers = {
-            "Referer": API_BASE,
-            "Origin": API_BASE
+            "Referer": apiBase + "/",
+            "Origin": apiBase,
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "User-Agent": DEFAULT_USER_AGENT
         };
         if (extra) {
             Object.keys(extra).forEach(function(key) {
@@ -142,22 +161,57 @@
         return keyMaterial.substring(0, 16);
     }
 
+    async function tryBridgeDecrypt(encryptedB64, keyValue, ivValue) {
+        if (typeof crypto !== "undefined" && crypto && typeof crypto.decryptAES === "function") {
+            try {
+                var viaCrypto = await crypto.decryptAES(encryptedB64, keyValue, ivValue);
+                if (typeof viaCrypto === "string" && viaCrypto) {
+                    return viaCrypto;
+                }
+            } catch (e) {}
+        }
+
+        if (typeof sendMessage === "function") {
+            try {
+                var viaMessage = await sendMessage("crypto_decrypt_aes", JSON.stringify({
+                    data: encryptedB64,
+                    key: keyValue,
+                    iv: ivValue
+                }));
+                if (typeof viaMessage === "string" && viaMessage) {
+                    return viaMessage;
+                }
+            } catch (e) {}
+        }
+
+        return null;
+    }
+
     async function decryptData(encryptedB64, apiKeyB64) {
         if (!encryptedB64) return null;
         try {
             var aesKey = deriveKey(apiKeyB64);
-            var decrypted = await crypto.decryptAES(encryptedB64, aesKey, aesKey);
-            if (typeof decrypted !== "string" || decrypted === encryptedB64) {
-                return null;
+            var keyB64 = btoa(aesKey);
+            var candidates = [
+                [aesKey, aesKey],
+                [keyB64, keyB64]
+            ];
+
+            for (var i = 0; i < candidates.length; i++) {
+                var decrypted = await tryBridgeDecrypt(encryptedB64, candidates[i][0], candidates[i][1]);
+                if (typeof decrypted === "string" && decrypted && decrypted !== encryptedB64) {
+                    return decrypted;
+                }
             }
-            return decrypted;
+
+            return null;
         } catch (e) {
             return null;
         }
     }
 
     async function getSecurityKey() {
-        var url = API_BASE + "/v0.1/system/getSecurityKey/1?channel=" + CHANNEL + "&clientType=" + CLIENT_TYPE + "&lang=" + LANG;
+        var url = getApiBase() + "/v0.1/system/getSecurityKey/1?channel=" + CHANNEL + "&clientType=" + CLIENT_TYPE + "&lang=" + LANG;
         var body = await httpGetText(url);
         var payload = safeJsonParse(body);
         if (payload && payload.code === 200 && payload.data) {
@@ -186,6 +240,14 @@
             throw new Error("CastleTV returned an empty encrypted payload");
         }
 
+        var directPayload = safeJsonParse(encryptedPayload);
+        if (directPayload && typeof directPayload === "object") {
+            return {
+                securityKey: securityKey,
+                data: directPayload
+            };
+        }
+
         var decrypted = await decryptData(encryptedPayload, securityKey);
         if (!decrypted) {
             throw new Error("CastleTV payload decryption failed");
@@ -212,6 +274,14 @@
         var encryptedPayload = getEncryptedPayload(responseText);
         if (!encryptedPayload) {
             throw new Error("CastleTV returned an empty encrypted payload");
+        }
+
+        var directPayload = safeJsonParse(encryptedPayload);
+        if (directPayload && typeof directPayload === "object") {
+            return {
+                securityKey: payloadKey,
+                data: directPayload
+            };
         }
 
         var decrypted = await decryptData(encryptedPayload, payloadKey);
@@ -274,7 +344,7 @@
     }
 
     async function fetchMovieDetails(movieId, securityKey) {
-        var url = API_BASE
+        var url = getApiBase()
             + "/film-api/v1.9.9/movie?channel=" + CHANNEL
             + "&clientType=" + CLIENT_TYPE
             + "&clientType=" + CLIENT_TYPE
@@ -366,7 +436,7 @@
     }
 
     function buildStreamSource(title, languageName, resolution, isPreview) {
-        var parts = [title || manifest.name || "Castle TV"];
+        var parts = [title || getPluginName()];
         if (languageName) parts.push(languageName);
         if (QUALITY_NAME_MAP[String(resolution)]) parts.push(QUALITY_NAME_MAP[String(resolution)]);
         if (isPreview) parts.push("preview");
@@ -374,7 +444,7 @@
     }
 
     async function resolveVideoPayload(movieId, episodeId, languageId, resolution, securityKey) {
-        var url = API_BASE + "/film-api/v2.0.1/movie/getVideo2?clientType=" + CLIENT_TYPE + "&packageName=" + PACKAGE_NAME + "&channel=" + CHANNEL + "&lang=" + LANG;
+        var url = getApiBase() + "/film-api/v2.0.1/movie/getVideo2?clientType=" + CLIENT_TYPE + "&packageName=" + PACKAGE_NAME + "&channel=" + CHANNEL + "&lang=" + LANG;
         var body = {
             mode: MODE,
             appMarket: APP_MARKET,
@@ -402,7 +472,7 @@
      */
     async function getHome(cb) {
         try {
-            var url = API_BASE
+            var url = getApiBase()
                 + "/film-api/v0.1/category/home?channel=" + CHANNEL
                 + "&clientType=" + CLIENT_TYPE
                 + "&clientType=" + CLIENT_TYPE
@@ -444,7 +514,7 @@
 
             cb({ success: true, data: home });
         } catch (e) {
-            cb({ success: false, errorCode: "PARSE_ERROR", message: toMessage(e) });
+            cb({ success: false, errorCode: "HOME_ERROR", message: toMessage(e) });
         }
     }
 
@@ -461,7 +531,7 @@
             }
 
             var encodedQuery = encodeURIComponent(query.trim());
-            var url = API_BASE
+            var url = getApiBase()
                 + "/film-api/v1.1.0/movie/searchByKeyword?channel=" + CHANNEL
                 + "&clientType=" + CLIENT_TYPE
                 + "&clientType=" + CLIENT_TYPE
@@ -633,7 +703,7 @@
                 throw new Error("CastleTV episode not found for stream resolution");
             }
 
-            var title = details.title || manifest.name || "Castle TV";
+            var title = details.title || getPluginName();
             var streams = [];
             var availableTracks = episode.tracks || [];
             var resolutions = [3, 2, 1];
