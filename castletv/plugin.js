@@ -29,9 +29,15 @@
     var QUALITY_NAME_MAP = { "3": "1080p", "2": "720p", "1": "480p" };
     var DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 
+    function preserveCastleIdsJson(text) {
+        return String(text).replace(/"([A-Za-z0-9_]*Id|id)"\s*:\s*(-?\d+)/g, function(_, key, value) {
+            return "\"" + key + "\":\"" + value + "\"";
+        });
+    }
+
     function safeJsonParse(text) {
         try {
-            return JSON.parse(text);
+            return JSON.parse(preserveCastleIdsJson(text));
         } catch (e) {
             return null;
         }
@@ -776,6 +782,11 @@
                     episode = episodes[i];
                     break;
                 }
+            }
+
+            if (!episode && episodes.length === 1) {
+                episode = episodes[0];
+                episodeId = episode && episode.id ? String(episode.id) : episodeId;
             }
 
             if (!episode) {
