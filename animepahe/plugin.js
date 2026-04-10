@@ -130,6 +130,101 @@
         return "anime";
     }
 
+    function decodeHtmlEntities(str) {
+        return String(str || "")
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/&#039;/g, "'")
+            .replace(/&nbsp;/g, " ");
+    }
+
+    function stripTags(str) {
+        return decodeHtmlEntities(String(str || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+    }
+
+    function uniqueByUrl(items) {
+        var seen = {};
+        return (items || []).filter(function(item) {
+            var key = item && item.url;
+            if (!key || seen[key]) return false;
+            seen[key] = true;
+            return true;
+        });
+    }
+
+    async function fetchAniZipMeta(malId) {
+        if (!malId) return null;
+        try {
+            var url = "https://api.ani.zip/mappings?mal_id=" + encodeURIComponent(malId);
+            var res = await http_get(url, { "Accept": "application/json" });
+            if (!res || !res.body) return null;
+            return JSON.parse(res.body);
+        } catch (e) {
+            console.error("[AniZip] fetch error:", e.message);
+            return null;
+        }
+    }
+
+    function buildAniZipEpisodeMap(aniZipMeta) {
+        return aniZipMeta && aniZipMeta.episodes ? aniZipMeta.episodes : null;
+    }
+
+    function getAniZipEpisodeMeta(metaEpisodes, episodeNumber) {
+        if (!metaEpisodes || episodeNumber == null) return null;
+        return metaEpisodes[String(episodeNumber)] || null;
+    }
+
+    function scoreFromAniZip(metaEpisode) {
+        if (!metaEpisode || !metaEpisode.rating) return null;
+        var score = parseFloat(metaEpisode.rating);
+        return isNaN(score) ? null : score;
+    }
+
+    function getAniZipFanart(aniZipMeta) {
+        var images = aniZipMeta && aniZipMeta.images;
+        if (!images || !images.length) return null;
+        for (var i = 0; i < images.length; i++) {
+            var image = images[i];
+            if (image && image.coverType === "Fanart" && image.url) return image.url;
+        }
+        return null;
+    }
+
+    function parseRecommendations(html) {
+        var start = html.indexOf('tab-content anime-recommendation row');
+        if (start === -1) start = html.indexOf('anime-recommendation row');
+        var end = start !== -1 ? html.indexOf('anime-comment', start) : -1;
+        var section = start !== -1 ? html.slice(start, end !== -1 ? end : start + 20000) : "";
+        if (!section) return [];
+
+        var recommendations = [];
+        var cardRegex = /<div[^>]*class="[^"]*col-12 col-sm-6[^"]*"[^>]*>[\s\S]*?<a href="\/anime\/([^"]+)" title="([^"]+)"[\s\S]*?<img[^>]+(?:data-src|src)="([^"]+)"[\s\S]*?<\/div>\s*<\/div>/gi;
+        var match;
+        while ((match = cardRegex.exec(section)) !== null) {
+            var session = match[1];
+            var title = decodeHtmlEntities(match[2].trim());
+            var posterUrl = match[3] || null;
+            if (!session || !title) continue;
+
+            recommendations.push(new MultimediaItem({
+                title: title,
+                url: JSON.stringify({
+                    session: session,
+                    name: title,
+                    sessionDate: Math.floor(Date.now() / 1000)
+                }),
+                posterUrl: posterUrl,
+                type: "anime",
+                headers: HEADERS
+            }));
+        }
+
+        return uniqueByUrl(recommendations);
+    }
+
     function toMultimediaItem(item, episodeInfo) {
         var multimedia = new MultimediaItem({
             title:     item.animeTitle || item.title,
@@ -600,19 +695,25 @@
             if (malMatch) malId     = malMatch[1];
             if (aniMatch) anilistId = aniMatch[1];
 
-            var episodes = await fetchAllEpisodes(session);
+            var aniZipMeta = await fetchAniZipMeta(malId);
+            var metaEpisodes = buildAniZipEpisodeMap(aniZipMeta);
+            var backgroundFanart = getAniZipFanart(aniZipMeta);
+            var recommendations = parseRecommendations(html);
+            var episodes = await fetchAllEpisodes(session, metaEpisodes);
 
             var result = new MultimediaItem({
                 title:       animeTitle,
                 url:         url,
                 posterUrl:   poster,
-                bannerUrl:   poster,
+                bannerUrl:   backgroundFanart || poster,
+                backgroundPosterUrl: backgroundFanart || poster,
                 type:        getType(type),
                 year:        year,
                 description: synopsis,
                 status:      status,
                 genres:      genres,
                 syncData:    { mal: malId, anilist: anilistId },
+                recommendations: recommendations,
                 episodes:    episodes,
                 headers:     HEADERS
             });
@@ -627,7 +728,7 @@
     // Episode fetching
     // ─────────────────────────────────────────────
 
-    async function fetchAllEpisodes(session) {
+    async function fetchAllEpisodes(session, metaEpisodes) {
         var episodes = [];
         var firstPageUrl = PROXY + MAIN_URL + "/api?m=release&id=" + session + "&sort=episode_asc&page=1";
 
@@ -637,14 +738,14 @@
             var firstPage = new EpisodeResponse(data);
 
             firstPage.data.forEach(function(ep) {
-                episodes.push(createEpisode(ep, session, 1, "sub"));
-                episodes.push(createEpisode(ep, session, 1, "dub"));
+                episodes.push(createEpisode(ep, session, 1, "sub", metaEpisodes));
+                episodes.push(createEpisode(ep, session, 1, "dub", metaEpisodes));
             });
 
             if (firstPage.lastPage > 1) {
                 var pagePromises = [];
                 for (var page = 2; page <= firstPage.lastPage; page++) {
-                    pagePromises.push(fetchEpisodePage(session, page));
+                    pagePromises.push(fetchEpisodePage(session, page, metaEpisodes));
                 }
                 var results = await Promise.all(pagePromises);
                 results.forEach(function(pageEps) {
@@ -662,7 +763,7 @@
         return episodes;
     }
 
-    async function fetchEpisodePage(session, page) {
+    async function fetchEpisodePage(session, page, metaEpisodes) {
         var url = PROXY + MAIN_URL + "/api?m=release&id=" + session + "&sort=episode_asc&page=" + page;
         try {
             var res      = await http_get(url, HEADERS);
@@ -670,8 +771,8 @@
             var pageData = new EpisodeResponse(data);
             var episodes = [];
             pageData.data.forEach(function(ep) {
-                episodes.push(createEpisode(ep, session, page, "sub"));
-                episodes.push(createEpisode(ep, session, page, "dub"));
+                episodes.push(createEpisode(ep, session, page, "sub", metaEpisodes));
+                episodes.push(createEpisode(ep, session, page, "dub", metaEpisodes));
             });
             return episodes;
         } catch(e) {
@@ -680,8 +781,9 @@
         }
     }
 
-    function createEpisode(epData, animeSession, page, dubStatus) {
-        var title      = epData.title || "Episode " + epData.episode;
+    function createEpisode(epData, animeSession, page, dubStatus, metaEpisodes) {
+        var meta = getAniZipEpisodeMeta(metaEpisodes, epData.episode);
+        var title      = (meta && meta.title && meta.title.en) || epData.title || "Episode " + epData.episode;
         var suffix     = dubStatus === "dub" ? " (Dub)" : "";
         var urlPayload = JSON.stringify({
             mainUrl:         MAIN_URL,
@@ -698,7 +800,10 @@
             url:       urlPayload,
             season:    1,
             episode:   epData.episode,
-            posterUrl: epData.snapshot,
+            posterUrl: (meta && meta.image) || epData.snapshot,
+            description: (meta && meta.overview) || "",
+            score: scoreFromAniZip(meta),
+            runTime: meta && meta.runtime ? meta.runtime : undefined,
             airDate:   epData.createdAt,
             dubStatus: dubStatus,
             headers:   HEADERS

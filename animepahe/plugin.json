@@ -1,9 +1,9 @@
 {
   "packageName": "com.igris.repo.animepahe",
   "name": "animepahe",
-  "version": 6,
+  "version": 7,
   "baseUrl": "https://example.com",
-  "description": "animepahe plugin for hindmovie",
+  "description": "Popular plugin for anime ",
   "authors": [
     "Developer"
   ],
