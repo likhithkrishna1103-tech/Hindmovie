@@ -1,9 +1,9 @@
 {
-  "packageName": "com.igris.repo.playztvjio",
-  "name": "PlayZTV Jio",
+  "packageName": "com.igris.repo.playztvpiratestv",
+  "name": "piratestv-playztv",
   "version": 1,
   "baseUrl": "https://adsflw.xyz",
-  "description": "PlayZTV Jio family IPTV provider",
+  "description": "PlayZTV Pirates TV IPTV provider",
   "authors": [
     "Developer"
   ],

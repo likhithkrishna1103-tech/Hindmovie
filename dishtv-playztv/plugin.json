@@ -1,9 +1,9 @@
 {
-  "packageName": "com.igris.repo.playztvfreesports",
-  "name": "PlayZTV Free Sports",
+  "packageName": "com.igris.repo.playztvdishtv",
+  "name": "dishtv-playztv",
   "version": 1,
   "baseUrl": "https://adsflw.xyz",
-  "description": "PlayZTV Free Sports IPTV provider",
+  "description": "PlayZTV Dish Tv IPTV provider",
   "authors": [
     "Developer"
   ],

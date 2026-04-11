@@ -1,9 +1,9 @@
 {
-  "packageName": "com.igris.repo.playztvbdixtv",
-  "name": "PlayZTV BDIX TV",
+  "packageName": "com.igris.repo.playztvsunnxt",
+  "name": "sunnxt-playztv",
   "version": 1,
   "baseUrl": "https://adsflw.xyz",
-  "description": "PlayZTV BDIX TV IPTV provider",
+  "description": "PlayZTV Sun Nxt IPTV provider",
   "authors": [
     "Developer"
   ],

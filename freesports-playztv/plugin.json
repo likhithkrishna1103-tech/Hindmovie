@@ -1,9 +1,9 @@
 {
-  "packageName": "com.igris.repo.playztvsony",
-  "name": "PlayZTV Sony",
+  "packageName": "com.igris.repo.playztvfreesports",
+  "name": "freesports-playztv",
   "version": 1,
   "baseUrl": "https://adsflw.xyz",
-  "description": "PlayZTV Sony family IPTV provider",
+  "description": "PlayZTV Free Sports IPTV provider",
   "authors": [
     "Developer"
   ],

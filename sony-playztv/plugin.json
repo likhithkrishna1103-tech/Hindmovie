@@ -1,9 +1,9 @@
 {
-  "packageName": "com.igris.repo.playztvdishtv",
-  "name": "PlayZTV Dish Tv",
+  "packageName": "com.igris.repo.playztvsony",
+  "name": "sony-playztv",
   "version": 1,
   "baseUrl": "https://adsflw.xyz",
-  "description": "PlayZTV Dish Tv IPTV provider",
+  "description": "PlayZTV Sony family IPTV provider",
   "authors": [
     "Developer"
   ],

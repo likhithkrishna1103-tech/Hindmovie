@@ -571,10 +571,37 @@
         };
     }
 
+    function isLowValuePosterUrl(url) {
+        const value = trimToString(url).toLowerCase();
+        if (!value) return true;
+
+        return (
+            value.includes("encrypted-tbn0.gstatic.com/images?q=tbn:") ||
+            value.includes("googleusercontent.com/img/b/")
+        );
+    }
+
+    function normalizePosterUrl(providerLabel, posterUrl) {
+        const value = trimToString(posterUrl);
+        if (!value) return "";
+
+        const normalizedProvider = trimToString(providerLabel).toLowerCase();
+        if (normalizedProvider === "jio bd" && isLowValuePosterUrl(value)) {
+            return "";
+        }
+
+        return value;
+    }
+
     function createChannelFromExtInf(providerLabel, providerLogo, title, attributes, bufferedDrm) {
+        const poster = normalizePosterUrl(
+            providerLabel,
+            trimToString(attributes["tvg-logo"]) || trimToString(providerLogo)
+        );
+
         return {
             title,
-            poster: trimToString(attributes["tvg-logo"]) || trimToString(providerLogo),
+            poster,
             group: trimToString(attributes["group-title"]) || "Other Channels",
             headers: {},
             userAgent: "",
