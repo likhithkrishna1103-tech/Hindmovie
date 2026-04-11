@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.zapsports",
+  "name": "ZAP SPORTS",
+  "version": 1,
+  "baseUrl": "https://tv.noobon.top/zapx/api.php?action=getIPTVPlaylist",
+  "description": "ZAP SPORTS live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

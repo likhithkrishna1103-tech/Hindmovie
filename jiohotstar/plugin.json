@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.jiohotstar",
+  "name": "JIOHOTSTAR",
+  "version": 1,
+  "baseUrl": "https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/jstar.m3u",
+  "description": "JIOHOTSTAR live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

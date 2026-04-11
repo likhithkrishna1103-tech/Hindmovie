@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.jioind",
+  "name": "JIO IND",
+  "version": 1,
+  "baseUrl": "https://jiotv.byte-vault.workers.dev/?token=42e4f5-2d873b-3c37d8-7f3f50",
+  "description": "JIO IND live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

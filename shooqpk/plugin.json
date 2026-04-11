@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.shooqpk",
+  "name": "SHOOQ PK",
+  "version": 1,
+  "baseUrl": "https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/shoq.m3u",
+  "description": "SHOOQ PK live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

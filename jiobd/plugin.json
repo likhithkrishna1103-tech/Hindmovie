@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.jiobd",
+  "name": "JIO BD",
+  "version": 1,
+  "baseUrl": "https://ranapk.short.gy/JIOBD.m3u",
+  "description": "JIO BD live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

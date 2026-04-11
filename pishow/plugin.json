@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.pishow",
+  "name": "PISHOW",
+  "version": 1,
+  "baseUrl": "http://playlist-storage.pages.dev/PLAYLIST/playboxtv.m3u",
+  "description": "PISHOW live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

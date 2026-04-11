@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.sonyin",
+  "name": "SONY IN",
+  "version": 1,
+  "baseUrl": "https://sonyliv.logic-lane.workers.dev?token=a14d9c-4b782a-6c90fd-9a1b84",
+  "description": "SONY IN live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

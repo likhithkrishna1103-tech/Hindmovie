@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.ayna2",
+  "name": "AYNA 2",
+  "version": 1,
+  "baseUrl": "https://bdix2.short.gy/AYNA/playlist.php",
+  "description": "AYNA 2 live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

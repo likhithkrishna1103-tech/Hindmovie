@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.piratestv",
+  "name": "Pirates TV",
+  "version": 1,
+  "baseUrl": "https://raw.githubusercontent.com/FunctionError/PiratesTv/refs/heads/main/combined_playlist.m3u",
+  "description": "Pirates TV live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

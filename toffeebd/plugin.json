@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.toffeebd",
+  "name": "TOFFEE BD",
+  "version": 1,
+  "baseUrl": "https://playlist-cricfy.noobon.top/toffee.php",
+  "description": "TOFFEE BD live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

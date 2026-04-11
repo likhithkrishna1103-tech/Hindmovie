@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.ayna",
+  "name": "AYNA",
+  "version": 1,
+  "baseUrl": "https://playlist-cricfy.noobon.top/aynaott.php",
+  "description": "AYNA live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.samsungtv",
+  "name": "SAMSUNG TV",
+  "version": 1,
+  "baseUrl": "https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/samsungtv.m3u",
+  "description": "SAMSUNG TV live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.dangaltv",
+  "name": "DANGAL TV",
+  "version": 1,
+  "baseUrl": "https://playlist-storage.pages.dev/PLAYLIST/DangalPlay.m3u",
+  "description": "DANGAL TV live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

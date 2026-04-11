@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.freetv",
+  "name": "FREE TV",
+  "version": 1,
+  "baseUrl": "https://playlist-storage.pages.dev/PLAYLIST/freetv.m3u",
+  "description": "FREE TV live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

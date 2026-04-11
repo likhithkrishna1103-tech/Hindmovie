@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.akash",
+  "name": "AKASH",
+  "version": 1,
+  "baseUrl": "https://playlist-cricfy.noobon.top/akashgo.php",
+  "description": "AKASH live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

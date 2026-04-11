@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.freesports",
+  "name": "FREE SPORTS",
+  "version": 1,
+  "baseUrl": "https://playlist-storage.pages.dev/PLAYLIST/freelivesports.m3u",
+  "description": "FREE SPORTS live IPTV provider from Cricify CloudStream",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}
