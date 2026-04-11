@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:icon="@drawable/ic_live_events"
+        android:id="@+id/navigation_home"
+        android:title="Live Events"/>
+    <item
+        android:icon="@drawable/ic_sports"
+        android:id="@+id/navigation_sports"
+        android:title="Sports"/>
+    <item
+        android:icon="@drawable/ic_categories"
+        android:id="@+id/navigation_categories"
+        android:title="Categories"/>
+</menu>

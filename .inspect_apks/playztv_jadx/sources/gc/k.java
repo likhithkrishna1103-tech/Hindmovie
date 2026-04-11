@@ -1,0 +1,48 @@
+package gc;
+
+/* JADX INFO: loaded from: classes.dex */
+public abstract class k {
+    public static int activity_main = 2131558428;
+    public static int activity_main_content = 2131558429;
+    public static int activity_main_toolbar = 2131558430;
+    public static int activity_player = 2131558431;
+    public static int activity_splash = 2131558432;
+    public static int activity_tv = 2131558433;
+    public static int activity_web = 2131558434;
+    public static int dialog_add_fav = 2131558451;
+    public static int dialog_add_playlist = 2131558452;
+    public static int dialog_choose = 2131558453;
+    public static int dialog_floating_player = 2131558454;
+    public static int dialog_links = 2131558455;
+    public static int dialog_telegram = 2131558456;
+    public static int dialog_video_set = 2131558457;
+    public static int dropdown_item = 2131558459;
+    public static int exo_track_selection_dialog = 2131558469;
+    public static int fragment_ad = 2131558470;
+    public static int fragment_category = 2131558471;
+    public static int fragment_channel = 2131558472;
+    public static int fragment_event = 2131558473;
+    public static int fragment_favourites = 2131558474;
+    public static int fragment_more = 2131558475;
+    public static int fragment_ns = 2131558476;
+    public static int fragment_playlist = 2131558477;
+    public static int fragment_update = 2131558478;
+    public static int header_lay = 2131558479;
+    public static int item_banner = 2131558482;
+    public static int item_category = 2131558483;
+    public static int item_channel = 2131558484;
+    public static int item_choose_tab = 2131558485;
+    public static int item_event = 2131558486;
+    public static int item_event_home = 2131558487;
+    public static int item_link = 2131558488;
+    public static int item_listview = 2131558489;
+    public static int item_playlist = 2131558490;
+    public static int layout_event_home = 2131558491;
+    public static int layout_floating_player = 2131558492;
+    public static int layout_swipe_gesture = 2131558493;
+    public static int layout_text_input = 2131558494;
+    public static int player_controller = 2131558569;
+    public static int player_floating_controls = 2131558570;
+    public static int track_selection_dialog = 2131558578;
+    public static int tv_top_layout = 2131558579;
+}

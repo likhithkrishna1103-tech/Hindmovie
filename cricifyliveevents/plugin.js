@@ -270,6 +270,162 @@
         return { url: String(parts[0] || "").trim(), headers };
     }
 
+    function shouldExpandHlsVariants(url) {
+        const text = String(url || "").trim().toLowerCase();
+        if (!text || /\.mpd(?:$|[?#])/i.test(text)) return false;
+        return /\.m3u8(?:$|[?#])/i.test(text) || text.includes("/hls/") || text.includes("m3u8");
+    }
+
+    function parseHlsAttributes(line) {
+        const attributes = {};
+        const regex = /([A-Z0-9-]+)=("[^"]*"|[^,]*)/g;
+        let match;
+
+        while ((match = regex.exec(String(line || ""))) !== null) {
+            const key = String(match[1] || "").trim().toUpperCase();
+            const value = String(match[2] || "").trim().replace(/^"|"$/g, "");
+            if (key) attributes[key] = value;
+        }
+
+        return attributes;
+    }
+
+    function resolveVariantUrl(baseUrl, variantPath) {
+        const target = String(variantPath || "").trim();
+        if (!target) return "";
+
+        try {
+            const resolved = new URL(target, baseUrl);
+            const base = new URL(baseUrl);
+            if (!resolved.search && !target.includes("?") && base.search) {
+                resolved.search = base.search;
+            }
+            return resolved.toString();
+        } catch (_) {
+            return target;
+        }
+    }
+
+    function parseVariantQuality(attributes) {
+        const resolution = String(attributes && attributes.RESOLUTION ? attributes.RESOLUTION : "").trim();
+        const resolutionMatch = /(\d+)\s*x\s*(\d+)/i.exec(resolution);
+        if (resolutionMatch) return parseInt(resolutionMatch[2], 10) || 0;
+
+        const bandwidthValue = parseInt(attributes && (attributes["AVERAGE-BANDWIDTH"] || attributes.BANDWIDTH || "0"), 10);
+        if (!bandwidthValue || bandwidthValue < 1) return 0;
+        if (bandwidthValue >= 6000000) return 1080;
+        if (bandwidthValue >= 3000000) return 720;
+        if (bandwidthValue >= 1500000) return 480;
+        if (bandwidthValue >= 800000) return 360;
+        return 240;
+    }
+
+    function buildVariantSource(baseSource, attributes, fallbackIndex) {
+        const quality = parseVariantQuality(attributes);
+        if (quality > 0) {
+            return {
+                quality,
+                source: `${baseSource} ${quality}p`
+            };
+        }
+
+        const bandwidthValue = parseInt(attributes && (attributes["AVERAGE-BANDWIDTH"] || attributes.BANDWIDTH || "0"), 10);
+        if (bandwidthValue > 0) {
+            return {
+                quality: 0,
+                source: `${baseSource} ${Math.max(1, Math.round(bandwidthValue / 1000))}kbps`
+            };
+        }
+
+        return {
+            quality: 0,
+            source: `${baseSource} Variant ${fallbackIndex + 1}`
+        };
+    }
+
+    function parseHlsMasterPlaylist(manifestText, manifestUrl) {
+        const variants = [];
+        const lines = String(manifestText || "").split(/\r?\n/);
+        let pendingAttributes = null;
+
+        lines.forEach((rawLine) => {
+            const line = String(rawLine || "").trim();
+            if (!line) return;
+
+            if (line.startsWith("#EXT-X-STREAM-INF:")) {
+                pendingAttributes = parseHlsAttributes(line.slice("#EXT-X-STREAM-INF:".length));
+                return;
+            }
+
+            if (line.startsWith("#")) return;
+
+            if (pendingAttributes) {
+                const resolvedUrl = resolveVariantUrl(manifestUrl, line);
+                if (resolvedUrl) {
+                    variants.push({
+                        url: resolvedUrl,
+                        attributes: pendingAttributes
+                    });
+                }
+                pendingAttributes = null;
+            }
+        });
+
+        return variants;
+    }
+
+    function applyEventDrm(stream, rawApi) {
+        if (!rawApi || !String(rawApi).includes(":")) return;
+        const parts = String(rawApi).split(":", 2);
+        if (parts.length !== 2) return;
+        stream.drmKid = parts[0].replace(/-/g, "");
+        stream.drmKey = parts[1].replace(/-/g, "");
+        stream.drmType = "clearkey";
+    }
+
+    function createEventStreamResult(sourceLabel, parsed, rawApi, quality) {
+        const result = new StreamResult({
+            source: sourceLabel,
+            url: parsed.url,
+            headers: parsed.headers
+        });
+        if (typeof quality === "number" && quality > 0) {
+            result.quality = quality;
+        }
+        applyEventDrm(result, rawApi);
+        return result;
+    }
+
+    async function expandEventHlsStreams(sourceLabel, parsed, rawApi) {
+        if (!parsed || !parsed.url || !shouldExpandHlsVariants(parsed.url)) return [];
+
+        try {
+            const response = await http_get(parsed.url, parsed.headers || {});
+            if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) return [];
+
+            const manifestText = extractResponseBody(response).trim();
+            if (!manifestText.startsWith("#EXTM3U") || manifestText.indexOf("#EXT-X-STREAM-INF") === -1) return [];
+
+            const variants = parseHlsMasterPlaylist(manifestText, parsed.url);
+            const streams = [];
+            const seenUrls = {};
+
+            variants.forEach((variant, index) => {
+                if (!variant || !variant.url || seenUrls[variant.url]) return;
+                seenUrls[variant.url] = true;
+                const variantInfo = buildVariantSource(sourceLabel, variant.attributes || {}, index);
+                streams.push(createEventStreamResult(variantInfo.source, {
+                    url: variant.url,
+                    headers: parsed.headers || {}
+                }, rawApi, variantInfo.quality));
+            });
+
+            return streams;
+        } catch (_) {
+            return [];
+        }
+    }
+
     async function getHome(cb) {
         try {
             const events = (await fetchCricifyJson("/categories/live-events.txt") || []).filter(isPublished);
@@ -397,26 +553,29 @@
             streamUrls.forEach((stream, index) => {
                 const parsed = parseStreamLink(stream && stream.link);
                 if (!parsed.url) return;
-
-                const result = new StreamResult({
-                    source: (stream && stream.title) || `Server ${index + 1}`,
-                    url: parsed.url,
-                    headers: parsed.headers
-                });
-
-                if (stream && stream.type === "7" && stream.api && stream.api.includes(":")) {
-                    const parts = String(stream.api).split(":", 2);
-                    if (parts.length === 2) {
-                        result.drmKid = parts[0].replace(/-/g, "");
-                        result.drmKey = parts[1].replace(/-/g, "");
-                        result.drmType = "clearkey";
-                    }
-                }
-
-                streams.push(result);
+                const sourceLabel = (stream && stream.title) || `Server ${index + 1}`;
+                const rawApi = stream && stream.type === "7" ? stream.api : "";
+                streams.push(createEventStreamResult(sourceLabel, parsed, rawApi, 0));
             });
 
-            cb({ success: true, data: streams });
+            const expandedGroups = await Promise.all(streamUrls.map(async (stream, index) => {
+                const parsed = parseStreamLink(stream && stream.link);
+                if (!parsed.url) return [];
+                const sourceLabel = (stream && stream.title) || `Server ${index + 1}`;
+                const rawApi = stream && stream.type === "7" ? stream.api : "";
+                const variants = await expandEventHlsStreams(sourceLabel, parsed, rawApi);
+                if (!variants.length) return [];
+                return [createEventStreamResult(`${sourceLabel} Auto`, parsed, rawApi, 0)].concat(variants);
+            }));
+
+            const expandedStreams = [];
+            expandedGroups.forEach((group) => {
+                if (Array.isArray(group) && group.length) {
+                    group.forEach((item) => expandedStreams.push(item));
+                }
+            });
+
+            cb({ success: true, data: expandedStreams.length ? expandedStreams : streams });
         } catch (error) {
             cb({
                 success: false,

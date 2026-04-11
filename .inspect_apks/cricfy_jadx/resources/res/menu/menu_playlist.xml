@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/add_playlist_from_url"
+        android:title="Add New Playlist"/>
+    <item
+        android:id="@+id/pick_playlist_file"
+        android:title="Choose Playlist File"/>
+    <item
+        android:id="@+id/iptv_playlist"
+        android:title="Xtream Codes Login"/>
+</menu>

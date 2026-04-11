@@ -1,0 +1,22 @@
+package td;
+
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+
+/* JADX WARN: Method from annotation default annotation not found: i */
+/* JADX WARN: Method from annotation default annotation not found: n */
+/* JADX WARN: Method from annotation default annotation not found: s */
+/* JADX INFO: compiled from: r8-map-id-8af220986ec75471f42850aff14da9e2635b56ed97029d3e9e3ceb4607eaaaec */
+/* JADX INFO: loaded from: classes.dex */
+@Retention(RetentionPolicy.RUNTIME)
+public @interface e {
+    String c() default "";
+
+    String f() default "";
+
+    int[] l() default {};
+
+    String m() default "";
+
+    int v() default 1;
+}

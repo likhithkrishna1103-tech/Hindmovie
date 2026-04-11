@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:icon="@drawable/ic_notification"
+        android:id="@+id/noti"
+        android:title="Notifications"
+        app:showAsAction="always"/>
+    <item
+        android:icon="@drawable/ic_fav"
+        android:id="@+id/fav"
+        android:title="Favourite Channels"
+        app:showAsAction="always"/>
+    <item
+        android:icon="@drawable/refresh_24px"
+        android:id="@+id/refresh"
+        android:title="Refresh"
+        app:showAsAction="always"/>
+    <item
+        android:icon="@drawable/search_24px"
+        android:id="@+id/search"
+        android:title="Search Channels"
+        app:actionViewClass="androidx.appcompat.widget.SearchView"
+        app:showAsAction="collapseActionView|always"/>
+</menu>

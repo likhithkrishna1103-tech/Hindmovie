@@ -1,0 +1,9 @@
+package androidx.emoji2.text;
+
+/* JADX INFO: compiled from: r8-map-id-8af220986ec75471f42850aff14da9e2635b56ed97029d3e9e3ceb4607eaaaec */
+/* JADX INFO: loaded from: classes.dex */
+public interface q {
+    Object a();
+
+    boolean g(CharSequence charSequence, int i, int i10, y yVar);
+}

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextView xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:textSize="15sp"
+    android:textColor="?attr/colorOnBackground"
+    android:gravity="center_vertical"
+    android:id="@android:id/text1"
+    android:background="?attr/selectableItemBackground"
+    android:paddingTop="14dp"
+    android:paddingBottom="14dp"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:minHeight="56dp"
+    android:drawablePadding="14dp"
+    android:paddingStart="20dp"
+    android:paddingEnd="20dp"
+    app:drawableStartCompat="@drawable/playlist_play_24px"
+    app:drawableTint="?attr/colorPrimary"/>

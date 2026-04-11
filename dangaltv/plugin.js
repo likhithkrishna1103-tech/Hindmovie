@@ -32,6 +32,7 @@
         sonyin: ["sonyin2", "sonyliv", "sonybd"],
         zee5: ["zee5live", "zee5in", "zee5in2"],
         jioind: ["jioind2", "jiotv", "jiotvs2", "jiotvs3", "jiotvs4", "jioliveind"],
+        jiobd: ["jioind", "jiotv", "jiocinemaind", "jiohotstar"],
         vootind: ["jiocinemaind"],
         dishhomebd: ["dishtv"],
         fancodebd: ["fancodebd2", "fancodeind"]
@@ -202,6 +203,28 @@
         return text.slice(Math.min.apply(null, indexes)).trim();
     }
 
+    function normalizeNoiseText(value) {
+        return trimToString(value).toLowerCase();
+    }
+
+    function isNoiseEntry(title, group, streamUrl) {
+        const normalizedTitle = normalizeNoiseText(title);
+        const normalizedGroup = normalizeNoiseText(group);
+        const normalizedUrl = normalizeNoiseText(streamUrl);
+        const suspiciousText = `${normalizedGroup} ${normalizedTitle}`;
+
+        if (!normalizedTitle && !normalizedGroup) return true;
+        if (suspiciousText.includes("join tg")) return true;
+        if (suspiciousText.includes("join telegram")) return true;
+        if (suspiciousText.includes("telegram")) return true;
+        if (suspiciousText.includes("unknown_brothers")) return true;
+        if (suspiciousText.includes("m3u file by")) return true;
+        if (suspiciousText.includes("ranapk")) return true;
+        if (suspiciousText.includes("last update")) return true;
+        if (normalizedUrl.includes("ranapk73/bdix/raw/refs/heads/main/entry.mp4")) return true;
+        return false;
+    }
+
     async function fetchEncryptedJson(url) {
         const response = await http_get(url, {
             "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 10; SM-A505F)",
@@ -328,13 +351,13 @@
                 const status = getResponseStatus(response);
                 const rawBody = response && typeof response.body === "string" ? response.body : "";
                 const directPlaylist = extractPlaylistText(rawBody);
-                if (status >= 200 && status < 300 && directPlaylist) {
+                if (status >= 200 && status < 300 && directPlaylist && countUsefulPlaylistEntries(directPlaylist) > 0) {
                     return directPlaylist;
                 }
 
                 const decryptedBody = await decryptContent(rawBody);
                 const decryptedPlaylist = extractPlaylistText(decryptedBody);
-                if (status >= 200 && status < 300 && decryptedPlaylist) {
+                if (status >= 200 && status < 300 && decryptedPlaylist && countUsefulPlaylistEntries(decryptedPlaylist) > 0) {
                     return decryptedPlaylist;
                 }
 
@@ -548,6 +571,18 @@
         return categories;
     }
 
+    function countUsefulPlaylistEntries(m3uString) {
+        const categories = parseM3U(m3uString);
+        let count = 0;
+        Object.keys(categories).forEach((group) => {
+            const items = categories[group];
+            if (Array.isArray(items)) {
+                count += items.length;
+            }
+        });
+        return count;
+    }
+
     function parseM3U(m3uString) {
         const lines = String(m3uString || "").split(/\r?\n/);
         const parsedItems = [];
@@ -647,6 +682,10 @@
 
             const title = bufferedTitle || trimToString(bufferedAttributes["tvg-name"]) || "Unknown Channel";
             const group = trimToString(bufferedAttributes["group-title"]) || "Other Channels";
+            if (isNoiseEntry(title, group, streamLine.url)) {
+                resetBuffers();
+                continue;
+            }
             const poster = ensurePosterUrl(title, bufferedAttributes["tvg-logo"] || "");
             const payload = {
                 title,
@@ -679,6 +718,189 @@
         }
 
         return buildCategoryOutput(parsedItems);
+    }
+
+    function buildStreamHeaders(channelData) {
+        const headers = Object.assign({}, channelData && channelData.headers ? channelData.headers : {});
+        if (trimToString(channelData && channelData.userAgent) && !headers["User-Agent"]) {
+            headers["User-Agent"] = trimToString(channelData.userAgent);
+        }
+        if (trimToString(channelData && channelData.cookie) && !headers["Cookie"]) {
+            headers["Cookie"] = trimToString(channelData.cookie);
+        }
+        return headers;
+    }
+
+    function applyDrmData(stream, channelData) {
+        const normalizedKey = normalizeDrmValue(channelData && channelData.key);
+        const normalizedKeyid = normalizeDrmValue(channelData && channelData.keyid);
+        if (normalizedKey && normalizedKeyid) {
+            stream.drmType = "clearkey";
+            stream.drmKey = normalizedKey;
+            stream.drmKid = normalizedKeyid;
+            return;
+        }
+
+        if (trimToString(channelData && channelData.licenseUrl)) {
+            const licenseUrl = trimToString(channelData.licenseUrl);
+            stream.drmType = trimToString(channelData.licenseType) || "widevine";
+            stream.licenseUrl = licenseUrl;
+            stream.drmLicenseUrl = licenseUrl;
+        }
+    }
+
+    function createStreamResultFromChannel(channelData, streamUrl, sourceLabel, quality) {
+        const stream = new StreamResult({
+            url: trimToString(streamUrl),
+            source: trimToString(sourceLabel) || trimToString(channelData && channelData.title) || "Auto",
+            headers: buildStreamHeaders(channelData)
+        });
+        if (typeof quality === "number" && quality > 0) {
+            stream.quality = quality;
+        }
+        applyDrmData(stream, channelData || {});
+        return stream;
+    }
+
+    function shouldExpandHlsVariants(url) {
+        const text = trimToString(url).toLowerCase();
+        if (!text || /\.mpd(?:$|[?#])/i.test(text)) return false;
+        return /\.m3u8(?:$|[?#])/i.test(text) || text.includes("/hls/") || text.includes("m3u8");
+    }
+
+    function parseHlsAttributes(line) {
+        const attributes = {};
+        const regex = /([A-Z0-9-]+)=("[^"]*"|[^,]*)/g;
+        let match;
+
+        while ((match = regex.exec(String(line || ""))) !== null) {
+            const key = trimToString(match[1]).toUpperCase();
+            const rawValue = trimToString(match[2]);
+            if (!key) continue;
+            attributes[key] = rawValue.replace(/^"|"$/g, "");
+        }
+
+        return attributes;
+    }
+
+    function resolveVariantUrl(baseUrl, variantPath) {
+        const target = trimToString(variantPath);
+        if (!target) return "";
+
+        try {
+            const resolved = new URL(target, baseUrl);
+            const base = new URL(baseUrl);
+            if (!resolved.search && !target.includes("?") && base.search) {
+                resolved.search = base.search;
+            }
+            return resolved.toString();
+        } catch (_) {
+            return target;
+        }
+    }
+
+    function parseVariantQuality(attributes) {
+        const resolution = trimToString(attributes && attributes.RESOLUTION);
+        const resolutionMatch = /(\d+)\s*x\s*(\d+)/i.exec(resolution);
+        if (resolutionMatch) {
+            return parseInt(resolutionMatch[2], 10) || 0;
+        }
+
+        const bandwidthValue = parseInt(attributes && (attributes["AVERAGE-BANDWIDTH"] || attributes.BANDWIDTH || "0"), 10);
+        if (!bandwidthValue || bandwidthValue < 1) return 0;
+        if (bandwidthValue >= 6000000) return 1080;
+        if (bandwidthValue >= 3000000) return 720;
+        if (bandwidthValue >= 1500000) return 480;
+        if (bandwidthValue >= 800000) return 360;
+        return 240;
+    }
+
+    function buildVariantLabel(channelData, attributes, fallbackIndex) {
+        const quality = parseVariantQuality(attributes);
+        if (quality > 0) {
+            return {
+                quality,
+                source: `${trimToString(channelData && channelData.title) || "Stream"} ${quality}p`
+            };
+        }
+
+        const bandwidthValue = parseInt(attributes && (attributes["AVERAGE-BANDWIDTH"] || attributes.BANDWIDTH || "0"), 10);
+        if (bandwidthValue > 0) {
+            const kbps = Math.max(1, Math.round(bandwidthValue / 1000));
+            return {
+                quality: 0,
+                source: `${trimToString(channelData && channelData.title) || "Stream"} ${kbps}kbps`
+            };
+        }
+
+        return {
+            quality: 0,
+            source: `${trimToString(channelData && channelData.title) || "Stream"} Variant ${fallbackIndex + 1}`
+        };
+    }
+
+    function parseHlsMasterPlaylist(manifestText, manifestUrl) {
+        const lines = String(manifestText || "").split(/\r?\n/);
+        const variants = [];
+        let pendingAttributes = null;
+
+        for (let index = 0; index < lines.length; index += 1) {
+            const line = trimToString(lines[index]);
+            if (!line) continue;
+
+            if (line.startsWith("#EXT-X-STREAM-INF:")) {
+                pendingAttributes = parseHlsAttributes(line.slice("#EXT-X-STREAM-INF:".length));
+                continue;
+            }
+
+            if (line.startsWith("#")) continue;
+
+            if (pendingAttributes) {
+                const resolvedUrl = resolveVariantUrl(manifestUrl, line);
+                if (resolvedUrl) {
+                    variants.push({
+                        url: resolvedUrl,
+                        attributes: pendingAttributes
+                    });
+                }
+                pendingAttributes = null;
+            }
+        }
+
+        return variants;
+    }
+
+    async function expandHlsStreams(channelData) {
+        const streamUrl = trimToString(channelData && channelData.url);
+        if (!shouldExpandHlsVariants(streamUrl)) return [];
+
+        try {
+            const response = await http_get(streamUrl, buildStreamHeaders(channelData));
+            const status = getResponseStatus(response);
+            if (status < 200 || status >= 300) return [];
+
+            const body = extractResponseBody(response);
+            const manifestText = trimToString(body);
+            if (!manifestText || !manifestText.startsWith("#EXTM3U") || manifestText.indexOf("#EXT-X-STREAM-INF") === -1) {
+                return [];
+            }
+
+            const variants = parseHlsMasterPlaylist(manifestText, streamUrl);
+            const streams = [];
+            const seenUrls = {};
+
+            for (let index = 0; index < variants.length; index += 1) {
+                const variant = variants[index];
+                if (!variant || !trimToString(variant.url) || seenUrls[variant.url]) continue;
+                seenUrls[variant.url] = true;
+                const label = buildVariantLabel(channelData, variant.attributes || {}, index);
+                streams.push(createStreamResultFromChannel(channelData, variant.url, label.source, label.quality));
+            }
+
+            return streams;
+        } catch (_) {
+            return [];
+        }
     }
 
     async function getHome(cb) {
@@ -758,30 +980,22 @@
                 return cb({ success: false, errorCode: "STREAM_ERROR", message: "Missing stream data" });
             }
 
-            const headers = Object.assign({}, channelData.headers || {});
-            if (trimToString(channelData.userAgent) && !headers["User-Agent"]) headers["User-Agent"] = trimToString(channelData.userAgent);
-            if (trimToString(channelData.cookie) && !headers["Cookie"]) headers["Cookie"] = trimToString(channelData.cookie);
-
-            const stream = new StreamResult({
-                url: trimToString(channelData.url),
-                source: trimToString(channelData.title) || "Auto",
-                headers
-            });
-
-            const normalizedKey = normalizeDrmValue(channelData.key);
-            const normalizedKeyid = normalizeDrmValue(channelData.keyid);
-            if (normalizedKey && normalizedKeyid) {
-                stream.drmType = "clearkey";
-                stream.drmKey = normalizedKey;
-                stream.drmKid = normalizedKeyid;
-            } else if (trimToString(channelData.licenseUrl)) {
-                const licenseUrl = trimToString(channelData.licenseUrl);
-                stream.drmType = trimToString(channelData.licenseType) || "widevine";
-                stream.licenseUrl = licenseUrl;
-                stream.drmLicenseUrl = licenseUrl;
+            const streamUrl = trimToString(channelData.url);
+            const variantStreams = await expandHlsStreams(channelData);
+            if (variantStreams.length) {
+                const streams = [
+                    createStreamResultFromChannel(channelData, streamUrl, `${trimToString(channelData.title) || "Stream"} Auto`, 0)
+                ];
+                for (let index = 0; index < variantStreams.length; index += 1) {
+                    streams.push(variantStreams[index]);
+                }
+                return cb({ success: true, data: streams });
             }
 
-            cb({ success: true, data: [stream] });
+            cb({
+                success: true,
+                data: [createStreamResultFromChannel(channelData, streamUrl, trimToString(channelData.title) || "Auto", 0)]
+            });
         } catch (error) {
             cb({ success: false, errorCode: "STREAM_ERROR", message: error && error.message ? error.message : String(error) });
         }
