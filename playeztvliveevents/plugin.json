@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.playeztvliveevents",
+  "name": "PlayEZTV Live Events",
+  "version": 1,
+  "baseUrl": "https://adsflw.xyz",
+  "description": "Live sports events from the PlayZTV app backend",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}
