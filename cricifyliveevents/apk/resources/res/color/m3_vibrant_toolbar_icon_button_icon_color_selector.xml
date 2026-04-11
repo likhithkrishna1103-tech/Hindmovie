@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:state_enabled="false"
+        android:color="?attr/colorOnSurface"
+        android:alpha="@dimen/m3_comp_toolbar_vibrant_disabled_icon_opacity"/>
+    <item
+        android:color="?attr/colorOnPrimaryContainer"
+        android:state_hovered="true"/>
+    <item
+        android:state_checkable="true"
+        android:state_checked="true"
+        android:color="?attr/colorOnSurface"
+        android:state_hovered="true"/>
+    <item
+        android:state_focused="true"
+        android:color="?attr/colorOnPrimaryContainer"/>
+    <item
+        android:state_focused="true"
+        android:state_checkable="true"
+        android:state_checked="true"
+        android:color="?attr/colorOnSurface"/>
+    <item
+        android:state_pressed="true"
+        android:color="?attr/colorOnPrimaryContainer"/>
+    <item
+        android:state_checkable="true"
+        android:state_checked="true"
+        android:state_pressed="true"
+        android:color="?attr/colorOnSurface"/>
+    <item
+        android:state_checkable="true"
+        android:state_checked="true"
+        android:color="?attr/colorOnSurface"/>
+    <item android:color="?attr/colorOnPrimaryContainer"/>
+</selector>

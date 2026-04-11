@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.chip.Chip xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:textColor="@color/white"
+    android:id="@+id/player_links_layout_btn"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginLeft="3dp"
+    android:layout_marginRight="3dp"
+    android:text="Link"
+    android:checkable="true"
+    android:layout_marginHorizontal="3dp"
+    app:checkedIcon="@drawable/check_24px"
+    app:checkedIconTint="@color/white"
+    app:checkedIconVisible="true"
+    app:chipBackgroundColor="@color/card_back"
+    app:chipStrokeColor="@color/chip_stroke"
+    app:chipStrokeWidth="1.5dp"/>
