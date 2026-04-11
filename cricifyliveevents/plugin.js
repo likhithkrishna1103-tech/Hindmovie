@@ -28,9 +28,32 @@
         { key: "M2hIenhZQWdTR0k4L2hhbQ==", iv: "VXFDdmt2amVjRUl6ODQyVg==" },
         { key: "TXFlWUdDVDRBWUtvSEtyVA==", iv: "b0hLclRRdVB4OHpsOG9KKw==" }
     ];
+    const LIVE_EVENT_TRUSTED_HOSTS = [
+        "otte.cache.aiv-cdn.net",
+        "a201aivottlinear-a.akamaihd.net",
+        "livetv.hotstar.com",
+        "jiotvpllive.cdn.jio.com",
+        "in-mc-flive.fancode.com",
+        "livevideos.cricbuzz.com",
+        "bl.rutube.ru",
+        "dice-live-oc.akamaized.net"
+    ];
+    const LIVE_EVENT_WEAK_HOSTS = [
+        "winner-api.icu",
+        "mainstreams.pro",
+        "smarthard.click",
+        "chatgpt.hereisman.net",
+        "windows-devs.top",
+        "firebase-api.com",
+        "195.178.110.2"
+    ];
 
     let activeBaseUrl = null;
     let remoteBaseUrlsPromise = null;
+
+    function trimToString(value) {
+        return typeof value === "string" ? value.trim() : String(value || "").trim();
+    }
 
     function normalizeBaseUrl(value) {
         if (!value || typeof value !== "string") return null;
@@ -235,6 +258,15 @@
         return url;
     }
 
+    function normalizeEventHeaderName(key) {
+        const normalizedKey = trimToString(key).toLowerCase();
+        if (normalizedKey === "user-agent") return "User-Agent";
+        if (normalizedKey === "referer" || normalizedKey === "referrer") return "Referer";
+        if (normalizedKey === "origin") return "Origin";
+        if (normalizedKey === "cookie") return "Cookie";
+        return trimToString(key);
+    }
+
     function parseStreamLink(link) {
         const headers = {};
         if (!link || typeof link !== "string") {
@@ -247,27 +279,35 @@
         const parts = link.split("|", 2);
         const headerPart = parts[1] || "";
         headerPart.split("&").forEach((pair) => {
-            const keyValue = pair.split("=", 2);
-            if (keyValue.length !== 2) return;
-            const key = String(keyValue[0] || "").trim();
+            const equalsIndex = pair.indexOf("=");
+            if (equalsIndex === -1) return;
+            const key = trimToString(pair.slice(0, equalsIndex));
             if (!key) return;
 
-            let value = String(keyValue[1] || "").trim();
+            let value = trimToString(pair.slice(equalsIndex + 1));
             try {
                 value = decodeURIComponent(value);
             } catch (_) {
                 // Keep the original value when it is not URI-encoded.
             }
 
-            const normalizedKey = key.toLowerCase() === "user-agent" ? "User-Agent"
-                : key.toLowerCase() === "referer" ? "Referer"
-                : key.toLowerCase() === "origin" ? "Origin"
-                : key.toLowerCase() === "cookie" ? "Cookie"
-                : key;
-            headers[normalizedKey] = value;
+            headers[normalizeEventHeaderName(key)] = value;
         });
 
         return { url: String(parts[0] || "").trim(), headers };
+    }
+
+    function getEventStreamHost(url) {
+        try {
+            return new URL(String(url || "")).hostname.toLowerCase();
+        } catch (_) {
+            return "";
+        }
+    }
+
+    function matchesEventHost(host, entries) {
+        const normalizedHost = trimToString(host).toLowerCase();
+        return entries.some((entry) => normalizedHost === entry || normalizedHost.endsWith(`.${entry}`));
     }
 
     function shouldExpandHlsVariants(url) {
@@ -394,6 +434,46 @@
         }
         applyEventDrm(result, rawApi);
         return result;
+    }
+
+    function scoreEventStream(sourceLabel, parsed, rawApi, quality, isVariant) {
+        const url = trimToString(parsed && parsed.url);
+        const headers = parsed && parsed.headers && typeof parsed.headers === "object" ? parsed.headers : {};
+        const source = trimToString(sourceLabel).toLowerCase();
+        const host = getEventStreamHost(url);
+        const hasDrm = trimToString(rawApi).includes(":");
+        const isDash = /\.mpd(?:$|[?#])/i.test(url);
+        const isHls = /\.m3u8(?:$|[?#])/i.test(url) || /\/hls\//i.test(url);
+
+        let score = 0;
+
+        if (/^https?:\/\//i.test(url)) score += 10;
+        if (isDash) score += 25;
+        if (isHls) score += 15;
+        if (hasDrm) score += 45;
+        if (Object.keys(headers).length) score += 4;
+        if (headers.Cookie) score += 8;
+        if (headers.Referer) score += 6;
+        if (headers["User-Agent"]) score += 2;
+        if (typeof quality === "number" && quality > 0) score += Math.min(Math.round(quality / 180), 6);
+
+        if (matchesEventHost(host, LIVE_EVENT_TRUSTED_HOSTS)) score += 20;
+        if (matchesEventHost(host, LIVE_EVENT_WEAK_HOSTS)) score -= 30;
+
+        if (source.includes("cricfy live")) score -= 10;
+        if (source.includes("low")) score -= 12;
+        if (source.includes("sd")) score -= 5;
+        if (isVariant) score -= 1;
+
+        return score;
+    }
+
+    function createRankedEventStream(sourceLabel, parsed, rawApi, quality, order, isVariant) {
+        return {
+            score: scoreEventStream(sourceLabel, parsed, rawApi, quality, isVariant),
+            order,
+            stream: createEventStreamResult(sourceLabel, parsed, rawApi, quality)
+        };
     }
 
     async function expandEventHlsStreams(sourceLabel, parsed, rawApi) {
@@ -547,7 +627,7 @@
             }
 
             const response = await fetchCricifyJson(`/channels/${String(data.slug).toLowerCase()}.txt`);
-            const streams = [];
+            const rankedStreams = [];
             const streamUrls = response && Array.isArray(response.streamUrls) ? response.streamUrls : [];
 
             streamUrls.forEach((stream, index) => {
@@ -555,7 +635,7 @@
                 if (!parsed.url) return;
                 const sourceLabel = (stream && stream.title) || `Server ${index + 1}`;
                 const rawApi = stream && stream.type === "7" ? stream.api : "";
-                streams.push(createEventStreamResult(sourceLabel, parsed, rawApi, 0));
+                rankedStreams.push(createRankedEventStream(sourceLabel, parsed, rawApi, 0, index * 100, false));
             });
 
             const expandedGroups = await Promise.all(streamUrls.map(async (stream, index) => {
@@ -565,17 +645,32 @@
                 const rawApi = stream && stream.type === "7" ? stream.api : "";
                 const variants = await expandEventHlsStreams(sourceLabel, parsed, rawApi);
                 if (!variants.length) return [];
-                return [createEventStreamResult(`${sourceLabel} Auto`, parsed, rawApi, 0)].concat(variants);
+                return variants.map((variant, variantIndex) => createRankedEventStream(
+                    trimToString(variant && variant.source) || sourceLabel,
+                    {
+                        url: trimToString(variant && variant.url),
+                        headers: variant && variant.headers ? variant.headers : (parsed.headers || {})
+                    },
+                    rawApi,
+                    typeof (variant && variant.quality) === "number" ? variant.quality : 0,
+                    (index * 100) + variantIndex + 1,
+                    true
+                ));
             }));
 
-            const expandedStreams = [];
+            const allRankedStreams = rankedStreams.slice();
             expandedGroups.forEach((group) => {
                 if (Array.isArray(group) && group.length) {
-                    group.forEach((item) => expandedStreams.push(item));
+                    group.forEach((item) => allRankedStreams.push(item));
                 }
             });
 
-            cb({ success: true, data: expandedStreams.length ? expandedStreams : streams });
+            allRankedStreams.sort((left, right) => {
+                if (right.score !== left.score) return right.score - left.score;
+                return left.order - right.order;
+            });
+
+            cb({ success: true, data: allRankedStreams.map((entry) => entry.stream) });
         } catch (error) {
             cb({
                 success: false,
