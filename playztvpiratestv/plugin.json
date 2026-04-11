@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.playztvpiratestv",
+  "name": "PlayZTV Pirates TV",
+  "version": 1,
+  "baseUrl": "https://adsflw.xyz",
+  "description": "PlayZTV Pirates TV IPTV provider",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

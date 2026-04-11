@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.playztvdishtv",
+  "name": "PlayZTV Dish Tv",
+  "version": 1,
+  "baseUrl": "https://adsflw.xyz",
+  "description": "PlayZTV Dish Tv IPTV provider",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}
