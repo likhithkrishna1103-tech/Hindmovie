@@ -274,6 +274,23 @@
         return trimToString(key);
     }
 
+    function normalizeDrmScheme(value) {
+        const normalized = trimToString(value).toLowerCase();
+        if (!normalized) return "";
+        if (normalized.includes("widevine")) return "widevine";
+        if (normalized.includes("clearkey") || normalized.includes("clear")) return "clearkey";
+        return normalized;
+    }
+
+    function normalizeDrmToken(value) {
+        const normalized = trimToString(value);
+        if (!normalized) return "";
+        if (/^[0-9a-f-]{32,}$/i.test(normalized)) {
+            return normalized.replace(/-/g, "").toLowerCase();
+        }
+        return normalized;
+    }
+
     function parseHeaderString(headerString) {
         const headers = {};
         trimToString(headerString).split("&").forEach((pair) => {
@@ -295,19 +312,63 @@
     }
 
     function splitUrlAndHeaders(rawUrl) {
-        const url = trimToString(rawUrl);
-        if (!url.includes("|")) {
-            return {
-                url,
-                headers: {}
-            };
+        const value = trimToString(rawUrl);
+        const result = {
+            url: value,
+            headers: {},
+            userAgent: "",
+            cookie: "",
+            drmScheme: "",
+            licenseUrl: "",
+            key: "",
+            keyid: ""
+        };
+
+        if (!value.includes("|")) {
+            return result;
         }
 
-        const parts = url.split("|", 2);
-        return {
-            url: trimToString(parts[0]),
-            headers: parseHeaderString(parts[1] || "")
-        };
+        const parts = value.split("|", 2);
+        result.url = trimToString(parts[0]);
+        trimToString(parts[1] || "").split("&").forEach((pair) => {
+            const equalsIndex = pair.indexOf("=");
+            if (equalsIndex === -1) return;
+
+            const rawKey = trimToString(pair.slice(0, equalsIndex));
+            if (!rawKey) return;
+
+            let rawValue = trimToString(pair.slice(equalsIndex + 1));
+            try {
+                rawValue = decodeURIComponent(rawValue);
+            } catch (_) {
+                // Keep raw value.
+            }
+
+            const lowered = rawKey.toLowerCase();
+            if (lowered === "drmlicense" || lowered === "licenseurl") {
+                result.licenseUrl = rawValue;
+                return;
+            }
+            if (lowered === "drmscheme") {
+                result.drmScheme = normalizeDrmScheme(rawValue);
+                return;
+            }
+            if (lowered === "key") {
+                result.key = rawValue;
+                return;
+            }
+            if (lowered === "keyid") {
+                result.keyid = rawValue;
+                return;
+            }
+
+            const key = normalizeHeaderName(rawKey);
+            if (!key) return;
+            result.headers[key] = rawValue;
+            if (key === "User-Agent") result.userAgent = rawValue;
+            if (key === "Cookie") result.cookie = rawValue;
+        });
+        return result;
     }
 
     function mergeHeaders(left, right) {
@@ -800,13 +861,46 @@
     }
 
     function parseHlsMasterPlaylist(manifestText, manifestUrl) {
-        const variants = [];
+        const info = {
+            variants: [],
+            version: "",
+            independentSegments: false,
+            mediaGroups: {
+                AUDIO: {},
+                SUBTITLES: {},
+                "CLOSED-CAPTIONS": {}
+            }
+        };
         const lines = String(manifestText || "").split(/\r?\n/);
         let pendingAttributes = null;
 
         lines.forEach((rawLine) => {
             const line = trimToString(rawLine);
             if (!line) return;
+
+            if (line.startsWith("#EXT-X-VERSION:")) {
+                info.version = trimToString(line.slice("#EXT-X-VERSION:".length));
+                return;
+            }
+
+            if (line === "#EXT-X-INDEPENDENT-SEGMENTS") {
+                info.independentSegments = true;
+                return;
+            }
+
+            if (line.startsWith("#EXT-X-MEDIA:")) {
+                const attributes = parseHlsAttributes(line.slice("#EXT-X-MEDIA:".length));
+                const mediaType = trimToString(attributes.TYPE).toUpperCase();
+                const groupId = trimToString(attributes["GROUP-ID"]);
+                if (!mediaType || !groupId) return;
+                if (attributes.URI) {
+                    attributes.URI = resolveVariantUrl(manifestUrl, attributes.URI);
+                }
+                if (!info.mediaGroups[mediaType]) info.mediaGroups[mediaType] = {};
+                if (!info.mediaGroups[mediaType][groupId]) info.mediaGroups[mediaType][groupId] = [];
+                info.mediaGroups[mediaType][groupId].push(attributes);
+                return;
+            }
 
             if (line.startsWith("#EXT-X-STREAM-INF:")) {
                 pendingAttributes = parseHlsAttributes(line.slice("#EXT-X-STREAM-INF:".length));
@@ -818,7 +912,7 @@
             if (pendingAttributes) {
                 const resolved = resolveVariantUrl(manifestUrl, line);
                 if (resolved) {
-                    variants.push({
+                    info.variants.push({
                         url: resolved,
                         attributes: pendingAttributes
                     });
@@ -827,40 +921,209 @@
             }
         });
 
-        return variants;
+        return info;
     }
 
-    function applyDrm(stream, rawApi) {
-        const value = trimToString(rawApi);
-        if (!value) return;
+    function encodeInlineManifest(text) {
+        return `data:application/vnd.apple.mpegurl;charset=utf-8,${encodeURIComponent(String(text || ""))}`;
+    }
 
-        if (value.includes(":") && !/^https?:\/\//i.test(value)) {
-            const parts = value.split(":", 2);
-            if (parts.length === 2) {
-                stream.drmKid = parts[0].replace(/-/g, "");
-                stream.drmKey = parts[1].replace(/-/g, "");
-                stream.drmType = "clearkey";
+    function serializeHlsAttributeValue(value) {
+        const text = trimToString(value);
+        if (!text) return "\"\"";
+        if (/^-?\d+(?:\.\d+)?$/i.test(text)) return text;
+        if (/^(YES|NO|NONE)$/i.test(text)) return text.toUpperCase();
+        if (/^[A-Za-z0-9._:-]+(?:x[A-Za-z0-9._:-]+)?$/i.test(text)) return text;
+        return `"${text.replace(/"/g, "\\\"")}"`;
+    }
+
+    function serializeHlsAttributes(attributes) {
+        return Object.keys(attributes || {}).map((key) => `${key}=${serializeHlsAttributeValue(attributes[key])}`).join(",");
+    }
+
+    function appendMediaGroupLines(lines, manifestInfo, mediaType, groupId) {
+        const groups = manifestInfo && manifestInfo.mediaGroups ? manifestInfo.mediaGroups : {};
+        const entries = groups[mediaType] && groups[mediaType][groupId] ? groups[mediaType][groupId] : [];
+        entries.forEach((attributes) => {
+            lines.push(`#EXT-X-MEDIA:${serializeHlsAttributes(attributes)}`);
+        });
+        return entries.length > 0;
+    }
+
+    function buildVariantPlaybackUrl(manifestInfo, variant) {
+        const attributes = variant && variant.attributes ? variant.attributes : {};
+        const lines = ["#EXTM3U"];
+        if (manifestInfo && manifestInfo.version) {
+            lines.push(`#EXT-X-VERSION:${manifestInfo.version}`);
+        }
+        if (manifestInfo && manifestInfo.independentSegments) {
+            lines.push("#EXT-X-INDEPENDENT-SEGMENTS");
+        }
+
+        let includedAlternateMedia = false;
+        const audioGroupId = trimToString(attributes.AUDIO);
+        if (audioGroupId) {
+            includedAlternateMedia = appendMediaGroupLines(lines, manifestInfo, "AUDIO", audioGroupId) || includedAlternateMedia;
+        }
+        const subtitleGroupId = trimToString(attributes.SUBTITLES);
+        if (subtitleGroupId) {
+            includedAlternateMedia = appendMediaGroupLines(lines, manifestInfo, "SUBTITLES", subtitleGroupId) || includedAlternateMedia;
+        }
+        const captionsGroupId = trimToString(attributes["CLOSED-CAPTIONS"]);
+        if (captionsGroupId && captionsGroupId.toUpperCase() !== "NONE") {
+            includedAlternateMedia = appendMediaGroupLines(lines, manifestInfo, "CLOSED-CAPTIONS", captionsGroupId) || includedAlternateMedia;
+        }
+
+        if (!includedAlternateMedia) {
+            return trimToString(variant && variant.url);
+        }
+
+        lines.push(`#EXT-X-STREAM-INF:${serializeHlsAttributes(attributes)}`);
+        lines.push(trimToString(variant && variant.url));
+        return encodeInlineManifest(lines.join("\n"));
+    }
+
+    function extractClearKeyPairFromJson(value) {
+        const data = safeJsonParse(value);
+        const entries = data && Array.isArray(data.keys) ? data.keys : [];
+        const firstEntry = entries.find((entry) => entry && (entry.k || entry.key) && (entry.kid || entry.keyid));
+        if (!firstEntry) return null;
+
+        const drmKey = normalizeDrmToken(firstEntry.k || firstEntry.key);
+        const drmKid = normalizeDrmToken(firstEntry.kid || firstEntry.keyid);
+        if (!drmKey || !drmKid) return null;
+        return { drmKey, drmKid };
+    }
+
+    function extractClearKeyPairFromValue(value) {
+        const text = trimToString(value);
+        if (!text || /^https?:\/\//i.test(text)) return null;
+        if (text.startsWith("{")) {
+            return extractClearKeyPairFromJson(text);
+        }
+
+        const delimiter = text.includes(":") ? ":" : (text.includes(",") ? "," : "");
+        if (!delimiter) return null;
+
+        const parts = text.split(delimiter, 2);
+        const drmKid = normalizeDrmToken(parts[0]);
+        const drmKey = normalizeDrmToken(parts[1]);
+        if (!drmKey || !drmKid) return null;
+        return { drmKey, drmKid };
+    }
+
+    function hexToBase64Url(hex) {
+        const normalized = trimToString(hex).replace(/-/g, "");
+        if (!/^[0-9a-f]+$/i.test(normalized) || normalized.length % 2 !== 0) return "";
+        const bytes = [];
+        for (let index = 0; index < normalized.length; index += 2) {
+            bytes.push(parseInt(normalized.slice(index, index + 2), 16));
+        }
+        const binary = String.fromCharCode.apply(null, bytes);
+        if (typeof btoa === "function") {
+            return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+        }
+        return "";
+    }
+
+    async function extractDefaultKidFromMpd(streamUrl, headers) {
+        if (!/\.mpd(?:$|[?#])/i.test(trimToString(streamUrl))) return "";
+        try {
+            const response = await fetchText(streamUrl, headers || {});
+            if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) return "";
+            const body = extractResponseBody(response);
+            const match = /cenc:default_KID=["']([0-9a-fA-F-]{32,36})["']/i.exec(body);
+            if (!match) return "";
+            return hexToBase64Url(match[1]);
+        } catch (_) {
+            return "";
+        }
+    }
+
+    async function fetchClearKeyFromLicenseServer(url, kid, headers) {
+        const licenseUrl = trimToString(url);
+        const drmKid = trimToString(kid);
+        if (!licenseUrl || !drmKid) return "";
+
+        try {
+            const response = await postJson(licenseUrl, {
+                kids: [drmKid],
+                type: "temporary"
+            }, mergeHeaders(headers || {}, {
+                "Content-Type": "application/json;charset=UTF-8"
+            }));
+
+            if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) return "";
+            const data = safeJsonParse(extractResponseBody(response));
+            const keys = data && Array.isArray(data.keys) ? data.keys : [];
+            const firstKey = keys.find((entry) => entry && (entry.k || entry.key));
+            return normalizeDrmToken(firstKey && (firstKey.k || firstKey.key));
+        } catch (_) {
+            return "";
+        }
+    }
+
+    async function resolveStreamDrm(rawApi, parsed, streamUrl, baseHeaders) {
+        const streamHeaders = mergeHeaders({}, baseHeaders || {}, parsed && parsed.headers ? parsed.headers : {});
+        let drmScheme = normalizeDrmScheme(parsed && parsed.drmScheme);
+        let drmKey = normalizeDrmToken(parsed && parsed.key);
+        let drmKid = normalizeDrmToken(parsed && parsed.keyid);
+        let licenseUrl = trimToString(parsed && parsed.licenseUrl);
+
+        const rawValue = trimToString(rawApi);
+        if (rawValue) {
+            const parsedApi = splitUrlAndHeaders(rawValue);
+            Object.assign(streamHeaders, mergeHeaders(streamHeaders, parsedApi.headers || {}));
+            drmScheme = drmScheme || normalizeDrmScheme(parsedApi.drmScheme);
+            licenseUrl = licenseUrl || trimToString(parsedApi.licenseUrl || (/^https?:\/\//i.test(parsedApi.url) ? parsedApi.url : ""));
+            if (!drmKey || !drmKid) {
+                const pair = extractClearKeyPairFromValue(parsedApi.url);
+                if (pair) {
+                    drmKey = drmKey || pair.drmKey;
+                    drmKid = drmKid || pair.drmKid;
+                }
             }
-            return;
         }
 
-        if (/^https?:\/\//i.test(value)) {
-            stream.licenseUrl = value;
-            stream.drmLicenseUrl = value;
-            stream.drmType = "widevine";
+        if ((!drmKey || !drmKid) && drmScheme === "clearkey" && licenseUrl && /\.mpd(?:$|[?#])/i.test(trimToString(streamUrl))) {
+            const mpdKid = await extractDefaultKidFromMpd(streamUrl, streamHeaders);
+            if (mpdKid) {
+                const fetchedKey = await fetchClearKeyFromLicenseServer(licenseUrl, mpdKid, streamHeaders);
+                if (fetchedKey) {
+                    drmKid = mpdKid;
+                    drmKey = fetchedKey;
+                }
+            }
         }
+
+        return {
+            headers: streamHeaders,
+            drmType: drmKey && drmKid ? "clearkey" : (drmScheme || (licenseUrl ? "widevine" : "")),
+            drmKey,
+            drmKid,
+            licenseUrl
+        };
     }
 
-    function createStreamResult(source, parsed, rawApi, quality) {
+    function createStreamResult(source, parsed, drmInfo, quality) {
+        const streamHeaders = mergeHeaders({}, drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {}));
         const stream = new StreamResult({
             source,
             url: parsed.url,
-            headers: parsed.headers || {}
+            headers: streamHeaders
         });
         if (typeof quality === "number" && quality > 0) {
             stream.quality = quality;
         }
-        applyDrm(stream, rawApi);
+        if (drmInfo && drmInfo.drmKey && drmInfo.drmKid) {
+            stream.drmKey = drmInfo.drmKey;
+            stream.drmKid = drmInfo.drmKid;
+            stream.drmType = normalizeDrmScheme(drmInfo.drmType) || "clearkey";
+        } else if (drmInfo && drmInfo.licenseUrl) {
+            stream.licenseUrl = drmInfo.licenseUrl;
+            stream.drmLicenseUrl = drmInfo.licenseUrl;
+            stream.drmType = normalizeDrmScheme(drmInfo.drmType) || "widevine";
+        }
         return stream;
     }
 
@@ -895,36 +1158,41 @@
         return score;
     }
 
-    function createRankedStream(source, parsed, rawApi, quality, order, isVariant) {
+    function createRankedStream(source, parsed, drmInfo, quality, order, isVariant) {
         return {
-            score: scoreStream(source, parsed, rawApi, quality, isVariant),
+            score: scoreStream(source, {
+                url: parsed.url,
+                headers: drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {})
+            }, trimToString(drmInfo && (drmInfo.drmKey || drmInfo.licenseUrl || drmInfo.drmType)), quality, isVariant),
             order,
-            stream: createStreamResult(source, parsed, rawApi, quality)
+            stream: createStreamResult(source, parsed, drmInfo, quality)
         };
     }
 
-    async function expandHlsStreams(sourceLabel, parsed, rawApi) {
+    async function expandHlsStreams(sourceLabel, parsed, drmInfo) {
         if (!parsed || !parsed.url || !shouldExpandHlsVariants(parsed.url)) return [];
 
         try {
-            const response = await fetchText(parsed.url, parsed.headers || {});
+            const response = await fetchText(parsed.url, drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {}));
             if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) return [];
 
             const manifestText = trimToString(extractResponseBody(response));
             if (!manifestText.startsWith("#EXTM3U") || manifestText.indexOf("#EXT-X-STREAM-INF") === -1) return [];
 
-            const variants = parseHlsMasterPlaylist(manifestText, parsed.url);
+            const manifestInfo = parseHlsMasterPlaylist(manifestText, parsed.url);
+            const variants = manifestInfo && Array.isArray(manifestInfo.variants) ? manifestInfo.variants : [];
             const seen = {};
             const streams = [];
 
             variants.forEach((variant, index) => {
-                if (!variant || !variant.url || seen[variant.url]) return;
-                seen[variant.url] = true;
+                const playbackUrl = buildVariantPlaybackUrl(manifestInfo, variant);
+                if (!variant || !variant.url || !playbackUrl || seen[playbackUrl]) return;
+                seen[playbackUrl] = true;
                 const variantInfo = buildVariantSource(sourceLabel, variant.attributes || {}, index);
                 streams.push(createStreamResult(variantInfo.source, {
-                    url: variant.url,
-                    headers: parsed.headers || {}
-                }, rawApi, variantInfo.quality));
+                    url: playbackUrl,
+                    headers: drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {})
+                }, drmInfo, variantInfo.quality));
             });
 
             return streams;
@@ -939,7 +1207,11 @@
             const parsedToken = splitUrlAndHeaders(tokenResolved.url);
             return {
                 url: parsedToken.url,
-                headers: mergeHeaders(tokenResolved.headers, parsedToken.headers)
+                headers: mergeHeaders(tokenResolved.headers, parsedToken.headers),
+                drmScheme: parsedToken.drmScheme || "",
+                licenseUrl: parsedToken.licenseUrl || "",
+                key: parsedToken.key || "",
+                keyid: parsedToken.keyid || ""
             };
         }
 
@@ -1069,17 +1341,18 @@
 
                 const rawApi = trimToString(entry && entry.api);
                 const sourceLabel = trimToString(entry && entry.name) || `Server ${index + 1}`;
-                rankedStreams.push(createRankedStream(sourceLabel, resolved, rawApi, 0, index * 100, false));
+                const drmInfo = await resolveStreamDrm(rawApi, resolved, resolved.url, resolved.headers || {});
+                rankedStreams.push(createRankedStream(sourceLabel, resolved, drmInfo, 0, index * 100, false));
 
-                const variants = await expandHlsStreams(sourceLabel, resolved, rawApi);
+                const variants = await expandHlsStreams(sourceLabel, resolved, drmInfo);
                 variants.forEach((variant, variantIndex) => {
                     rankedStreams.push(createRankedStream(
                         trimToString(variant && variant.source) || sourceLabel,
                         {
                             url: trimToString(variant && variant.url),
-                            headers: variant && variant.headers ? variant.headers : (resolved.headers || {})
+                            headers: variant && variant.headers ? variant.headers : (drmInfo.headers || resolved.headers || {})
                         },
-                        rawApi,
+                        drmInfo,
                         typeof (variant && variant.quality) === "number" ? variant.quality : 0,
                         (index * 100) + variantIndex + 1,
                         true

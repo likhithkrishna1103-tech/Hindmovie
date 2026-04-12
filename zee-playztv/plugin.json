@@ -1,16 +1,16 @@
 {
   "packageName": "com.igris.repo.playztvzee",
-  "name": "zee-playztv",
-  "version": 1,
+  "name": "Zee - PlayZTV",
+  "version": 2,
   "baseUrl": "https://adsflw.xyz",
-  "description": "PlayZTV Zee family IPTV provider",
+  "description": "Zee live channels via PlayZTV.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Live TV"
   ]
 }

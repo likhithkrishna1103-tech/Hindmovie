@@ -1,16 +1,17 @@
 {
   "packageName": "com.igris.repo.castletv",
-  "name": "Castle Tv",
-  "version": 6,
+  "name": "Castle TV",
+  "version": 7,
   "baseUrl": "https://example.com",
-  "description": "Castle TV movies and series provider",
+  "description": "Sharp movies and series in one place.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Movies",
+    "Series"
   ]
 }

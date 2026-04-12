@@ -1,16 +1,16 @@
 {
   "packageName": "com.igris.repo.playztvjio",
-  "name": "jio-playztv",
-  "version": 1,
+  "name": "Jio - PlayZTV",
+  "version": 2,
   "baseUrl": "https://adsflw.xyz",
-  "description": "PlayZTV Jio family IPTV provider",
+  "description": "Jio live TV lineup via PlayZTV.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Live TV"
   ]
 }

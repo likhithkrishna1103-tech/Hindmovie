@@ -1,16 +1,17 @@
 {
   "packageName": "com.igris.repo.hindmoviez",
-  "name": "hindmoviez",
-  "version": 5,
+  "name": "HindMoviez",
+  "version": 6,
   "baseUrl": "https://example.com",
-  "description": "hindmoviez plugin (Sky Gen 2)",
+  "description": "Trending movies and series, quickly.",
   "authors": [
-    "igris"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Movies",
+    "Series"
   ]
 }

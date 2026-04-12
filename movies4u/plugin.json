@@ -1,16 +1,16 @@
 {
   "packageName": "com.igris.repo.movies4u",
-  "name": "Movies4u",
-  "version": 7,
-  "baseUrl": "https://example.com",
-  "description": "Movies4u plugin for hindmovie",
+  "name": "Movies4U",
+  "version": 8,
+  "baseUrl": "https://movies4u.rs",
+  "description": "Movie picks with straightforward stream links.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Movies"
   ]
 }

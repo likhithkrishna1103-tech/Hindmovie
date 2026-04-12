@@ -1,16 +1,17 @@
 {
   "packageName": "com.igris.repo.piratexplay",
-  "name": "Piratexplay",
-  "version": 1,
+  "name": "PirateXPlay",
+  "version": 2,
   "baseUrl": "https://example.com",
-  "description": "Piratexplay plugin for hindmovie",
+  "description": "Movies and shows with fast stream picks.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Movies",
+    "Series"
   ]
 }

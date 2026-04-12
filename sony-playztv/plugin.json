@@ -1,16 +1,16 @@
 {
   "packageName": "com.igris.repo.playztvsony",
-  "name": "sony-playztv",
-  "version": 1,
+  "name": "Sony - PlayZTV",
+  "version": 2,
   "baseUrl": "https://adsflw.xyz",
-  "description": "PlayZTV Sony family IPTV provider",
+  "description": "Sony live channels via PlayZTV.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Live TV"
   ]
 }

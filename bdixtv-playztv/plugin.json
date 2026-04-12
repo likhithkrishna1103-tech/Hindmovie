@@ -1,16 +1,16 @@
 {
   "packageName": "com.igris.repo.playztvbdixtv",
-  "name": "bdixtv-playztv",
-  "version": 1,
+  "name": "BDIX TV - PlayZTV",
+  "version": 2,
   "baseUrl": "https://adsflw.xyz",
-  "description": "PlayZTV BDIX TV IPTV provider",
+  "description": "BDIX live TV, powered by PlayZTV.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Live TV"
   ]
 }

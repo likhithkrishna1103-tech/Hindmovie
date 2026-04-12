@@ -1,15 +1,13 @@
 (function () {
     "use strict";
 
-    var DEFAULT_BASE_URL = "https://movies4u.kitchen";
+    var DEFAULT_BASE_URL = "https://movies4u.rs";
     var DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
     var TMDB_WORKER_API = "https://wild-surf-4a0d.phisher1.workers.dev";
     var TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original";
     var TMDB_API = "https://api.themoviedb.org/3";
     var TMDB_WORKER_API_KEY = "1865f43a0549ca50d341dd9ab8b29f49";
     var TMDB_LOGO_API_KEY = "98ae14df2b8d8f8f8136499daf79f0e0";
-    var MAIN_PAGE_COOKIE = "xla=s4t; ext_name=ojplmecpdpgccookcobabopnaifgidhf; cf_clearance=t8e4FnYNVLq5mnSM3STcq978u7YyAaAb_WiqmVmXkcI-1773985249-1.2.1.1-Sg.2ExY1ScnsVHPQ0nj5jSQ7aKuFzBaPOPn8WRH5i0JYxUTrGXNrowzFsl36zUeK9irU7RqVsRTLF9DoM25Rz1tyFLiGaVK6WlxZLkOyr0_xyAduok9mNr3ilfnSXx1FT6.g9jo4m2cAKY.AFbvLZ8AB.8VgL0Wv4BTn5EBGcKQo4s.grQTQ.Bd58bFWF0CQRYgxD0O2PrfIoveenO8wCQMqQ_R9h22MKBQdBqqLCgk";
-
     var runtimeManifest = (typeof manifest !== "undefined" && manifest) ? manifest : { baseUrl: DEFAULT_BASE_URL };
     var domainCache = null;
     var gdflixDomainCache = null;
@@ -99,6 +97,10 @@
         } catch (_) {
             return String(path || "");
         }
+    }
+
+    function normalizeBaseUrl(url) {
+        return String(url || "").replace(/\/+$/g, "");
     }
 
     function baseOrigin(url) {
@@ -321,11 +323,28 @@
     }
 
     function mainPageHeaders(mainUrl) {
-        return {
-            "Cookie": MAIN_PAGE_COOKIE,
-            "User-Agent": "Mozilla/5.0",
-            "Referer": mainUrl + "/"
-        };
+        return pageHeaders(mainUrl);
+    }
+
+    function isPlaceholderBaseUrl(url) {
+        return /(?:^|\/\/)(?:www\.)?example\.com(?:\/|$)/i.test(String(url || ""));
+    }
+
+    function looksLikeMediaListing(html) {
+        var source = String(html || "");
+        return /<article\b[^>]*class=["'][^"']*(?:entry-card|post|hentry)[^"']*["']/i.test(source)
+            || /<h[23]\b[^>]*class=["'][^"']*entry-title[^"']*["']/i.test(source);
+    }
+
+    function validateMainUrl(candidate) {
+        var url = normalizeBaseUrl(candidate);
+        if (!/^https?:\/\//i.test(url) || isPlaceholderBaseUrl(url)) return Promise.resolve("");
+
+        return getText(url + "/", pageHeaders(url), true).then(function (html) {
+            return looksLikeMediaListing(html) ? url : "";
+        }).catch(function () {
+            return "";
+        });
     }
 
     function parseAnchors(html, base) {
@@ -362,12 +381,32 @@
 
     function getMainUrl() {
         if (domainCache) return Promise.resolve(domainCache);
-        return getJson(DOMAINS_URL, defaultHeaders()).then(function (json) {
-            domainCache = (json && json.movies4u) || runtimeManifest.baseUrl || DEFAULT_BASE_URL;
-            return domainCache;
-        }).catch(function () {
-            domainCache = runtimeManifest.baseUrl || DEFAULT_BASE_URL;
-            return domainCache;
+
+        return getJson(DOMAINS_URL, defaultHeaders()).catch(function () {
+            return {};
+        }).then(function (json) {
+            var candidates = uniqueBy([
+                runtimeManifest.baseUrl,
+                DEFAULT_BASE_URL,
+                json && json.movies4u
+            ].map(normalizeBaseUrl).filter(Boolean), function (item) {
+                return item;
+            });
+
+            var current = Promise.resolve("");
+            for (var i = 0; i < candidates.length; i++) {
+                (function (candidate) {
+                    current = current.then(function (resolved) {
+                        if (resolved) return resolved;
+                        return validateMainUrl(candidate);
+                    });
+                })(candidates[i]);
+            }
+
+            return current.then(function (resolved) {
+                domainCache = resolved || normalizeBaseUrl(runtimeManifest.baseUrl) || DEFAULT_BASE_URL;
+                return domainCache;
+            });
         });
     }
 
@@ -441,7 +480,7 @@
                 title: fullTitle,
                 url: absoluteUrl(base, href),
                 posterUrl: getImageFromBlock(block, base),
-                type: "movie",
+                type: inferTypeFromTitle(rawTitle),
                 quality: getSearchQuality(rawTitle),
                 headers: defaultHeaders()
             });
@@ -449,35 +488,7 @@
     }
 
     function parseSearchResultsKotlin(html, base) {
-        return extractBlocks(html, "article").map(function (block) {
-            var href = firstMatch(block, [
-                /<h3\b[^>]*class=["'][^"']*entry-title[^"']*["'][^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i
-            ]);
-            var rawTitle = stripTags(firstMatch(block, [
-                /<h3\b[^>]*class=["'][^"']*entry-title[^"']*["'][^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i
-            ]));
-            if (!href || !rawTitle) return null;
-
-            var title = trim(rawTitle.split("(")[0]);
-            var year = rawTitle.match(/\((\d{4})\)/);
-            var lang = rawTitle.match(/\[([^\]]+)\]/);
-            var fullTitle = title;
-            if (year) fullTitle += " (" + year[1] + ")";
-            if (lang && trim(lang[1])) fullTitle += " [" + trim(lang[1]) + "]";
-
-            var type = "movie";
-            if (/season|series/i.test(rawTitle)) type = "series";
-            else if (/anime/i.test(rawTitle)) type = "anime";
-
-            return new MultimediaItem({
-                title: fullTitle,
-                url: absoluteUrl(base, href),
-                posterUrl: getImageFromBlock(block, base),
-                type: type,
-                quality: getSearchQuality(rawTitle),
-                headers: defaultHeaders()
-            });
-        }).filter(Boolean);
+        return parseSearchResults(html, base);
     }
 
     function extractMetaContent(html, propertyName) {
@@ -502,7 +513,29 @@
             /<div\b[^>]*class=["'][^"']*downloads-btns-div[^"']*["'][^>]*>/i,
             /<\/div>/i
         );
-        return parseAnchors(section, base).map(function (item) { return item.href; }).filter(Boolean);
+        var links = parseAnchors(section, base).map(function (item) { return item.href; }).filter(Boolean);
+        if (links.length) return links;
+
+        var buttonLinks = [];
+        var buttonRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>(?:(?!<\/a>)[\s\S])*?<button\b[^>]*class=["'][^"']*dwd-button[^"']*["'][^>]*>/gi;
+        var buttonMatch;
+        while ((buttonMatch = buttonRegex.exec(String(html || "")))) {
+            buttonLinks.push(absoluteUrl(base, decodeHtmlEntities(buttonMatch[1])));
+        }
+        if (buttonLinks.length) return uniqueBy(buttonLinks, function (item) { return item; });
+
+        return uniqueBy(parseAnchors(html, base).filter(function (item) {
+            var href = String(item && item.href || "");
+            var text = String(item && item.text || "");
+            if (!/^https?:\/\//i.test(href)) return false;
+            if (baseOrigin(href) === baseOrigin(base)) return false;
+            if (/t\.me|telegram|hianime|fuckmaza|how-to-download/i.test(href)) return false;
+            return /download|watch|server|drive|cloud|direct|gdflix|hubcloud|pixeldrain|gofile|m4ulinks|mdrive/i.test(text + " " + href);
+        }).map(function (item) {
+            return item.href;
+        }), function (item) {
+            return item;
+        });
     }
 
     function extractStoryline(html) {
@@ -681,6 +714,7 @@
         if (isDirectMediaUrl(value)) return true;
         if (/hub\.hailmary\.lat\/[a-f0-9]+\?token=/i.test(value)) return true;
         if (/pixeldrain\.(dev|com)\/api\/file\//i.test(value)) return true;
+        if (/mdrive\.ink\//i.test(value)) return true;
         return false;
     }
 
@@ -970,6 +1004,22 @@
         });
     }
 
+    function resolveMdrive(url) {
+        var headers = defaultHeaders({ "Referer": baseOrigin(url) + "/" });
+        return request(url, {
+            headers: headers,
+            allowRedirects: false
+        }).then(function (res) {
+            var location = res.headers.location || res.headers["x-redirect-location"] || "";
+            if (location && /^https?:\/\//i.test(location) && location !== url) {
+                return resolveExtractorUrl(location, "MDrive");
+            }
+            return [buildStreamResult(url, "MDrive", headers, getQualityFromText(url))];
+        }).catch(function () {
+            return [buildStreamResult(url, "MDrive", headers, getQualityFromText(url))];
+        });
+    }
+
     function resolveExtractorUrl(url, refererLabel) {
         if (!url) return Promise.resolve([]);
         if (isDirectMediaUrl(url)) return Promise.resolve([buildStreamResult(url, refererLabel || "Direct", {}, getQualityFromText(url))]);
@@ -978,6 +1028,7 @@
         if (/hubcloud\.(foo|one)|gamerxyt\.com\/hubcloud\.php/i.test(url)) return resolveHubCloud(url, refererLabel || "HubCloud");
         if (/gdfli?x/i.test(url)) return resolveGdflix(url);
         if (/gofile\.io/i.test(url)) return resolveGofile(url);
+        if (/mdrive\.ink\//i.test(url)) return resolveMdrive(url);
         return Promise.resolve([]);
     }
 
@@ -1050,7 +1101,8 @@
             var rawOgTitle = extractMetaContent(html, "og:title") || "Unknown Title";
             var title = trim(rawOgTitle.split("(")[0]) || "Unknown Title";
             var plot = extractStoryline(html);
-            var poster = getImageFromBlock(firstMatch(html, [/<div\b[^>]*class=["'][^"']*post-thumbnail[^"']*["'][^>]*>([\s\S]*?)<\/div>/i]), sourceUrl);
+            var poster = extractMetaContent(html, "og:image")
+                || getImageFromBlock(firstMatch(html, [/<div\b[^>]*class=["'][^"']*post-thumbnail[^"']*["'][^>]*>([\s\S]*?)<\/div>/i]), sourceUrl);
             var typeRaw = extractPrimaryHeading(html);
             var type = /Series/i.test(typeRaw) ? "series" : "movie";
             if (/Anime/i.test(typeRaw)) type = "anime";

@@ -1,16 +1,16 @@
 {
   "packageName": "com.igris.repo.darktv",
-  "name": "DARK TV",
-  "version": 1,
+  "name": "Dark TV",
+  "version": 2,
   "baseUrl": "https://example.com",
-  "description": "DARK TV Live Channels (v2 Standard)",
+  "description": "Live channels with quick stream access.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Live TV"
   ]
 }

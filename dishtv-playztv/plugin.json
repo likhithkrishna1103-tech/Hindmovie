@@ -1,16 +1,16 @@
 {
   "packageName": "com.igris.repo.playztvdishtv",
-  "name": "dishtv-playztv",
-  "version": 1,
+  "name": "DishTV - PlayZTV",
+  "version": 2,
   "baseUrl": "https://adsflw.xyz",
-  "description": "PlayZTV Dish Tv IPTV provider",
+  "description": "DishTV live channels via PlayZTV.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Live TV"
   ]
 }

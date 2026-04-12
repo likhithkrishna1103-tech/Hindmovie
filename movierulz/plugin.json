@@ -1,16 +1,16 @@
 {
   "packageName": "com.igris.repo.movierulz",
-  "name": "movierulz",
-  "version": 3,
+  "name": "Movierulz",
+  "version": 4,
   "baseUrl": "https://example.com",
-  "description": "movierulz plugin for hindmovie",
+  "description": "Fresh movie drops with fast links.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Movies"
   ]
 }

@@ -1,16 +1,16 @@
 {
   "packageName": "com.igris.repo.animetsu",
   "name": "Animetsu",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://example.com",
-  "description": "Animetsu plugin for hindmovie",
+  "description": "Clean anime picks with sub and dub.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Anime"
   ]
 }

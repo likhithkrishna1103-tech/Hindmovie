@@ -1,16 +1,16 @@
 {
   "packageName": "com.igris.repo.playztvfreesports",
-  "name": "freesports-playztv",
-  "version": 1,
+  "name": "FreeSports - PlayZTV",
+  "version": 2,
   "baseUrl": "https://adsflw.xyz",
-  "description": "PlayZTV Free Sports IPTV provider",
+  "description": "Free sports streams through PlayZTV.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Sports"
   ]
 }

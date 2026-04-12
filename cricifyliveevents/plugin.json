@@ -1,16 +1,16 @@
 {
   "packageName": "com.igris.repo.cricifyliveevents",
   "name": "Cricify Live Events",
-  "version": 4,
+  "version": 5,
   "baseUrl": "https://cfymarkscanjiostar80.top",
-  "description": "Live Sports Events and Highlights",
+  "description": "Live sports events, fast and direct.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Sports"
   ]
 }

@@ -1,16 +1,16 @@
 {
   "packageName": "com.igris.repo.kaido",
   "name": "Kaido",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://example.com",
-  "description": "Kaido plugin for hindmovie",
+  "description": "Anime streaming with quick episode access.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Anime"
   ]
 }

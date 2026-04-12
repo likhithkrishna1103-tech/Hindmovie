@@ -1,16 +1,16 @@
 {
   "packageName": "com.igris.repo.animepahe",
-  "name": "animepahe",
-  "version": 7,
+  "name": "AnimePahe",
+  "version": 8,
   "baseUrl": "https://example.com",
-  "description": "Popular plugin for anime ",
+  "description": "Fast anime streaming with sub and dub.",
   "authors": [
-    "Developer"
+    "IGRIS"
   ],
   "languages": [
     "en"
   ],
   "categories": [
-    "Others"
+    "Anime"
   ]
 }
