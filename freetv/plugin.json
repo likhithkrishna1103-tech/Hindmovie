@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.freetv",
   "name": "Free TV",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://playlist-storage.pages.dev/PLAYLIST/freetv.m3u",
   "description": "Free live TV with ready-to-play channels.",
   "authors": [
@@ -11,6 +11,6 @@
     "en"
   ],
   "categories": [
-    "Live TV"
+    "livestream"
   ]
 }

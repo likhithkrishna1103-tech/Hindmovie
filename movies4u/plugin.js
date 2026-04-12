@@ -120,6 +120,31 @@
         }
     }
 
+    function safeDecodeURIComponent(value) {
+        try {
+            return decodeURIComponent(String(value || ""));
+        } catch (_) {
+            return String(value || "");
+        }
+    }
+
+    function decodeBase64Safe(value) {
+        var input = String(value || "").trim();
+        if (!input) return "";
+        var normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+        while (normalized.length % 4) normalized += "=";
+
+        try {
+            if (typeof atob === "function") return atob(normalized);
+        } catch (_) {}
+
+        try {
+            if (typeof Buffer !== "undefined") return Buffer.from(normalized, "base64").toString("utf8");
+        } catch (_) {}
+
+        return "";
+    }
+
     function getQualityFromText(text) {
         var lower = String(text || "").toLowerCase();
         if (/\b2160p\b|\b4k\b|\buhd\b|\bds4k\b/.test(lower)) return 2160;
@@ -530,7 +555,7 @@
             if (!/^https?:\/\//i.test(href)) return false;
             if (baseOrigin(href) === baseOrigin(base)) return false;
             if (/t\.me|telegram|hianime|fuckmaza|how-to-download/i.test(href)) return false;
-            return /download|watch|server|drive|cloud|direct|gdflix|hubcloud|pixeldrain|gofile|m4ulinks|mdrive/i.test(text + " " + href);
+            return /download|watch|server|drive|cloud|direct|gdflix|hubcloud|filepress|filebee|pixeldrain|gofile|m4ulinks|mdrive/i.test(text + " " + href);
         }).map(function (item) {
             return item.href;
         }), function (item) {
@@ -707,15 +732,139 @@
             || /gofile\.io\/download/i.test(String(url || ""));
     }
 
+    function looksLikeGoogleDriveUrl(url) {
+        return /(?:drive|docs)\.google\.com|googleusercontent\.com/i.test(String(url || ""));
+    }
+
     function isUsableStreamUrl(url) {
         var value = String(url || "");
         if (!/^https?:\/\//i.test(value)) return false;
-        if (/gpdl\.hubcdn\.fans|tinyurl\.com\/Unblock-Ban-Site|one\.one\.one\.one/i.test(value)) return false;
+        if (/gpdl\.hubcdn\.fans|tinyurl\.com\/Unblock-Ban-Site|one\.one\.one\.one|\/cdn-cgi\/challenge-platform\//i.test(value)) return false;
         if (isDirectMediaUrl(value)) return true;
         if (/hub\.hailmary\.lat\/[a-f0-9]+\?token=/i.test(value)) return true;
         if (/pixeldrain\.(dev|com)\/api\/file\//i.test(value)) return true;
+        if (/hubcloud\.|hubdrive\./i.test(value)) return true;
+        if (/filepress\.|filebee/i.test(value)) return true;
+        if (looksLikeGoogleDriveUrl(value)) return true;
         if (/mdrive\.ink\//i.test(value)) return true;
         return false;
+    }
+
+    function isInterestingExtractorUrl(url) {
+        var value = String(url || "");
+        if (!value) return false;
+        if (/\/cdn-cgi\/challenge-platform\//i.test(value)) return false;
+        if (isDirectMediaUrl(value)) return true;
+        if (looksLikeGoogleDriveUrl(value)) return true;
+        return /hubcloud\.|hubdrive\.|gamerxyt\.com\/hubcloud\.php|gdfli?x|gdlink|gofile\.io|m4ulinks\.com|filesdl\.|filepress\.|filebee|pixeldrain|buzzserver|streamtape|mediafire\.com|1fichier\.com|mdrive\.ink\//i.test(value);
+    }
+
+    function normalizeExtractedUrl(rawValue, base) {
+        var value = String(rawValue || "");
+        if (!value) return "";
+
+        value = value
+            .replace(/^[\s"'`(]+/, "")
+            .replace(/[\s"'`),;]+$/, "")
+            .replace(/\\u002F/gi, "/")
+            .replace(/\\u003A/gi, ":")
+            .replace(/\\u0026/gi, "&")
+            .replace(/\\\//g, "/");
+
+        value = decodeHtmlEntities(value);
+
+        for (var i = 0; i < 2; i++) {
+            var decoded = safeDecodeURIComponent(value);
+            if (decoded === value) break;
+            value = decoded;
+        }
+
+        if (/^\/\//.test(value)) value = "https:" + value;
+        if (/^www\./i.test(value)) value = "https://" + value;
+        if (/^(?:javascript|mailto|tel|data):/i.test(value) || /^#/.test(value)) return "";
+
+        if (!/^https?:\/\//i.test(value) && base) {
+            if (/^(?:\/|\.\/|\.\.\/|\?)/.test(value) || /^[a-z0-9][^:]*\/[^:]+/i.test(value)) {
+                value = absoluteUrl(base, value);
+            }
+        }
+
+        return String(value || "").replace(/&amp;/gi, "&");
+    }
+
+    function addExtractedUrl(out, seen, rawValue, base) {
+        var queue = [];
+        var initial = normalizeExtractedUrl(rawValue, base);
+        if (initial) queue.push(initial);
+
+        for (var index = 0; index < queue.length; index++) {
+            var current = queue[index];
+            var fingerprint = String(current || "");
+            if (!fingerprint || seen[fingerprint]) continue;
+            seen[fingerprint] = true;
+
+            if (isInterestingExtractorUrl(fingerprint)) {
+                out.push(fingerprint);
+            }
+
+            var paramNames = ["url", "link", "r", "redirect", "redirect_url", "target", "destination", "dest", "to", "file", "dl"];
+            for (var i = 0; i < paramNames.length; i++) {
+                var nested = decodeQueryParam(fingerprint, paramNames[i]);
+                if (!nested) continue;
+                nested = normalizeExtractedUrl(nested, base);
+                if (nested && !seen[nested]) queue.push(nested);
+                var decodedNested = decodeBase64Safe(nested);
+                if (decodedNested && /https?:\/\//i.test(decodedNested) && !seen[decodedNested]) {
+                    queue.push(decodedNested);
+                }
+            }
+
+            if (/^[A-Za-z0-9+/_-]{24,}={0,2}$/.test(fingerprint) && !/^https?:\/\//i.test(fingerprint)) {
+                var decoded = decodeBase64Safe(fingerprint);
+                if (decoded && !seen[decoded]) queue.push(decoded);
+            }
+        }
+    }
+
+    function extractInterestingExtractorUrls(html, base) {
+        var source = String(html || "");
+        var out = [];
+        var seen = {};
+
+        parseAnchors(source, base).forEach(function (anchor) {
+            addExtractedUrl(out, seen, anchor && anchor.href, base);
+        });
+
+        var regexes = [
+            /https?:\/\/[^\s"'<>\\]+/gi,
+            /(?:href|src|action)\s*=\s*["']([^"']+)["']/gi,
+            /(?:window\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/gi,
+            /location\.replace\(\s*["']([^"']+)["']/gi,
+            /window\.open\(\s*["']([^"']+)["']/gi,
+            /["']((?:https?:)?\/\/[^"'<>\\]+)["']/gi,
+            /"(?:url|link|file|download(?:Url)?|source|redirect(?:Url)?)"\s*:\s*"([^"]+)"/gi,
+            /'(?:url|link|file|download(?:Url)?|source|redirect(?:Url)?)'\s*:\s*'([^']+)'/gi,
+            /atob\(\s*["']([A-Za-z0-9+/_-]{24,}={0,2})["']\s*\)/gi
+        ];
+
+        for (var i = 0; i < regexes.length; i++) {
+            var regex = regexes[i];
+            var match;
+            while ((match = regex.exec(source))) {
+                addExtractedUrl(out, seen, match[1] || match[0], base);
+            }
+        }
+
+        var quotedBase64 = /["']([A-Za-z0-9+/_-]{40,}={0,2})["']/gi;
+        var base64Match;
+        while ((base64Match = quotedBase64.exec(source))) {
+            var decoded = decodeBase64Safe(base64Match[1]);
+            if (decoded && (/https?:\/\//i.test(decoded) || /hubcloud|filepress|filebee|drive\.google|gdfli?x|gofile|pixeldrain/i.test(decoded))) {
+                addExtractedUrl(out, seen, decoded, base);
+            }
+        }
+
+        return uniqueBy(out, function (item) { return item; });
     }
 
     function cleanHubTitle(title) {
@@ -903,6 +1052,140 @@
         });
     }
 
+    function resolveGoogleDrive(url) {
+        return Promise.resolve([buildStreamResult(url, "GDrive", {
+            "Referer": "https://drive.google.com/"
+        }, getQualityFromText(url))]);
+    }
+
+    function resolveFilepress(url) {
+        var headers = defaultHeaders({ "Referer": baseOrigin(url) + "/" });
+
+        function resolveFilepressContent(contentUrl) {
+            if (!contentUrl) return Promise.resolve([]);
+
+            var contentHeaders = defaultHeaders({
+                "Referer": url,
+                "Origin": baseOrigin(url)
+            });
+
+            return request(contentUrl, {
+                headers: contentHeaders,
+                allowRedirects: false
+            }).catch(function () {
+                return { headers: {}, body: "", finalUrl: contentUrl };
+            }).then(function (initialRes) {
+                var redirectLocation = normalizeExtractedUrl(initialRes.headers.location || initialRes.headers["x-redirect-location"] || "", baseOrigin(contentUrl));
+                if (redirectLocation && redirectLocation !== contentUrl) {
+                    if (looksLikeGoogleDriveUrl(redirectLocation)) return resolveGoogleDrive(redirectLocation);
+                    if (isDirectMediaUrl(redirectLocation)) {
+                        return [buildStreamResult(redirectLocation, "Filepress", {}, getQualityFromText(redirectLocation))];
+                    }
+                    if (isInterestingExtractorUrl(redirectLocation)) {
+                        return resolveExtractorUrl(redirectLocation, "Filepress");
+                    }
+                }
+
+                return request(contentUrl, {
+                    headers: contentHeaders,
+                    allowRedirects: true
+                }).catch(function () {
+                    return initialRes;
+                }).then(function (pageRes) {
+                    var finalUrl = normalizeExtractedUrl(pageRes.finalUrl || contentUrl, baseOrigin(contentUrl)) || contentUrl;
+                    if (looksLikeGoogleDriveUrl(finalUrl)) return resolveGoogleDrive(finalUrl);
+                    if (isDirectMediaUrl(finalUrl)) {
+                        return [buildStreamResult(finalUrl, "Filepress", {}, getQualityFromText(finalUrl))];
+                    }
+
+                    var pageBase = baseOrigin(finalUrl) || baseOrigin(contentUrl);
+                    var candidates = extractInterestingExtractorUrls(pageRes.body || initialRes.body || "", pageBase).filter(function (candidate) {
+                        return candidate && candidate !== url && candidate !== contentUrl && candidate !== finalUrl;
+                    });
+
+                    if (!candidates.length && finalUrl !== contentUrl && isInterestingExtractorUrl(finalUrl)) {
+                        candidates.push(finalUrl);
+                    }
+
+                    if (!candidates.length) return [];
+
+                    return Promise.all(candidates.map(function (candidate) {
+                        if (looksLikeGoogleDriveUrl(candidate)) return resolveGoogleDrive(candidate);
+                        return resolveExtractorUrl(candidate, "Filepress");
+                    })).then(flattenResults);
+                });
+            });
+        }
+
+        return request(url, {
+            headers: headers,
+            allowRedirects: false
+        }).catch(function () {
+            return { headers: {}, body: "", finalUrl: url };
+        }).then(function (initialRes) {
+            var redirectLocation = normalizeExtractedUrl(initialRes.headers.location || initialRes.headers["x-redirect-location"] || "", baseOrigin(url));
+            if (redirectLocation && redirectLocation !== url) {
+                if (looksLikeGoogleDriveUrl(redirectLocation)) return resolveGoogleDrive(redirectLocation);
+                if (isDirectMediaUrl(redirectLocation)) {
+                    return [buildStreamResult(redirectLocation, "Filepress", {}, getQualityFromText(redirectLocation))];
+                }
+                if (isInterestingExtractorUrl(redirectLocation)) {
+                    return resolveExtractorUrl(redirectLocation, "Filepress");
+                }
+            }
+
+            return request(url, {
+                headers: headers,
+                allowRedirects: true
+            }).catch(function () {
+                return initialRes;
+            }).then(function (pageRes) {
+                var finalUrl = normalizeExtractedUrl(pageRes.finalUrl || url, baseOrigin(url)) || url;
+                if (looksLikeGoogleDriveUrl(finalUrl)) return resolveGoogleDrive(finalUrl);
+                if (isDirectMediaUrl(finalUrl)) {
+                    return [buildStreamResult(finalUrl, "Filepress", {}, getQualityFromText(finalUrl))];
+                }
+
+                var pageBase = baseOrigin(finalUrl) || baseOrigin(url);
+                var html = String(pageRes.body || initialRes.body || "");
+                var candidates = extractInterestingExtractorUrls(html, pageBase).filter(function (candidate) {
+                    return candidate && candidate !== url && candidate !== finalUrl;
+                });
+
+                var hiddenContentLinks = parseAnchors(html, pageBase).map(function (anchor) {
+                    return anchor && anchor.href;
+                }).filter(function (href) {
+                    return /\/cdn-cgi\/content\?id=/i.test(String(href || ""));
+                });
+
+                for (var i = 0; i < hiddenContentLinks.length; i++) {
+                    if (candidates.indexOf(hiddenContentLinks[i]) === -1) {
+                        candidates.push(hiddenContentLinks[i]);
+                    }
+                }
+
+                if (!candidates.length && finalUrl !== url && isInterestingExtractorUrl(finalUrl)) {
+                    candidates.push(finalUrl);
+                }
+
+                if (!candidates.length) {
+                    return [buildStreamResult(url, "Filepress [GDrive]", headers, getQualityFromText(url))];
+                }
+
+                return Promise.all(candidates.map(function (candidate) {
+                    if (/\/cdn-cgi\/content\?id=/i.test(candidate)) {
+                        return resolveFilepressContent(candidate);
+                    }
+                    if (looksLikeGoogleDriveUrl(candidate)) return resolveGoogleDrive(candidate);
+                    return resolveExtractorUrl(candidate, "Filepress");
+                })).then(flattenResults).then(function (results) {
+                    if (results && results.length) return results;
+                    return [buildStreamResult(url, "Filepress [GDrive]", headers, getQualityFromText(url))];
+                });
+            });
+        });
+    }
+
     function resolveDrivebot(link, fileName, fileSize, quality) {
         var id = decodeQueryParam(link, "id");
         var doId = (link.split("do=")[1] || "").split("==")[0];
@@ -1004,28 +1287,102 @@
         });
     }
 
+    function resolveHubCloudWithFallback(url, refererLabel) {
+        var headers = defaultHeaders({ "Referer": baseOrigin(url) + "/" });
+        return resolveHubCloud(url, refererLabel).then(function (results) {
+            if (results && results.length) return results;
+            return [buildStreamResult(url, refererLabel || "HubCloud", headers, getQualityFromText(url))];
+        }).catch(function () {
+            return [buildStreamResult(url, refererLabel || "HubCloud", headers, getQualityFromText(url))];
+        });
+    }
+
+    function resolveHubDrive(url) {
+        var headers = defaultHeaders({ "Referer": baseOrigin(url) + "/" });
+        return getText(url, headers, true).then(function (html) {
+            var candidates = extractInterestingExtractorUrls(html, baseOrigin(url)).filter(function (candidate) {
+                return candidate !== url && !/hubdrive\./i.test(candidate);
+            });
+            if (!candidates.length) {
+                return [buildStreamResult(url, "HubDrive", headers, getQualityFromText(url))];
+            }
+            return Promise.all(candidates.map(function (candidate) {
+                return resolveExtractorUrl(candidate, "HubDrive");
+            })).then(flattenResults).then(function (results) {
+                return results && results.length ? results : [buildStreamResult(url, "HubDrive", headers, getQualityFromText(url))];
+            });
+        }).catch(function () {
+            return [buildStreamResult(url, "HubDrive", headers, getQualityFromText(url))];
+        });
+    }
+
     function resolveMdrive(url) {
         var headers = defaultHeaders({ "Referer": baseOrigin(url) + "/" });
         return request(url, {
             headers: headers,
             allowRedirects: false
-        }).then(function (res) {
-            var location = res.headers.location || res.headers["x-redirect-location"] || "";
-            if (location && /^https?:\/\//i.test(location) && location !== url) {
-                return resolveExtractorUrl(location, "MDrive");
-            }
-            return [buildStreamResult(url, "MDrive", headers, getQualityFromText(url))];
         }).catch(function () {
-            return [buildStreamResult(url, "MDrive", headers, getQualityFromText(url))];
+            return { headers: {}, body: "", finalUrl: url };
+        }).then(function (initialRes) {
+            var redirectLocation = normalizeExtractedUrl(initialRes.headers.location || initialRes.headers["x-redirect-location"] || "", baseOrigin(url));
+            if (redirectLocation && /^https?:\/\//i.test(redirectLocation) && redirectLocation !== url) {
+                return resolveExtractorUrl(redirectLocation, "MDrive");
+            }
+
+            return request(url, {
+                headers: headers,
+                allowRedirects: true
+            }).catch(function () {
+                return initialRes;
+            }).then(function (pageRes) {
+                var finalUrl = normalizeExtractedUrl(pageRes.finalUrl || url, baseOrigin(url)) || url;
+                if (finalUrl !== url && isDirectMediaUrl(finalUrl)) {
+                    return [buildStreamResult(finalUrl, "MDrive", {}, getQualityFromText(finalUrl))];
+                }
+
+                var pageBase = baseOrigin(finalUrl) || baseOrigin(url);
+                var html = String(pageRes.body || initialRes.body || "");
+                var candidates = extractInterestingExtractorUrls(html, pageBase).filter(function (candidate) {
+                    return candidate && candidate !== url && candidate !== finalUrl;
+                });
+
+                if (!candidates.length && finalUrl && finalUrl !== url && isInterestingExtractorUrl(finalUrl)) {
+                    candidates.push(finalUrl);
+                }
+
+                if (!candidates.length) {
+                    return [buildStreamResult(url, "MDrive", headers, getQualityFromText(url))];
+                }
+
+                return Promise.all(candidates.map(function (candidate) {
+                    if (looksLikeGoogleDriveUrl(candidate)) return resolveGoogleDrive(candidate);
+                    return resolveExtractorUrl(candidate, "MDrive");
+                })).then(flattenResults).then(function (results) {
+                    if (results && results.length) return results;
+                    return candidates.filter(function (candidate) {
+                        return looksLikeGoogleDriveUrl(candidate) || /hubcloud\.|hubdrive\.|filepress\.|filebee/i.test(candidate);
+                    }).map(function (candidate) {
+                        var label = looksLikeGoogleDriveUrl(candidate)
+                            ? "GDrive"
+                            : (/hubdrive\./i.test(candidate)
+                                ? "HubDrive"
+                                : (/filepress\.|filebee/i.test(candidate) ? "Filepress [GDrive]" : "HubCloud"));
+                        return buildStreamResult(candidate, label, headers, getQualityFromText(candidate));
+                    });
+                });
+            });
         });
     }
 
     function resolveExtractorUrl(url, refererLabel) {
         if (!url) return Promise.resolve([]);
         if (isDirectMediaUrl(url)) return Promise.resolve([buildStreamResult(url, refererLabel || "Direct", {}, getQualityFromText(url))]);
+        if (looksLikeGoogleDriveUrl(url)) return resolveGoogleDrive(url);
         if (/m4ulinks\.com/i.test(url)) return resolveM4ulinks(url);
         if (/filesdl\./i.test(url)) return resolveFilesdl(url);
-        if (/hubcloud\.(foo|one)|gamerxyt\.com\/hubcloud\.php/i.test(url)) return resolveHubCloud(url, refererLabel || "HubCloud");
+        if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php/i.test(url)) return resolveHubCloudWithFallback(url, refererLabel || "HubCloud");
+        if (/hubdrive\./i.test(url)) return resolveHubDrive(url);
+        if (/filepress\.|filebee/i.test(url)) return resolveFilepress(url);
         if (/gdfli?x/i.test(url)) return resolveGdflix(url);
         if (/gofile\.io/i.test(url)) return resolveGofile(url);
         if (/mdrive\.ink\//i.test(url)) return resolveMdrive(url);

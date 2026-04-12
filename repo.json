@@ -1,8 +1,8 @@
 {
-  "name": "hindmovie",
+  "name": "ZORO",
   "packageName": "com.igris.repo",
-  "description": "SkyStream plugins repository",
-  "manifestVersion": 1,
+  "description": "One stopfor all plugins ",
+  "manifestVersion": 2,
   "pluginLists": [
     "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/plugins.json"
   ]
