@@ -19,7 +19,7 @@ SkyStream uses a repository system to fetch plugins. Follow these steps to activ
 2.  Select the **Manage Extensions** menu.
 3.  Click on the **Add Repository** button.
 4.  Enter the following Repository URL:
-    > **Repository URL:** `https://raw.githubusercontent.com/USER_NAME/REPO_NAME/main/repo.json`
+    > **Repository URL:** `https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/repo.json`
 5.  Tap **Add**.
 6.  Wait for the list to populate, then **download** the desired plugins.
 
