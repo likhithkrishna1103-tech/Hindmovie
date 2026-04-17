@@ -11,6 +11,8 @@
     var runtimeManifest = (typeof manifest !== "undefined" && manifest) ? manifest : { baseUrl: DEFAULT_BASE_URL };
     var domainCache = null;
     var gdflixDomainCache = null;
+    var urlCache = {};
+    var CACHE_TTL = 300000;
 
     var MAIN_PAGE_SECTIONS = [
         { path: "", title: "Home" },
@@ -309,8 +311,14 @@
     }
 
     function getText(url, headers, allowRedirects) {
-        return request(url, { headers: headers, allowRedirects: allowRedirects }).then(function (res) {
-            return res.body || "";
+        var now = Date.now();
+        if (urlCache[url] && (now - urlCache[url].time) < CACHE_TTL) {
+            return Promise.resolve(urlCache[url].body);
+        }
+        return request(url, { headers: headers, allowRedirects: allowRedirects, timeout: 15000 }).then(function (res) {
+            var body = res.body || "";
+            urlCache[url] = { body: body, time: now };
+            return body;
         });
     }
 
@@ -1332,9 +1340,9 @@
                     return resolveExtractorUrl(candidate, "VCloud");
                 })).then(flattenResults);
             }
-            return [buildStreamResult(url, "VCloud", headers, getQualityFromText(url))];
+            return [];
         }).catch(function () {
-            return [buildStreamResult(url, "VCloud", headers, getQualityFromText(url))];
+            return [];
         });
     }
 
@@ -1349,9 +1357,9 @@
                     return resolveExtractorUrl(candidate, "FastDL");
                 })).then(flattenResults);
             }
-            return [buildStreamResult(url, "FastDL", headers, getQualityFromText(url))];
+            return [];
         }).catch(function () {
-            return [buildStreamResult(url, "FastDL", headers, getQualityFromText(url))];
+            return [];
         });
     }
 
@@ -1413,20 +1421,36 @@
         });
     }
 
+    function withTimeout(promise, ms, label) {
+        var timer;
+        var timeoutPromise = new Promise(function (_, reject) {
+            timer = setTimeout(function () {
+                reject(new Error("Timeout after " + ms + "ms for " + (label || "request")));
+            }, ms);
+        });
+        return Promise.race([promise, timeoutPromise]).then(function (result) {
+            clearTimeout(timer);
+            return result;
+        }).catch(function (err) {
+            clearTimeout(timer);
+            throw err;
+        });
+    }
+
     function resolveExtractorUrl(url, refererLabel) {
         if (!url) return Promise.resolve([]);
         if (isDirectMediaUrl(url)) return Promise.resolve([buildStreamResult(url, refererLabel || "Direct", {}, getQualityFromText(url))]);
         if (looksLikeGoogleDriveUrl(url)) return resolveGoogleDrive(url);
-        if (/m4ulinks\.com/i.test(url)) return resolveM4ulinks(url);
-        if (/filesdl\./i.test(url)) return resolveFilesdl(url);
-        if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php/i.test(url)) return resolveHubCloudWithFallback(url, refererLabel || "HubCloud");
-        if (/hubdrive\./i.test(url)) return resolveHubDrive(url);
-        if (/filepress\.|filebee/i.test(url)) return resolveFilepress(url);
-        if (/gdfli?x/i.test(url)) return resolveGdflix(url);
-        if (/gofile\.io/i.test(url)) return resolveGofile(url);
-        if (/mdrive\.ink\//i.test(url)) return resolveMdrive(url);
-        if (/vcloud\.zip/i.test(url)) return resolveVcloud(url);
-        if (/fastdl\.zip/i.test(url)) return resolveFastdl(url);
+        if (/m4ulinks\.com/i.test(url)) return withTimeout(resolveM4ulinks(url), 20000, "M4ULinks");
+        if (/filesdl\./i.test(url)) return withTimeout(resolveFilesdl(url), 20000, "FilesDL");
+        if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php/i.test(url)) return withTimeout(resolveHubCloudWithFallback(url, refererLabel || "HubCloud"), 25000, "HubCloud");
+        if (/hubdrive\./i.test(url)) return withTimeout(resolveHubDrive(url), 20000, "HubDrive");
+        if (/filepress\.|filebee/i.test(url)) return withTimeout(resolveFilepress(url), 25000, "Filepress");
+        if (/gdfli?x/i.test(url)) return withTimeout(resolveGdflix(url), 25000, "GDFlix");
+        if (/gofile\.io/i.test(url)) return withTimeout(resolveGofile(url), 20000, "Gofile");
+        if (/mdrive\.ink\//i.test(url)) return withTimeout(resolveMdrive(url), 30000, "MDrive");
+        if (/vcloud\.zip/i.test(url)) return withTimeout(resolveVcloud(url), 20000, "VCloud");
+        if (/fastdl\.zip/i.test(url)) return withTimeout(resolveFastdl(url), 20000, "FastDL");
         return Promise.resolve([]);
     }
 
