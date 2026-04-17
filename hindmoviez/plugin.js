@@ -5,8 +5,6 @@
     function err(...a)  { console.error("[HMZ ERR]", ...a); }
 
     const DOMAINS_URL  = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
-    const CINEMETA_URL = "https://v3-cinemeta.strem.io/meta";
-    const TMDB_API_KEY = "1865f43a0549ca50d341dd9ab8b29f49";
 
     const FALLBACK_DOMAINS = [
         "https://hindmoviez.cafe",
@@ -346,32 +344,6 @@
         throw lastErr;
     }
 
-    async function tmdbIdFromImdb(id) {
-        try {
-            const r = await fetchWithRetry(`https://api.themoviedb.org/3/find/${id}?api_key=${TMDB_API_KEY}&external_source=imdb_id`, {
-                attempts: 2,
-                ttl: DOMAIN_CACHE_TTL,
-                allowBlocked: true
-            });
-            const d = JSON.parse(r.body);
-            return d.movie_results?.[0]?.id || d.tv_results?.[0]?.id || null;
-        } catch (_) {
-            return null;
-        }
-    }
-
-    function parseCredits(json) {
-        try {
-            return (JSON.parse(json).cast || []).slice(0, 20).map(c => new Actor({
-                name: c.name,
-                role: c.character,
-                image: c.profile_path ? `https://image.tmdb.org/t/p/w185${c.profile_path}` : undefined
-            }));
-        } catch (_) {
-            return [];
-        }
-    }
-
     function parseArticles(html, mainUrl) {
         const items = [];
         const articleMatches = String(html || "").match(/<article[\s\S]*?<\/article>/gi) || [];
@@ -440,7 +412,7 @@
         }
     }
 
-    async function buildSeriesEpisodes(html, responseData, mainUrl) {
+    async function buildSeriesEpisodes(html, mainUrl) {
         const map = {};
         const sRe = /<h[23][^>]*>[\s\S]*?Season\s*(\d+)[\s\S]*?<\/h[23]>[\s\S]*?<a[^>]+href="([^"]+)"/gi;
         let sm;
@@ -469,15 +441,11 @@
         }
 
         return Object.values(map).map(ep => {
-            const metaEp = responseData?.meta?.videos?.find(v => v.season === ep.season && v.episode === ep.episode);
             return new Episode({
-                name: metaEp?.name || `Episode ${ep.episode}`,
+                name: `Episode ${ep.episode}`,
                 url: JSON.stringify(unique(ep.pageUrls)),
                 season: ep.season,
-                episode: ep.episode,
-                description: metaEp?.overview || null,
-                posterUrl: metaEp?.thumbnail || null,
-                aired: metaEp?.released || null
+                episode: ep.episode
             });
         }).sort((a, b) => a.season !== b.season ? a.season - b.season : a.episode - b.episode);
     }
@@ -589,7 +557,6 @@
 
             let name = null;
             let imdbRating = null;
-            let imdbId = null;
             let releaseYear = null;
             let docGenres = [];
 
@@ -606,8 +573,6 @@
                 if (key === "Name") name = value || null;
                 else if (key === "IMDB Rating") {
                     imdbRating = innerValue.split("/")[0].trim() || null;
-                    const im = liHtml.match(/href="[^"]*\/title\/(tt\d+)\//i);
-                    if (im) imdbId = im[1];
                 } else if (key === "Release Year") {
                     releaseYear = value || null;
                 } else if (key === "Genre") {
@@ -626,55 +591,22 @@
 
             const title = name || "Unknown";
             const poster = html.match(/<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i)?.[1] || null;
-            const descRaw = html.match(/<h3[^>]*>[^<]*Storyline[^<]*<\/h3>\s*<p[^>]*>([\s\S]*?)<\/p>/i)?.[1];
             const heading = stripTags(html.match(/<h1[^>]*class="entry-title"[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || "");
             const isSeries = /Season/i.test(heading);
 
-            let description = descRaw ? stripTags(descRaw) : null;
-            let background = poster;
-            let castList = [];
-
-            const [tmdbId, responseData] = await Promise.all([
-                imdbId ? tmdbIdFromImdb(imdbId) : Promise.resolve(null),
-                imdbId ? fetchWithRetry(`${CINEMETA_URL}/${isSeries ? "series" : "movie"}/${imdbId}.json`, {
-                    attempts: 2,
-                    ttl: DOMAIN_CACHE_TTL,
-                    allowBlocked: true
-                }).then(cr => cr.body?.trim().startsWith("{") ? JSON.parse(cr.body) : null).catch(() => null) : Promise.resolve(null)
-            ]);
-
-            if (tmdbId) {
-                try {
-                    const cr = await fetchWithRetry(`https://api.themoviedb.org/3/${isSeries ? "tv" : "movie"}/${tmdbId}/credits?api_key=${TMDB_API_KEY}&language=en-US`, {
-                        attempts: 2,
-                        ttl: DOMAIN_CACHE_TTL,
-                        allowBlocked: true
-                    });
-                    castList = parseCredits(cr.body);
-                } catch (_) {}
-            }
-
-            if (responseData?.meta) {
-                description = responseData.meta.description || description;
-                background = responseData.meta.background || poster;
-            }
-
             if (isSeries) {
-                const episodes = await buildSeriesEpisodes(html, responseData, mainUrl);
+                const episodes = await buildSeriesEpisodes(html, mainUrl);
                 cb({
                     success: true,
                     data: new MultimediaItem({
-                        title: responseData?.meta?.name || title,
+                        title,
                         url: realUrl,
                         posterUrl: poster,
-                        bannerUrl: background,
-                        logoUrl: responseData?.meta?.logo || null,
+                        bannerUrl: poster,
                         type: "series",
-                        description,
-                        year: parseInt(releaseYear || responseData?.meta?.year) || undefined,
-                        score: parseFloat(imdbRating || responseData?.meta?.imdbRating) || undefined,
+                        year: parseInt(releaseYear) || undefined,
+                        score: parseFloat(imdbRating) || undefined,
                         genres: docGenres,
-                        cast: castList,
                         episodes
                     })
                 });
@@ -685,17 +617,14 @@
             cb({
                 success: true,
                 data: new MultimediaItem({
-                    title: responseData?.meta?.name || title,
+                    title,
                     url: realUrl,
                     posterUrl: poster,
-                    bannerUrl: background,
-                    logoUrl: responseData?.meta?.logo || null,
+                    bannerUrl: poster,
                     type: "movie",
-                    description,
-                    year: parseInt(releaseYear || responseData?.meta?.year) || undefined,
-                    score: parseFloat(imdbRating || responseData?.meta?.imdbRating) || undefined,
+                    year: parseInt(releaseYear) || undefined,
+                    score: parseFloat(imdbRating) || undefined,
                     genres: docGenres,
-                    cast: castList,
                     episodes: [new Episode({
                         name: "Movie",
                         url: JSON.stringify(pageUrls),

@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.hindmoviez",
   "name": "HindMoviez",
-  "version": 6,
+  "version": 7,
   "baseUrl": "https://example.com",
   "description": "Trending movies and series, quickly.",
   "authors": [
