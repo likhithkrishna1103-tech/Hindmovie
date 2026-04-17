@@ -273,7 +273,7 @@
             bannerUrl: tmdbImage(item.backdrop_path),
             description: item.overview || "",
             year: year,
-            type: "anime"
+            type: isMovie ? "movie" : "anime"
         });
     }
 
@@ -334,7 +334,7 @@
                 bannerUrl: tmdbImage(details.backdrop_path),
                 description: details.overview || "",
                 year: Number(String(details.release_date || details.first_air_date || "").slice(0, 4)) || payload.year || 0,
-                type: "anime"
+                type: isMovie ? "movie" : "anime"
             });
 
             if (!isMovie) {

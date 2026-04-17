@@ -166,6 +166,15 @@
         return "";
     }
 
+    function firstRawMatch(text, patterns) {
+        var source = String(text || "");
+        for (var i = 0; i < patterns.length; i++) {
+            var match = source.match(patterns[i]);
+            if (match && typeof match[1] !== "undefined") return String(match[1] || "");
+        }
+        return "";
+    }
+
     function parseAnchors(html, base) {
         var source = String(html || "");
         var out = [];
@@ -298,49 +307,163 @@
         return path ? (TMDB_IMAGE + path) : "";
     }
 
-    function tmdbItemToCard(item) {
-        var isMovie = String(item.media_type || item.mediaType || "") === "movie";
-        var title = trim(item.title || item.name || "");
-        var originalTitle = trim(item.original_title || item.original_name || title);
-        var year = Number(String(item.release_date || item.first_air_date || "").slice(0, 4)) || 0;
-        return new MultimediaItem({
-            title: title,
-            url: buildPayload({
-                mode: "tmdb",
-                tmdbId: item.id,
-                mediaType: isMovie ? "movie" : "tv",
-                title: title,
-                originalTitle: originalTitle,
-                year: year,
-                isMovie: isMovie
-            }),
-            posterUrl: tmdbImage(item.poster_path),
-            bannerUrl: tmdbImage(item.backdrop_path),
-            description: item.overview || "",
-            year: year,
-            type: isMovie ? "movie" : "tvseries"
+    function yearFromText(value) {
+        var match = String(value || "").match(/\b(19|20)\d{2}\b/);
+        return match ? Number(match[0]) : 0;
+    }
+
+    function buildSitePayload(data) {
+        return buildPayload({
+            mode: "site",
+            pageUrl: data.pageUrl || data.url || "",
+            title: data.title || "",
+            originalTitle: data.originalTitle || data.title || "",
+            year: Number(data.year) || 0,
+            isMovie: true,
+            posterUrl: data.posterUrl || "",
+            bannerUrl: data.bannerUrl || data.posterUrl || "",
+            description: data.description || ""
         });
     }
 
-    async function buildHomeSection(path, mediaType) {
-        var json = await getTmdbJson(path);
-        var rows = json && json.results || [];
-        return rows.slice(0, 20).map(function (item) {
-            item.media_type = item.media_type || mediaType || "tv";
-            return tmdbItemToCard(item);
+    function buildSiteCard(data) {
+        return new MultimediaItem({
+            title: data.title || "",
+            url: buildSitePayload(data),
+            posterUrl: data.posterUrl || "",
+            bannerUrl: data.bannerUrl || data.posterUrl || "",
+            description: data.description || "",
+            year: Number(data.year) || 0,
+            type: "movie"
         });
+    }
+
+    function parseHdmovieCard(block, base) {
+        var href = absoluteUrl(base, firstMatch(block, [
+            /<h3\b[^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i,
+            /<a\b[^>]*href=["']([^"']+)["'][^>]*>\s*<div\b[^>]*class=["'][^"']*see/i,
+            /<a\b[^>]*href=["']([^"']+)["'][^>]*>/i
+        ]));
+        var title = stripTags(firstMatch(block, [
+            /<h3\b[^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i,
+            /<img\b[^>]*alt=["']([^"']+)["']/i
+        ]));
+        if (!href || !title) return null;
+        var posterUrl = normalizeResolvedUrl(firstMatch(block, [/<img\b[^>]*src=["']([^"']+)["']/i]), base);
+        var year = yearFromText(stripTags(firstMatch(block, [
+            /<span class=["']year["'][^>]*>([^<]+)<\/span>/i,
+            /<div class=["'][^"']*data[^"']*>\s*<h3[\s\S]*?<span>([\s\S]*?)<\/span>/i,
+            /<div class=["'][^"']*meta[^"']*>\s*<span class=["']year["'][^>]*>([^<]+)<\/span>/i
+        ])) || title);
+        var description = stripTags(firstMatch(block, [/<div class=["'][^"']*contenido[^"']*>\s*<p>([\s\S]*?)<\/p>/i]));
+        return {
+            title: title,
+            pageUrl: href,
+            url: href,
+            posterUrl: posterUrl,
+            bannerUrl: posterUrl,
+            description: description,
+            year: year,
+            type: "movie"
+        };
+    }
+
+    function parseHdmovieCards(containerHtml, base) {
+        return extractBlocks(containerHtml, "article").map(function (block) {
+            return parseHdmovieCard(block, base);
+        }).filter(Boolean);
+    }
+
+    function parseHdmovieFeatured(html, base) {
+        var container = firstRawMatch(html, [/<div class=["']items featured["']>([\s\S]*?)<\/div>\s*<header>/i]);
+        return parseHdmovieCards(container, base);
+    }
+
+    function parseHdmovieLatest(html, base) {
+        var container = firstRawMatch(html, [/<div class=["']items normal["']>([\s\S]*?)<\/div>\s*<\/div>\s*<div class=["']sidebar/i]);
+        return parseHdmovieCards(container, base);
+    }
+
+    function parseHdmoviePopular(html, base) {
+        var container = firstRawMatch(html, [/<h2 class=["']widget-title["']>Popular Mo(?:i|v)ies[\s\S]*?<\/h2><div class=["']dtw_content dt_views_count["']>([\s\S]*?)<\/div><\/aside>/i]);
+        return parseHdmovieCards(container, base);
+    }
+
+    function parseHdmovieSearchResults(html, base) {
+        var out = [];
+        var regex = /<div class=["']result-item["'][\s\S]*?<\/article>\s*<\/div>/gi;
+        var match;
+        while ((match = regex.exec(String(html || ""))) !== null) {
+            var card = parseHdmovieCard(match[0], base);
+            if (card) out.push(card);
+        }
+        return uniqueBy(out, function (item) { return item.pageUrl; });
+    }
+
+    function cleanHdmovieSynopsis(block, fallback) {
+        var regex = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+        var match;
+        var candidates = [];
+        while ((match = regex.exec(String(block || ""))) !== null) {
+            var text = stripTags(match[1]);
+            if (!text || text.length < 25) continue;
+            if (/(?:1080p|720p|480p|2160p|gdflix|gdtot|filepress|use vpn|signup|please use vpn)/i.test(text)) continue;
+            candidates.push(text);
+        }
+        return candidates.length ? candidates[0] : trim(fallback || "");
+    }
+
+    function parseHdmovieDetails(html, pageUrl, payload) {
+        var title = stripTags(firstMatch(html, [
+            /<div class=["']sheader["'][\s\S]*?<h1>([\s\S]*?)<\/h1>/i,
+            /<title>([^<]+?)\s*-\s*Hdmovie2/i
+        ])) || trim(payload && payload.title || "");
+        var originalTitle = stripTags(firstMatch(html, [
+            /<b class=["']variante["']>\s*Original title\s*<\/b>\s*<span class=["']valor["']>([\s\S]*?)<\/span>/i
+        ])) || trim(payload && payload.originalTitle || title);
+        var posterUrl = normalizeResolvedUrl(firstMatch(html, [
+            /<div class=["']poster["']>\s*<img[^>]*src=["']([^"']+)["']/i,
+            /<meta property=['"]og:image['"] content=['"]([^'"]+)['"]/i
+        ]), pageUrl);
+        var bannerUrl = normalizeResolvedUrl(firstMatch(html, [
+            /<img class=['"]cover['"] src=['"]([^'"]+)['"]/i,
+            /<meta property=['"]og:image['"] content=['"]([^'"]+)['"]/i
+        ]), pageUrl) || posterUrl;
+        var metaDescription = decodeHtml(firstMatch(html, [/<meta name=["']description["'] content=["']([^"']+)["']/i]));
+        var synopsisBlock = firstRawMatch(html, [/<div itemprop=["']description["'] class=["']wp-content["']>([\s\S]*?)<\/div>\s*<div class=["']custom_fields["']/i]);
+        var description = cleanHdmovieSynopsis(synopsisBlock, metaDescription);
+        var year = yearFromText(title + " " + stripTags(firstMatch(html, [
+            /<span class=['"]date['"][^>]*>([^<]+)<\/span>/i,
+            /<meta itemprop=['"]dateCreated['"] content=['"]([^'"]+)['"]/i
+        ]))) || Number(payload && payload.year) || 0;
+        return {
+            title: title,
+            originalTitle: originalTitle,
+            pageUrl: pageUrl,
+            posterUrl: posterUrl,
+            bannerUrl: bannerUrl,
+            description: description,
+            year: year,
+            type: "movie"
+        };
+    }
+
+    async function getSitePage(url) {
+        return getText(url, commonHeaders({ "Referer": (await getMainUrl()) + "/" }), true);
     }
 
     async function getHome(cb) {
         try {
-            cb({
-                success: true,
-                data: {
-                    "Trending Movies": await buildHomeSection("trending/movie/week?api_key=" + TMDB_API_KEY, "movie"),
-                    "Popular Movies": await buildHomeSection("movie/popular?api_key=" + TMDB_API_KEY, "movie"),
-                    "Popular Series": await buildHomeSection("tv/popular?api_key=" + TMDB_API_KEY, "tv")
-                }
-            });
+            var mainUrl = await getMainUrl();
+            var html = await getText(mainUrl + "/", commonHeaders({ "Referer": mainUrl + "/" }), true);
+            var data = {};
+            var featured = parseHdmovieFeatured(html, mainUrl).map(buildSiteCard);
+            var latest = parseHdmovieLatest(html, mainUrl).map(buildSiteCard);
+            var popular = parseHdmoviePopular(html, mainUrl).map(buildSiteCard);
+            if (featured.length) data["Featured"] = featured;
+            if (latest.length) data["Latest"] = latest;
+            if (popular.length) data["Popular"] = popular;
+            cb({ success: true, data: data });
         } catch (error) {
             cb({ success: false, errorCode: "SITE_OFFLINE", message: String(error && error.message || error) });
         }
@@ -348,11 +471,9 @@
 
     async function search(query, cb) {
         try {
-            var json = await getTmdbJson("search/multi?api_key=" + TMDB_API_KEY + "&query=" + encodeURIComponent(query));
-            var rows = (json && json.results || []).filter(function (item) {
-                return item && (item.media_type === "movie" || item.media_type === "tv");
-            });
-            cb({ success: true, data: rows.map(tmdbItemToCard) });
+            var mainUrl = await getMainUrl();
+            var html = await getText(mainUrl + "/?s=" + encodeURIComponent(query), commonHeaders({ "Referer": mainUrl + "/" }), true);
+            cb({ success: true, data: parseHdmovieSearchResults(html, mainUrl).map(buildSiteCard) });
         } catch (error) {
             cb({ success: false, errorCode: "SEARCH_ERROR", message: String(error && error.message || error) });
         }
@@ -361,63 +482,22 @@
     async function load(url, cb) {
         try {
             var payload = parsePayload(url);
-            var isMovie = String(payload.mediaType) === "movie";
-            var detailPath = (isMovie ? "movie/" : "tv/") + payload.tmdbId + "?api_key=" + TMDB_API_KEY + "&append_to_response=external_ids";
-            var details = await getTmdbJson(detailPath);
-            var imdbId = trim(details && details.external_ids && details.external_ids.imdb_id || "");
-            var item = new MultimediaItem({
-                title: details.title || details.name || payload.title,
-                url: buildPayload({
-                    mode: "tmdb",
-                    tmdbId: payload.tmdbId,
-                    mediaType: payload.mediaType,
-                    title: details.title || details.name || payload.title,
-                    originalTitle: details.original_title || details.original_name || payload.originalTitle || payload.title,
-                    year: Number(String(details.release_date || details.first_air_date || "").slice(0, 4)) || payload.year || 0,
-                    imdbId: imdbId,
-                    isMovie: isMovie
-                }),
-                posterUrl: tmdbImage(details.poster_path),
-                bannerUrl: tmdbImage(details.backdrop_path),
-                description: details.overview || "",
-                year: Number(String(details.release_date || details.first_air_date || "").slice(0, 4)) || payload.year || 0,
-                type: isMovie ? "movie" : "tvseries"
+            var pageUrl = trim(payload.pageUrl || payload.url || "");
+            if (!pageUrl) throw new Error("Missing page URL");
+            var html = await getSitePage(pageUrl);
+            var details = parseHdmovieDetails(html, pageUrl, payload);
+            cb({
+                success: true,
+                data: new MultimediaItem({
+                    title: details.title,
+                    url: buildSitePayload(details),
+                    posterUrl: details.posterUrl,
+                    bannerUrl: details.bannerUrl,
+                    description: details.description,
+                    year: details.year,
+                    type: "movie"
+                })
             });
-
-            if (!isMovie) {
-                var seasons = [];
-                var seasonRows = details.seasons || [];
-                for (var i = 0; i < seasonRows.length; i++) {
-                    var season = seasonRows[i];
-                    if (!season || !season.season_number || season.season_number <= 0) continue;
-                    var seasonInfo = await getTmdbJson("tv/" + payload.tmdbId + "/season/" + season.season_number + "?api_key=" + TMDB_API_KEY);
-                    var episodes = seasonInfo && seasonInfo.episodes || [];
-                    for (var j = 0; j < episodes.length; j++) {
-                        var episode = episodes[j];
-                        seasons.push(new Episode({
-                            name: episode.name || ("Episode " + episode.episode_number),
-                            season: season.season_number,
-                            episode: episode.episode_number,
-                            posterUrl: tmdbImage(episode.still_path) || tmdbImage(details.poster_path),
-                            url: buildPayload({
-                                mode: "tmdb",
-                                tmdbId: payload.tmdbId,
-                                mediaType: payload.mediaType,
-                                title: details.name || payload.title,
-                                originalTitle: details.original_name || payload.originalTitle || payload.title,
-                                year: Number(String(details.first_air_date || "").slice(0, 4)) || payload.year || 0,
-                                imdbId: imdbId,
-                                isMovie: false,
-                                season: season.season_number,
-                                episode: episode.episode_number
-                            })
-                        }));
-                    }
-                }
-                item.episodes = seasons;
-            }
-
-            cb({ success: true, data: item });
         } catch (error) {
             cb({ success: false, errorCode: "LOAD_ERROR", message: String(error && error.message || error) });
         }
@@ -541,7 +621,7 @@
             if (!query) continue;
             try {
                 var html = await getText(mainUrl + "/?s=" + encodeURIComponent(query), commonHeaders({ "Referer": mainUrl + "/" }), true);
-                var results = parseWpArticleResults(html, mainUrl);
+                var results = parseHdmovieSearchResults(html, mainUrl);
                 if (results.length) return results;
             } catch (_) {}
         }
@@ -580,9 +660,13 @@
     async function loadStreams(url, cb) {
         try {
             var payload = parsePayload(url);
-            var queries = uniqueBy([payload.title, payload.originalTitle], function (item) { return normalizeTitle(item); }).filter(Boolean);
-            var rows = await searchTitles(queries);
-            var match = bestMatch(rows, queries, payload.year, payload.isMovie ? "movie" : null);
+            var pageUrl = trim(payload.pageUrl || payload.url || "");
+            var match = pageUrl ? { url: pageUrl, title: payload.title || "" } : null;
+            if (!match) {
+                var queries = uniqueBy([payload.title, payload.originalTitle], function (item) { return normalizeTitle(item); }).filter(Boolean);
+                var rows = await searchTitles(queries);
+                match = bestMatch(rows, queries, payload.year, "movie");
+            }
             if (!match || !match.url) return cb({ success: true, data: [] });
             var pageHtml = await getText(match.url, commonHeaders({ "Referer": (await getMainUrl()) + "/" }), true).catch(function () { return ""; });
             if (!pageHtml) return cb({ success: true, data: [] });
@@ -608,7 +692,7 @@
                 if (!embedUrl) continue;
                 var resolved = await resolveCommonExtractorUrl(embedUrl, "HDMovie2", 0);
                 for (var j = 0; j < resolved.length; j++) {
-                    if (!resolved[j].quality) resolved[j].quality = qualityFromText(options[i].title || match.title);
+                    if (!resolved[j].quality) resolved[j].quality = qualityFromText(options[i].title || payload.title || match.title);
                     streams.push(resolved[j]);
                 }
             }
