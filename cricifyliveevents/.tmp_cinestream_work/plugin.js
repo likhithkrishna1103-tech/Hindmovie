@@ -70,10 +70,15 @@
             redirect: allowRedirects ? "follow" : "manual"
         }).then(function (res) {
             return res.text().then(function (bodyText) {
+                var parsedHeaders = parseHeaders(res.headers);
+                if (res.headers && typeof res.headers.getSetCookie === "function") {
+                    var cookies = res.headers.getSetCookie();
+                    if (cookies && cookies.length) parsedHeaders["set-cookie"] = cookies;
+                }
                 return {
                     status: res.status,
                     body: bodyText,
-                    headers: parseHeaders(res.headers),
+                    headers: parsedHeaders,
                     finalUrl: res.url || url
                 };
             });
@@ -706,47 +711,6 @@
         return [buildResolvedStream(streamUrl, label || "RubyStream", qualityFromText(html), commonHeaders({ "Referer": origin + "/" }))];
     }
 
-    async function resolveAsCdnVideoGlobal(url, label, referer) {
-        var normalized = normalizeResolvedUrl(url, referer ? baseOrigin(referer) : "");
-        var match = String(normalized || "").match(/\/video\/([A-Za-z0-9]+)/i);
-        if (!match) return [];
-        var videoId = match[1];
-        var origin = baseOrigin(normalized);
-        var endpoint = origin + "/player/index.php?data=" + encodeURIComponent(videoId) + "&do=getVideo";
-        var body = "hash=" + encodeURIComponent(videoId) + "&r=" + encodeURIComponent(referer || normalized);
-        var res = await request(endpoint, {
-            method: "POST",
-            body: body,
-            headers: commonHeaders({
-                "Referer": normalized,
-                "Origin": origin,
-                "X-Requested-With": "XMLHttpRequest",
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
-            })
-        }).catch(function () { return null; });
-        var payload = res ? parseJsonSafe(res.body, null) : null;
-        if (!payload || typeof payload !== "object") return [];
-
-        var headers = commonHeaders({
-            "Referer": normalized,
-            "Origin": origin
-        });
-        var out = [];
-        var streamUrl = trim(payload.videoSource || payload.securedLink || "");
-        if (payload.hls === true && streamUrl) {
-            out.push(buildResolvedStream(streamUrl, label || "Toonstream", qualityFromText(streamUrl), headers));
-        }
-
-        var rows = Array.isArray(payload.videoSources) ? payload.videoSources : [];
-        for (var i = 0; i < rows.length; i++) {
-            var row = rows[i] || {};
-            var fileUrl = trim(row.file || row.src || row.url || "");
-            if (!fileUrl) continue;
-            out.push(buildResolvedStream(fileUrl, label || "Toonstream", qualityFromText(row.label || fileUrl), headers));
-        }
-        return dedupeStreams(out);
-    }
-
     async function resolveGenericLinkPage(url, label, referer, depth) {
         var res = await request(url, {
             headers: commonHeaders({ "Referer": (referer || baseOrigin(url) + "/") }),
@@ -784,8 +748,6 @@
         if (/mdrive\./i.test(normalized)) return resolveMdriveGlobal(normalized, label || "MDrive", currentDepth);
         if (/hdm2\.ink\/play/i.test(normalized)) return resolveHdm2PlayGlobal(normalized, label || "HDMovie2");
         if (/rubystm\.com\/e\/|streamruby\.com\/e\//i.test(normalized)) return resolveRubyStreamGlobal(normalized, label || "RubyStream");
-        if (/\/\/as-cdn\d+\.[^/]+\/video\//i.test(normalized)) return resolveAsCdnVideoGlobal(normalized, label || "Toonstream", referer || normalized);
-        if (/toonstream\.dad\/\?trembed=/i.test(normalized)) return resolveGenericLinkPage(normalized, label || "Toonstream", referer || normalized, currentDepth);
         if (/linksmod|nexdrive|gadgetsweb|cryptoinsights|fastdlserver|fastdl\.zip|vcloud\.zip|streamtape|1fichier|clicknupload|ok\.ru|multiup|vidstreaming|rubystm|strmup/i.test(normalized)) {
             return resolveGenericLinkPage(normalized, label || "Source", referer || normalized, currentDepth);
         }
@@ -2972,31 +2934,12 @@
 
     var StreamvixSource = createStremioSource("p_streamvix", "Streamvix", "https://streamvix.hayd.uk");
     var NoTorrentSource = createStremioSource("p_notorrent", "NoTorrent", "https://addon-osvh.onrender.com");
-    var MoviesDriveExtraSource = createJsonSearchDownloadSource("p_moviesdrive_extra", "MoviesDrive", {
-        domainKey: "moviesdrive",
-        fallback: "https://new2.moviesdrives.my",
-        movieOnly: false
-    });
-    var VegaMoviesSource = createJsonSearchDownloadSource("p_vegamovies", "VegaMovies", {
-        domainKey: "vegamovies",
-        fallback: "https://vegamovies.vodka",
-        movieOnly: true,
-        searchPath: "/search.php"
-    });
-    var RogMoviesSource = createJsonSearchDownloadSource("p_rogmovies", "RogMovies", {
-        domainKey: "rogmovies",
-        fallback: "https://rogmovies.vip",
-        movieOnly: true,
-        searchPath: "/search.php"
-    });
-
-    function createJsonSearchDownloadSource(key, name, options) {
-        var opts = options || {};
+    var MoviesDriveExtraSource = (function () {
         var cachedMainUrl = "";
 
         async function getMainUrl() {
             if (cachedMainUrl) return cachedMainUrl;
-            cachedMainUrl = await getDynamicDomain(opts.domainKey, opts.fallback);
+            cachedMainUrl = await getDynamicDomain("moviesdrive", "https://new2.moviesdrives.my");
             return cachedMainUrl;
         }
 
@@ -3021,25 +2964,217 @@
 
         async function searchTitles(queries) {
             var mainUrl = await getMainUrl();
-            var searchPath = trim(opts.searchPath || "/searchapi.php");
             for (var i = 0; i < queries.length; i++) {
                 var query = trim(queries[i]);
                 if (!query) continue;
                 try {
-                    var json = await getJson(mainUrl + searchPath + "?q=" + encodeURIComponent(query) + "&page=1", commonHeaders({
+                    var json = await getJson(mainUrl + "/searchapi.php?q=" + encodeURIComponent(query) + "&page=1", commonHeaders({
                         "Accept": "application/json, text/plain, */*",
                         "Referer": mainUrl + "/search.html?q=" + encodeURIComponent(query)
                     }));
-                    var rows = parseSearchRows(json, mainUrl);
-                    if (rows.length) return rows;
+                    var results = parseSearchRows(json, mainUrl);
+                    if (results.length) return results;
                 } catch (_) {}
             }
             return [];
         }
 
+        function isSeriesTitle(title) {
+            return /series|season|episode/i.test(String(title || ""));
+        }
+
+        function parseButtonRows(html, base) {
+            var out = [];
+            var regex = /<h5\b[^>]*>([\s\S]*?)<\/h5>/gi;
+            var match;
+            while ((match = regex.exec(String(html || "")))) {
+                var anchors = parseAnchors(match[1], base);
+                for (var i = 0; i < anchors.length; i++) {
+                    if (!anchors[i].href) continue;
+                    out.push({ url: anchors[i].href, text: anchors[i].text || "" });
+                }
+            }
+            return uniqueBy(out, function (item) { return item.url + "|" + item.text; });
+        }
+
+        function seasonFromText(text, fallback) {
+            var match = String(text || "").match(/(?:season|s)\s*(\d+)/i);
+            return match ? Number(match[1]) : Number(fallback || 1);
+        }
+
+        function episodeFromText(text, fallback) {
+            var match = String(text || "").match(/(?:episode|ep|e)\s*(\d+)/i);
+            return match ? Number(match[1]) : Number(fallback || 1);
+        }
+
+        function parseLinkRowsWithContext(html, base) {
+            var out = [];
+            var regex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+            var match;
+            while ((match = regex.exec(String(html || "")))) {
+                out.push({
+                    href: absoluteUrl(base, decodeHtml(match[1])),
+                    text: stripTags(match[2] || ""),
+                    context: String(html || "").slice(Math.max(0, match.index - 500), Math.min(String(html || "").length, match.index + match[0].length + 500))
+                });
+            }
+            return out;
+        }
+
+        function parseFinalButtonRows(html, base, quality) {
+            var out = [];
+            var regex = /<a\b([^>]*)href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi;
+            var match;
+            while ((match = regex.exec(String(html || "")))) {
+                var attrs = String(match[1] || "") + " " + String(match[3] || "");
+                var className = firstMatch(attrs, [/class=["']([^"']+)["']/i]);
+                var href = absoluteUrl(base, decodeHtml(match[2]));
+                var text = stripTags(match[4] || "");
+                if (!/\bbtn\b/i.test(className)) continue;
+                if (/fsl server|fslv2|download file|s3 server|mega server|10gbps/i.test(text)) {
+                    out.push(buildResolvedStream(href, "MoviesDrive", quality, commonHeaders()));
+                } else if (/pixeldrain|pixel server/i.test(text)) {
+                    var pixelId = firstMatch(href, [/\/u\/([A-Za-z0-9]+)/i]);
+                    if (pixelId) out.push(buildResolvedStream("https://pixeldrain.com/api/file/" + pixelId + "?download", "MoviesDrive", quality, commonHeaders()));
+                }
+            }
+            return dedupeStreams(out);
+        }
+
+        async function extractHubCloudLike(url, quality) {
+            var headers = commonHeaders({ "Cookie": "xla=s4t" });
+            var firstRes = await request(url, {
+                headers: headers,
+                allowRedirects: true
+            }).catch(function () { return null; });
+            var firstHtml = firstRes ? String(firstRes.body || "") : "";
+            if (!firstHtml) return [];
+
+            if (/gamerxyt\.com/i.test(url) || /Download Link Generated/i.test(firstHtml)) {
+                return parseFinalButtonRows(firstHtml, baseOrigin(url), quality);
+            }
+
+            var nextHref = firstMatch(firstHtml, [
+                /id=["']download["'][^>]*href=["']([^"']+)["']/i,
+                /href=["']([^"']+)["'][^>]*id=["']download["']/i
+            ]);
+            if (!nextHref) return [];
+
+            var nextUrl = absoluteUrl(baseOrigin(url), nextHref);
+            var nextHtml = await getText(nextUrl, commonHeaders({
+                "Cookie": "xla=s4t",
+                "Referer": url
+            }), true).catch(function () { return ""; });
+            if (!nextHtml) return [];
+            return parseFinalButtonRows(nextHtml, baseOrigin(nextUrl), quality);
+        }
+
+        async function collectLinkRows(media, match, html) {
+            var buttons = parseButtonRows(html, match.url);
+            var isSeries = !media.isMovie || isSeriesTitle(match.title);
+            var collected = [];
+
+            for (var i = 0; i < buttons.length; i++) {
+                var button = buttons[i];
+                var season = seasonFromText(button.text, media.season || 1);
+                if (isSeries && media.season && season !== Number(media.season)) continue;
+
+                var pageHtml = await getText(button.url, commonHeaders({ "Referer": match.url }), true).catch(function () { return ""; });
+                if (!pageHtml) continue;
+                var links = parseLinkRowsWithContext(pageHtml, button.url);
+                if (!links.length) continue;
+
+                if (!isSeries) {
+                    for (var j = 0; j < links.length; j++) {
+                        var movieLink = links[j];
+                        var movieText = String(movieLink.text || "").toLowerCase();
+                        if (!(/hubcloud|gdflix|gdlink|gdtot/i.test(movieLink.href) || movieText.indexOf("hubcloud") !== -1)) continue;
+                        collected.push({
+                            url: movieLink.href,
+                            quality: qualityFromText(button.text || match.title),
+                            label: button.text || match.title
+                        });
+                    }
+                    continue;
+                }
+
+                for (var k = 0; k < links.length; k++) {
+                    var row = links[k];
+                    var lowerText = String(row.text || "").toLowerCase();
+                    if (!(/hubcloud|gdflix|gdlink|gdtot/i.test(row.href) || lowerText.indexOf("hubcloud") !== -1)) continue;
+                    var episode = episodeFromText(row.text, episodeFromText(row.context, k + 1));
+                    if (media.episode && episode !== Number(media.episode)) continue;
+                    collected.push({
+                        url: row.href,
+                        quality: qualityFromText(button.text || row.text || match.title),
+                        label: button.text || row.text || match.title
+                    });
+                }
+            }
+
+            if (!collected.length) {
+                var fallbackRows = extractExternalSourceLinks(html, match.url);
+                for (var m = 0; m < fallbackRows.length; m++) {
+                    collected.push({
+                        url: fallbackRows[m].url,
+                        quality: qualityFromText(fallbackRows[m].label || match.title),
+                        label: fallbackRows[m].label || match.title
+                    });
+                }
+            }
+
+            collected = uniqueBy(collected, function (item) { return item.url + "|" + item.quality; });
+            collected.sort(function (a, b) {
+                function score(item) {
+                    var url = String(item && item.url || "");
+                    if (/hubcloud/i.test(url)) return 3;
+                    if (/gdflix|gdlink/i.test(url)) return 2;
+                    if (/gdtot/i.test(url)) return 1;
+                    return 0;
+                }
+                var qualityDiff = Number(b && b.quality || 0) - Number(a && a.quality || 0);
+                if (qualityDiff) return qualityDiff;
+                return score(b) - score(a);
+            });
+
+            var selected = [];
+            var perQuality = {};
+            for (var n = 0; n < collected.length; n++) {
+                var item = collected[n];
+                var key = String(item && item.quality || 0);
+                var count = perQuality[key] || 0;
+                if (count >= 1) continue;
+                perQuality[key] = count + 1;
+                selected.push(item);
+                if (selected.length >= 4) break;
+            }
+
+            return selected;
+        }
+
+        async function resolveCollectedLink(item, referer) {
+            var url = trim(item && item.url || "");
+            if (!url) return [];
+            var quality = Number(item && item.quality || 0) || qualityFromText(item && item.label || url);
+            var resolved = [];
+            if (/hubcloud|gdflix|gdlink/i.test(url)) {
+                resolved = await extractHubCloudLike(url, quality);
+                if (!resolved.length) resolved = await resolveHubCloudGlobal(url, "MoviesDrive");
+                if (!resolved.length) resolved = await resolveGdflixGlobal(url, "MoviesDrive", 0);
+            }
+            if (!resolved.length) resolved = await resolveCommonExtractorUrl(url, "MoviesDrive", referer, 0);
+            if (!resolved.length && isCommonDirectMediaUrl(url)) {
+                resolved = [buildResolvedStream(url, "MoviesDrive", quality, commonHeaders(referer ? { "Referer": referer } : {}))];
+            }
+            for (var i = 0; i < resolved.length; i++) {
+                if (!resolved[i].quality) resolved[i].quality = quality;
+                if (!resolved[i].source) resolved[i].source = "MoviesDrive";
+            }
+            return resolved;
+        }
+
         async function resolve(media) {
             if (media.anime) return [];
-            if (opts.movieOnly && !media.isMovie) return [];
             var queries = uniqueBy([media.imdbId, media.title, media.originalTitle], function (item) {
                 return trim(String(item || "").toLowerCase());
             }).filter(Boolean);
@@ -3055,17 +3190,14 @@
             }
             if (!match) match = bestMatch(rows, queries, media.year, media.isMovie ? "movie" : null);
             if (!match || !match.url) return [];
-
             var html = await getText(match.url, commonHeaders({ "Referer": (await getMainUrl()) + "/" }), true).catch(function () { return ""; });
             if (!html) return [];
 
-            var linkRows = extractExternalSourceLinks(html, match.url);
+            var links = await collectLinkRows(media, match, html);
             var streams = [];
-            for (var j = 0; j < linkRows.length; j++) {
-                var resolved = await resolveCommonExtractorUrl(linkRows[j].url, name, match.url, 0);
-                var linkQuality = qualityFromText(linkRows[j].label || match.title);
+            for (var j = 0; j < links.length; j++) {
+                var resolved = await resolveCollectedLink(links[j], match.url);
                 for (var k = 0; k < resolved.length; k++) {
-                    if (!resolved[k].quality) resolved[k].quality = linkQuality;
                     streams.push(resolved[k]);
                 }
             }
@@ -3073,11 +3205,11 @@
         }
 
         return {
-            key: key,
-            name: name,
+            key: "p_moviesdrive_extra",
+            name: "MoviesDrive",
             resolve: resolve
         };
-    }
+    })();
 
     var BollyflixSource = (function () {
         var cachedMainUrl = "";
@@ -3088,60 +3220,284 @@
             return cachedMainUrl;
         }
 
+        async function bypassSidexfee(url) {
+            var id = firstMatch(String(url || ""), [/[?&]id=([^&#]+)/i]);
+            if (!id) return trim(String(url || ""));
+            var res = await getText("https://web.sidexfee.com/?id=" + encodeURIComponent(id), commonHeaders()).catch(function () { return ""; });
+            var encoded = firstMatch(res, [/link":"([^"]+)"/i]).replace(/\\\//g, "/");
+            if (!encoded) return trim(String(url || ""));
+            try {
+                while (encoded.length % 4 !== 0) encoded += "=";
+                return trim(Buffer.from(encoded, "base64").toString("utf8"));
+            } catch (_) {
+                return trim(String(url || ""));
+            }
+        }
+
+        function checkIsSeries(title, url) {
+            var text = String(title || "").toLowerCase();
+            var href = String(url || "").toLowerCase();
+            return text.indexOf("series") !== -1
+                || href.indexOf("/series/") !== -1
+                || href.indexOf("-season-") !== -1
+                || href.indexOf("-series-") !== -1
+                || /season|episode/i.test(text);
+        }
+
         async function searchTitles(queries) {
             var mainUrl = await getMainUrl();
             for (var i = 0; i < queries.length; i++) {
                 var query = trim(queries[i]);
                 if (!query) continue;
-                try {
-                    var html = await getText(mainUrl + "/search/" + encodeURIComponent(query), commonHeaders({ "Referer": mainUrl + "/" }), true);
-                    var results = parseWpArticleResults(html, mainUrl);
-                    if (results.length) return results;
-                } catch (_) {}
+                var urls = [
+                    mainUrl + "/?s=" + encodeURIComponent(query),
+                    mainUrl + "/search/" + encodeURIComponent(query) + "/page/1/"
+                ];
+                for (var j = 0; j < urls.length; j++) {
+                    try {
+                        var html = await getText(urls[j], commonHeaders({ "Referer": mainUrl + "/" }), true);
+                        var results = parseWpArticleResults(html, mainUrl);
+                        if (results.length) return results;
+                    } catch (_) {}
+                }
             }
             return [];
         }
 
-        function parseDownloadRows(html, base) {
+        function parseClassAnchors(html, base, classPattern) {
             var out = [];
-            var regex = /<h5\b[^>]*>([\s\S]*?)<\/h5>\s*([\s\S]*?)(?=<h5\b|$)/gi;
+            var regex = /<a\b([^>]*)href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi;
             var match;
             while ((match = regex.exec(String(html || "")))) {
-                var label = stripTags(match[1]);
-                var anchors = extractExternalSourceLinks(match[2], base);
-                for (var i = 0; i < anchors.length; i++) {
+                var attrs = String(match[1] || "") + " " + String(match[3] || "");
+                var className = firstMatch(attrs, [/class=["']([^"']+)["']/i]);
+                if (!classPattern.test(className)) continue;
+                out.push({
+                    href: absoluteUrl(base, decodeHtml(match[2])),
+                    text: stripTags(match[4] || ""),
+                    index: match.index
+                });
+            }
+            return out;
+        }
+
+        function extractLastSeason(text) {
+            var regex = /(?:season|s)\s*(\d+)/ig;
+            var last = "";
+            var match;
+            while ((match = regex.exec(String(text || "")))) last = match[1];
+            return Number(last || 1);
+        }
+
+        function extractEpisodeNumber(text, fallback) {
+            var match = String(text || "").match(/(?:episode|ep|e)\s*(\d+)/i);
+            return match ? Number(match[1]) : Number(fallback || 1);
+        }
+
+        function parseMovieButtons(html, base) {
+            return parseClassAnchors(html, base, /(maxbutton|dl|btnn)/i).filter(function (item) {
+                return /(download|links|view|click)/i.test(String(item.text || "")) || /id=|gdflix|gdlink|fastdlserver|linksmod|hub/i.test(String(item.href || ""));
+            });
+        }
+
+        function extractCookieHeader(headers) {
+            var raw = headers && headers["set-cookie"];
+            if (!raw) return "";
+            if (Array.isArray(raw)) {
+                return raw.map(function (item) {
+                    return String(item || "").split(";")[0];
+                }).filter(Boolean).join("; ");
+            }
+            return String(raw || "").split(/,(?=[^;]+=[^;]+)/).map(function (item) {
+                return String(item || "").split(";")[0];
+            }).filter(Boolean).join("; ");
+        }
+
+        async function unlockLinksmod(url) {
+            var firstRes = await request(url, {
+                headers: commonHeaders({ "Referer": baseOrigin(url) + "/" }),
+                allowRedirects: true
+            }).catch(function () { return null; });
+            var firstHtml = firstRes ? String(firstRes.body || "") : "";
+            if (!firstHtml) return "";
+            var tokenMatch = String(firstHtml || "").match(/<input[^>]+type=["']hidden["'][^>]+name=["']([^"']+)["'][^>]+value=["']([^"']*)["']/i);
+            if (!tokenMatch) return firstHtml;
+
+            var form = encodeURIComponent(tokenMatch[1]) + "=" + encodeURIComponent(tokenMatch[2] || "");
+            var cookieHeader = extractCookieHeader(firstRes && firstRes.headers || {});
+            var postRes = await request(url, {
+                method: "POST",
+                body: form,
+                headers: commonHeaders({
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                    "Origin": baseOrigin(url),
+                    "Referer": url,
+                    "Cookie": cookieHeader
+                }),
+                allowRedirects: true
+            }).catch(function () { return null; });
+            return postRes ? String(postRes.body || "") : firstHtml;
+        }
+
+        async function resolveLinksmod(url, quality) {
+            var html = await unlockLinksmod(url);
+            if (!html) return [];
+            var anchors = parseAnchors(html, url).filter(function (item) {
+                return /^https?:\/\//i.test(item.href)
+                    && baseOrigin(item.href) !== baseOrigin(url)
+                    && !/telegram|facebook|instagram|twitter|youtube/i.test(item.href);
+            });
+            var streams = [];
+            for (var i = 0; i < anchors.length; i++) {
+                var resolved = await resolveCommonExtractorUrl(anchors[i].href, "Bollyflix", url, 0);
+                streams = streams.concat(resolved);
+            }
+            if (!streams.length) {
+                for (var j = 0; j < anchors.length; j++) {
+                    if (/gofile/i.test(anchors[j].href)) {
+                        streams = streams.concat(await resolveGofileGlobal(anchors[j].href, "Bollyflix"));
+                    }
+                }
+            }
+            for (var k = 0; k < streams.length; k++) {
+                if (!streams[k].quality) streams[k].quality = quality;
+                if (!streams[k].source) streams[k].source = "Bollyflix";
+            }
+            return dedupeStreams(streams);
+        }
+
+        async function collectSeriesLinks(html, baseUrl, media) {
+            var buttons = parseClassAnchors(html, baseUrl, /(maxbutton|dl|btnn)/i).filter(function (item) {
+                return /(download|links|view|click)/i.test(String(item.text || ""));
+            });
+            var out = [];
+
+            for (var i = 0; i < buttons.length; i++) {
+                var button = buttons[i];
+                var season = extractEpisodeNumber(button.text, extractLastSeason(String(html || "").slice(Math.max(0, button.index - 800), button.index)));
+                if (media.season && season !== Number(media.season)) continue;
+
+                var resolvedButtonUrl = await bypassSidexfee(button.href);
+                if (!resolvedButtonUrl || !/^https?:\/\//i.test(resolvedButtonUrl)) continue;
+                var pageHtml = await getText(resolvedButtonUrl, commonHeaders({ "Referer": baseUrl }), true).catch(function () { return ""; });
+                if (!pageHtml) continue;
+                var anchors = parseAnchors(pageHtml, resolvedButtonUrl).filter(function (item) {
+                    var text = String(item.text || "").toLowerCase();
+                    return /^https?:\/\//i.test(item.href) && text.indexOf("zip") === -1 && text.indexOf("elinks") === -1;
+                });
+
+                for (var j = 0; j < anchors.length; j++) {
+                    var epNum = extractEpisodeNumber(anchors[j].text, j + 1);
+                    if (media.episode && epNum !== Number(media.episode)) continue;
                     out.push({
-                        url: anchors[i].url,
-                        label: label || anchors[i].label || ""
+                        url: anchors[j].href,
+                        quality: qualityFromText(button.text || anchors[j].text),
+                        label: button.text || anchors[j].text
                     });
                 }
             }
-            if (!out.length) {
-                return extractExternalSourceLinks(html, base).map(function (item) {
-                    return { url: item.url, label: item.label || "" };
-                });
+
+            return uniqueBy(out, function (item) { return item.url + "|" + item.quality; });
+        }
+
+        async function resolveBollyflixGdflix(url) {
+            var html = await getText(url, commonHeaders({ "Referer": baseOrigin(url) + "/" }), true).catch(function () { return ""; });
+            if (!html) return [];
+            var fileName = firstMatch(html, [/Name\s*:\s*([^<]+)/i]);
+            var fileSize = firstMatch(html, [/Size\s*:\s*([^<]+)/i]);
+            var anchors = parseAnchors(html, baseOrigin(url));
+            var out = [];
+
+            for (var i = 0; i < anchors.length; i++) {
+                var text = String(anchors[i].text || "");
+                var href = trim(anchors[i].href || "");
+                if (!href) continue;
+                var quality = qualityFromText(fileName || text || href);
+                var suffix = fileSize ? " (" + fileSize + ")" : "";
+
+                if (/DIRECT|FSL V2|CLOUD/i.test(text)) {
+                    out.push(buildResolvedStream(href, "Bollyflix [" + trim(text) + "]", quality, commonHeaders()));
+                } else if (/FAST CLOUD/i.test(text)) {
+                    var fastHtml = await getText(href, commonHeaders({ "Referer": url }), true).catch(function () { return ""; });
+                    var directLink = normalizeResolvedUrl(firstMatch(fastHtml, [/<div[^>]*class=["'][^"']*card-body[^"']*["'][\s\S]*?<a[^>]+href=["']([^"']+)["']/i]), baseOrigin(href));
+                    if (directLink) {
+                        out.push(buildResolvedStream(directLink, "Bollyflix [FastCloud]" + suffix, quality, commonHeaders({ "Referer": href })));
+                    }
+                } else if (/pixeldrain/i.test(href) || /pixeldrain/i.test(text)) {
+                    var fileId = href.split("/").pop();
+                    if (fileId) out.push(buildResolvedStream("https://pixeldrain.com/api/file/" + fileId + "?download", "Bollyflix [Pixeldrain]" + suffix, quality, commonHeaders()));
+                }
             }
-            return uniqueBy(out, function (item) { return item.url; });
+
+            return dedupeStreams(out);
+        }
+
+        async function resolveLinkRow(item, referer) {
+            var url = trim(item && item.url || "");
+            if (!url) return [];
+            url = await bypassSidexfee(url);
+            var quality = Number(item && item.quality || 0) || qualityFromText(item && item.label || url);
+            var resolved = [];
+            if (/linksmod\.top\/view\//i.test(url)) {
+                resolved = await resolveLinksmod(url, quality);
+            }
+            if (/gdflix|gdlink|fastdlserver/i.test(url)) {
+                resolved = await resolveBollyflixGdflix(url);
+                if (!resolved.length) resolved = await resolveGdflixGlobal(url, "Bollyflix", 0);
+            }
+            if (!resolved.length) resolved = await resolveCommonExtractorUrl(url, "Bollyflix", referer, 0);
+            if (!resolved.length && isCommonDirectMediaUrl(url)) {
+                resolved = [buildResolvedStream(url, "Bollyflix", quality, commonHeaders(referer ? { "Referer": referer } : {}))];
+            }
+            for (var i = 0; i < resolved.length; i++) {
+                if (!resolved[i].quality) resolved[i].quality = quality;
+                if (!resolved[i].source) resolved[i].source = "Bollyflix";
+            }
+            return resolved;
         }
 
         async function resolve(media) {
-            if (!media.isMovie || media.anime) return [];
+            if (media.anime) return [];
             var queries = uniqueBy([media.imdbId, media.title, media.originalTitle], function (item) {
                 return trim(String(item || "").toLowerCase());
             }).filter(Boolean);
             var rows = await searchTitles(queries);
-            var match = bestMatch(rows, queries, media.year, "movie");
+            var match = bestMatch(rows, queries, media.year, media.isMovie ? "movie" : null);
             if (!match || !match.url) return [];
             var html = await getText(match.url, commonHeaders({ "Referer": (await getMainUrl()) + "/" }), true).catch(function () { return ""; });
             if (!html) return [];
-            var links = parseDownloadRows(html, match.url);
+
+            var isSeries = checkIsSeries(match.title || media.title, match.url) || !media.isMovie;
+            var links = [];
+            if (isSeries) {
+                links = await collectSeriesLinks(html, match.url, media);
+            } else {
+                var buttons = parseMovieButtons(html, match.url);
+                for (var i = 0; i < buttons.length; i++) {
+                    links.push({
+                        url: buttons[i].href,
+                        quality: qualityFromText(buttons[i].text || match.title),
+                        label: buttons[i].text || match.title
+                    });
+                }
+            }
+
+            if (!links.length) {
+                var fallbackRows = extractExternalSourceLinks(html, match.url);
+                for (var j = 0; j < fallbackRows.length; j++) {
+                    links.push({
+                        url: fallbackRows[j].url,
+                        quality: qualityFromText(fallbackRows[j].label || match.title),
+                        label: fallbackRows[j].label || match.title
+                    });
+                }
+            }
+
             var streams = [];
-            for (var i = 0; i < links.length; i++) {
-                var resolved = await resolveCommonExtractorUrl(links[i].url, "Bollyflix", match.url, 0);
-                var linkQuality = qualityFromText(links[i].label || match.title);
-                for (var j = 0; j < resolved.length; j++) {
-                    if (!resolved[j].quality) resolved[j].quality = linkQuality;
-                    streams.push(resolved[j]);
+            for (var k = 0; k < links.length; k++) {
+                var resolved = await resolveLinkRow(links[k], match.url);
+                for (var m = 0; m < resolved.length; m++) {
+                    streams.push(resolved[m]);
                 }
             }
             return dedupeStreams(streams);
@@ -3305,157 +3661,13 @@
         };
     })();
 
-    var ToonstreamSource = (function () {
-        var cachedMainUrl = "";
-
-        async function getMainUrl() {
-            if (cachedMainUrl) return cachedMainUrl;
-            cachedMainUrl = await getDynamicDomain("toonstream", "https://toonstream.dad");
-            return cachedMainUrl;
-        }
-
-        function parseSearchResults(html, mainUrl) {
-            return extractBlocks(html, "article").map(function (block) {
-                var href = firstMatch(block, [
-                    /<a[^>]+href=["']([^"']*(?:\/series\/|\/movies\/)[^"']+)["'][^>]*class=["'][^"']*lnk-blk[^"']*["']/i,
-                    /<a[^>]+class=["'][^"']*lnk-blk[^"']*["'][^>]+href=["']([^"']*(?:\/series\/|\/movies\/)[^"']+)["']/i,
-                    /<a[^>]+href=["']([^"']*(?:\/series\/|\/movies\/)[^"']+)["']/i
-                ]);
-                var title = stripTags(firstMatch(block, [
-                    /<h2[^>]*class=["'][^"']*entry-title[^"']*["'][^>]*>([\s\S]*?)<\/h2>/i,
-                    /<img[^>]+alt=["']([^"']+)["']/i
-                ])).replace(/^Image\s+/i, "");
-                if (!href || !title) return null;
-                var resolved = absoluteUrl(mainUrl, href);
-                return {
-                    title: title,
-                    url: resolved,
-                    type: /\/movies\//i.test(resolved) ? "movie" : "anime"
-                };
-            }).filter(Boolean).filter(function (item) {
-                return /\/(?:series|movies)\//i.test(String(item && item.url || ""));
-            }).filter(function (item) {
-                return !/category\//i.test(String(item && item.url || ""));
-            }).filter(function (item) {
-                return !/random|latest/i.test(normalizeTitle(item && item.title || ""));
-            }).filter(function (item, index, list) {
-                for (var i = 0; i < index; i++) {
-                    if (list[i].url === item.url) return false;
-                }
-                return true;
-            });
-        }
-
-        function slugifySearch(text) {
-            return trim(String(text || "").toLowerCase())
-                .replace(/[^a-z0-9]+/g, "-")
-                .replace(/^-+|-+$/g, "");
-        }
-
-        function findEpisodeLink(html, mainUrl, season, episode) {
-            var anchors = parseAnchors(html, mainUrl);
-            for (var i = 0; i < anchors.length; i++) {
-                var href = String(anchors[i].href || "");
-                var match = href.match(/\/episode\/[^/]+-(\d+)x(\d+)\/?$/i);
-                if (!match) continue;
-                if (Number(match[1]) === Number(season) && Number(match[2]) === Number(episode)) return href;
-            }
-            return "";
-        }
-
-        function extractEmbedCandidates(html, base) {
-            var out = [];
-            var regexes = [
-                /data-src=["']([^"']+)["']/gi,
-                /(?:href|src)=["']([^"']+\?trembed=[^"']+)["']/gi
-            ];
-            for (var i = 0; i < regexes.length; i++) {
-                var regex = regexes[i];
-                var match;
-                while ((match = regex.exec(String(html || "")))) {
-                    var value = normalizeResolvedUrl(decodeHtml(match[1]), baseOrigin(base));
-                    if (value && /\?trembed=/i.test(value)) out.push(value);
-                }
-            }
-            return uniqueValues(out);
-        }
-
-        async function expandFrameUrls(url, referer) {
-            if (/\/\/as-cdn\d+\.[^/]+\/video\//i.test(String(url || ""))) return [url];
-            if (!/toonstream\.dad\/\?trembed=/i.test(String(url || ""))) return [url];
-            var html = await getText(url, commonHeaders({ "Referer": referer || (await getMainUrl()) + "/" }), true).catch(function () { return ""; });
-            var frames = [];
-            var regex = /<iframe[^>]+src=["']([^"']+)["']/gi;
-            var match;
-            while ((match = regex.exec(String(html || "")))) {
-                frames.push(normalizeResolvedUrl(decodeHtml(match[1]), baseOrigin(url)));
-            }
-            return frames.length ? uniqueValues(frames) : [url];
-        }
-
-        async function resolve(media) {
-            if (!media.anime) return [];
-            var mainUrl = await getMainUrl();
-            var queries = uniqueBy([media.originalTitle, media.title], function (item) { return normalizeTitle(item); }).filter(Boolean);
-            var rows = [];
-            for (var i = 0; i < queries.length; i++) {
-                var query = trim(queries[i]);
-                if (!query) continue;
-                var searchUrls = uniqueValues([
-                    mainUrl + "/search/" + encodeURIComponent(slugifySearch(query)) + "/",
-                    mainUrl + "/?s=" + encodeURIComponent(query)
-                ]);
-                for (var s = 0; s < searchUrls.length; s++) {
-                    try {
-                        var html = await getText(searchUrls[s], commonHeaders({ "Referer": mainUrl + "/" }), true);
-                        rows = parseSearchResults(html, mainUrl);
-                        if (rows.length) break;
-                    } catch (_) {}
-                }
-                if (rows.length) break;
-            }
-            var match = bestMatch(rows, queries, media.year, media.isMovie ? "movie" : "anime");
-            if (!match || !match.url) return [];
-            var targetUrl = match.url;
-            if (!media.isMovie) {
-                var seriesHtml = await getText(match.url, commonHeaders({ "Referer": mainUrl + "/" }), true).catch(function () { return ""; });
-                targetUrl = findEpisodeLink(seriesHtml, match.url, media.season || 1, media.episode || 1);
-                if (!targetUrl) return [];
-            }
-            var pageHtml = await getText(targetUrl, commonHeaders({ "Referer": match.url }), true).catch(function () { return ""; });
-            if (!pageHtml) return [];
-            var iframeUrls = extractEmbedCandidates(pageHtml, targetUrl);
-            if (!iframeUrls.length) {
-                var frameRegex = /<iframe[^>]+src=["']([^"']+)["']/gi;
-                var frameMatch;
-                while ((frameMatch = frameRegex.exec(String(pageHtml || "")))) {
-                    iframeUrls.push(normalizeResolvedUrl(decodeHtml(frameMatch[1]), baseOrigin(targetUrl)));
-                }
-                iframeUrls = uniqueValues(iframeUrls);
-            }
-            var streams = [];
-            for (var j = 0; j < iframeUrls.length; j++) {
-                var expanded = await expandFrameUrls(iframeUrls[j], targetUrl);
-                for (var k = 0; k < expanded.length; k++) {
-                    var resolved = await resolveCommonExtractorUrl(expanded[k], "Toonstream", targetUrl, 0);
-                    streams = streams.concat(resolved);
-                }
-            }
-            return dedupeStreams(streams);
-        }
-
-        return {
-            key: "p_toonstream",
-            name: "Toonstream",
-            resolve: resolve
-        };
-    })();
-
     var PROVIDERS = [
         CastleSource,
         StreamvixSource,
         NoTorrentSource,
         Movies4uSource,
+        MoviesDriveExtraSource,
+        BollyflixSource,
         HindmoviezSource,
         HDMovie2Source,
         KaidoSource,
@@ -3482,6 +3694,8 @@
                     || provider === StreamvixSource
                     || provider === NoTorrentSource
                     || provider === Movies4uSource
+                    || provider === MoviesDriveExtraSource
+                    || provider === BollyflixSource
                     || provider === HindmoviezSource
                     || provider === HDMovie2Source;
             });
