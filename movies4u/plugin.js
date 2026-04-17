@@ -747,6 +747,7 @@
         if (/filepress\.|filebee/i.test(value)) return true;
         if (looksLikeGoogleDriveUrl(value)) return true;
         if (/mdrive\.ink\//i.test(value)) return true;
+        if (/vcloud\.zip|fastdl\.zip/i.test(value)) return true;
         return false;
     }
 
@@ -756,7 +757,7 @@
         if (/\/cdn-cgi\/challenge-platform\//i.test(value)) return false;
         if (isDirectMediaUrl(value)) return true;
         if (looksLikeGoogleDriveUrl(value)) return true;
-        return /hubcloud\.|hubdrive\.|gamerxyt\.com\/hubcloud\.php|gdfli?x|gdlink|gofile\.io|m4ulinks\.com|filesdl\.|filepress\.|filebee|pixeldrain|buzzserver|streamtape|mediafire\.com|1fichier\.com|mdrive\.ink\//i.test(value);
+        return /hubcloud\.|hubdrive\.|gamerxyt\.com\/hubcloud\.php|gdfli?x|gdlink|gofile\.io|m4ulinks\.com|filesdl\.|filepress\.|filebee|pixeldrain|buzzserver|streamtape|mediafire\.com|1fichier\.com|mdrive\.ink\/|vcloud\.zip|fastdl\.zip/i.test(value);
     }
 
     function normalizeExtractedUrl(rawValue, base) {
@@ -1316,6 +1317,44 @@
         });
     }
 
+    function resolveVcloud(url) {
+        var headers = defaultHeaders({ "Referer": baseOrigin(url) + "/" });
+        return getText(url, headers).then(function (html) {
+            var hubcloudMatch = html.match(/https:\/\/gamerxyt\.com\/hubcloud\.php\?host=vcloud[^"'\s]*/i);
+            if (hubcloudMatch) {
+                return resolveExtractorUrl(hubcloudMatch[0], "VCloud");
+            }
+            var candidates = extractInterestingExtractorUrls(html, baseOrigin(url)).filter(function (candidate) {
+                return candidate !== url && /hubcloud\.|gdflix\.|filepress\.|g-direct\.|drive\.google/i.test(candidate);
+            });
+            if (candidates.length) {
+                return Promise.all(candidates.map(function (candidate) {
+                    return resolveExtractorUrl(candidate, "VCloud");
+                })).then(flattenResults);
+            }
+            return [buildStreamResult(url, "VCloud", headers, getQualityFromText(url))];
+        }).catch(function () {
+            return [buildStreamResult(url, "VCloud", headers, getQualityFromText(url))];
+        });
+    }
+
+    function resolveFastdl(url) {
+        var headers = defaultHeaders({ "Referer": baseOrigin(url) + "/" });
+        return getText(url, headers).then(function (html) {
+            var candidates = extractInterestingExtractorUrls(html, baseOrigin(url)).filter(function (candidate) {
+                return candidate !== url && /hubcloud\.|gdflix\.|filepress\.|g-direct\.|drive\.google|filebee/i.test(candidate);
+            });
+            if (candidates.length) {
+                return Promise.all(candidates.map(function (candidate) {
+                    return resolveExtractorUrl(candidate, "FastDL");
+                })).then(flattenResults);
+            }
+            return [buildStreamResult(url, "FastDL", headers, getQualityFromText(url))];
+        }).catch(function () {
+            return [buildStreamResult(url, "FastDL", headers, getQualityFromText(url))];
+        });
+    }
+
     function resolveMdrive(url) {
         var headers = defaultHeaders({ "Referer": baseOrigin(url) + "/" });
         return request(url, {
@@ -1386,6 +1425,8 @@
         if (/gdfli?x/i.test(url)) return resolveGdflix(url);
         if (/gofile\.io/i.test(url)) return resolveGofile(url);
         if (/mdrive\.ink\//i.test(url)) return resolveMdrive(url);
+        if (/vcloud\.zip/i.test(url)) return resolveVcloud(url);
+        if (/fastdl\.zip/i.test(url)) return resolveFastdl(url);
         return Promise.resolve([]);
     }
 

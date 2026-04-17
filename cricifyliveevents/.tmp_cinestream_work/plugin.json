@@ -1,0 +1,18 @@
+{
+  "packageName": "com.igris.repo.cinestream",
+  "name": "CineStream",
+  "version": 1,
+  "baseUrl": "https://www.themoviedb.org",
+  "description": "TMDB catalog with a CineStream-style non-torrent source stack.",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Movies",
+    "Series",
+    "Anime"
+  ]
+}
