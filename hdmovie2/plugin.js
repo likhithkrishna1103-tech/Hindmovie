@@ -8,6 +8,17 @@
     var DOMAINS_JSON_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
     var COMMON_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
     var domainsCache = null;
+    var HDMOVIE2_HOME_SECTIONS = [
+        { path: function () { return "release/" + new Date().getFullYear(); }, title: "Latest" },
+        { path: "genre/bollywood", title: "BollyWood" },
+        { path: "movies", title: "Movies" },
+        { path: "genre/hindi-webseries", title: "Hindi Web Series" },
+        { path: "genre/netflix", title: "Netflix" },
+        { path: "genre/zee5", title: "Zee5" },
+        { path: "genre/hindi-dubbed", title: "Hindi Dubbed" },
+        { path: "genre/comedy", title: "Comedy" },
+        { path: "genre/science-fiction", title: "Science Fiction" }
+    ];
 
     function trim(value) {
         return String(value == null ? "" : value).replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "");
@@ -389,6 +400,15 @@
         return parseHdmovieCards(container, base);
     }
 
+    function parseHdmovieArchiveItems(html, base) {
+        var container = firstRawMatch(html, [
+            /<header>\s*<h2>Recently added<\/h2>\s*<\/header>\s*<div class=["']items normal["']>([\s\S]*?)<\/div>\s*<div class=["']resppages["']/i,
+            /<div class=["']items normal["']>([\s\S]*?)<\/div>\s*<div class=["']resppages["']/i,
+            /<div class=["']items normal["']>([\s\S]*?)<\/div>\s*<\/div>\s*<div class=["']sidebar/i
+        ]);
+        return parseHdmovieCards(container, base);
+    }
+
     function parseHdmovieSearchResults(html, base) {
         var out = [];
         var regex = /<div class=["']result-item["'][\s\S]*?<\/article>\s*<\/div>/gi;
@@ -452,17 +472,41 @@
         return getText(url, commonHeaders({ "Referer": (await getMainUrl()) + "/" }), true);
     }
 
+    async function fetchHdmovieHomeSection(mainUrl, section) {
+        var path = typeof section.path === "function" ? section.path() : section.path;
+        var url = absoluteUrl(mainUrl + "/", String(path || "").replace(/^\/+/, ""));
+        var html = await getText(url, commonHeaders({ "Referer": mainUrl + "/" }), true);
+        return {
+            title: section.title,
+            items: uniqueBy(parseHdmovieArchiveItems(html, mainUrl), function (item) {
+                return item.pageUrl || item.url;
+            }).map(buildSiteCard)
+        };
+    }
+
     async function getHome(cb) {
         try {
             var mainUrl = await getMainUrl();
-            var html = await getText(mainUrl + "/", commonHeaders({ "Referer": mainUrl + "/" }), true);
             var data = {};
-            var featured = parseHdmovieFeatured(html, mainUrl).map(buildSiteCard);
-            var latest = parseHdmovieLatest(html, mainUrl).map(buildSiteCard);
-            var popular = parseHdmoviePopular(html, mainUrl).map(buildSiteCard);
-            if (featured.length) data["Featured"] = featured;
-            if (latest.length) data["Latest"] = latest;
-            if (popular.length) data["Popular"] = popular;
+            var sections = await Promise.all(HDMOVIE2_HOME_SECTIONS.map(function (section) {
+                return fetchHdmovieHomeSection(mainUrl, section).catch(function () {
+                    return { title: section.title, items: [] };
+                });
+            }));
+            for (var i = 0; i < sections.length; i++) {
+                if (sections[i].items && sections[i].items.length) {
+                    data[sections[i].title] = sections[i].items;
+                }
+            }
+            if (!Object.keys(data).length) {
+                var html = await getText(mainUrl + "/", commonHeaders({ "Referer": mainUrl + "/" }), true);
+                var featured = parseHdmovieFeatured(html, mainUrl).map(buildSiteCard);
+                var latest = parseHdmovieLatest(html, mainUrl).map(buildSiteCard);
+                var popular = parseHdmoviePopular(html, mainUrl).map(buildSiteCard);
+                if (featured.length) data["Featured"] = featured;
+                if (latest.length) data["Latest"] = latest;
+                if (popular.length) data["Popular"] = popular;
+            }
             cb({ success: true, data: data });
         } catch (error) {
             cb({ success: false, errorCode: "SITE_OFFLINE", message: String(error && error.message || error) });
@@ -495,7 +539,15 @@
                     bannerUrl: details.bannerUrl,
                     description: details.description,
                     year: details.year,
-                    type: "movie"
+                    type: "movie",
+                    episodes: [new Episode({
+                        name: "Movie",
+                        url: buildSitePayload(details),
+                        season: 0,
+                        episode: 0,
+                        posterUrl: details.posterUrl,
+                        description: details.description
+                    })]
                 })
             });
         } catch (error) {

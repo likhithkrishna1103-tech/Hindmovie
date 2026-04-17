@@ -368,6 +368,23 @@
                     }
                 }
                 item.episodes = episodes;
+            } else {
+                item.episodes = [new Episode({
+                    name: "Movie",
+                    season: 0,
+                    episode: 0,
+                    posterUrl: tmdbImage(details.poster_path),
+                    url: buildPayload({
+                        mode: "tmdb",
+                        tmdbId: payload.tmdbId,
+                        mediaType: payload.mediaType,
+                        title: details.title || details.name || payload.title,
+                        originalTitle: details.original_title || details.original_name || payload.originalTitle || payload.title,
+                        year: Number(String(details.release_date || details.first_air_date || "").slice(0, 4)) || payload.year || 0,
+                        anime: true,
+                        isMovie: true
+                    })
+                })];
             }
 
             cb({ success: true, data: item });
