@@ -170,6 +170,7 @@
             var eps = extractPageEpisodes(html, url);
             var type = /season|episode/i.test(title) ? "series" : "movie";
             var bundledPayloads = [];
+            var qualityHasIntermediate = {};
             var i;
 
             eps.sort(function(a, b) {
@@ -181,9 +182,14 @@
             if (type === "movie") {
                 for (i = 0; i < eps.length; i++) {
                     try {
-                        bundledPayloads.push(JSON.parse(eps[i].url));
+                        var payload = JSON.parse(eps[i].url);
+                        if (payload && payload.type === "intermediate") qualityHasIntermediate[Number(payload.quality || 0)] = true;
+                        bundledPayloads.push(payload);
                     } catch (_) {}
                 }
+                bundledPayloads = bundledPayloads.filter(function (payload) {
+                    return !shouldSkipBundledMoviePayload(payload, qualityHasIntermediate);
+                });
                 eps = bundledPayloads.length ? [new Episode({
                     name: "Movie",
                     url: JSON.stringify(bundledPayloads),
@@ -556,6 +562,14 @@
         }
 
         return parts.join(" ").trim() || label + " Links";
+    }
+
+    function shouldSkipBundledMoviePayload(payload, qualityHasIntermediate) {
+        var url = String(payload && payload.url || "");
+        var quality = Number(payload && payload.quality || 0);
+        if (!url) return true;
+        if (/links\.kmhd\.eu\/play\?/i.test(url) && qualityHasIntermediate[quality]) return true;
+        return false;
     }
 
     function extractPageEpisodes(html, pageUrl) {
@@ -1364,6 +1378,23 @@
 
     function loadStreams(url, cb) {
         try {
+            function collectPayloadSetsSequential(payloads) {
+                var sets = [];
+                var chain = Promise.resolve();
+
+                (payloads || []).forEach(function (payload) {
+                    chain = chain.then(function () {
+                        return withTimeout(collectStreamsFromPayload(payload), 10000).catch(function () {
+                            return [];
+                        }).then(function (result) {
+                            sets.push(result || []);
+                        });
+                    });
+                });
+
+                return chain.then(function () { return sets; });
+            }
+
             function resolveAndReply(results, fallback) {
                 return Promise.all((results || []).map(function (item) {
                     return resolveStreamCandidate(item, 0);
@@ -1406,11 +1437,7 @@
 
             var parsed = JSON.parse(url);
             var payloads = Array.isArray(parsed) ? parsed : [parsed];
-            return Promise.all(payloads.map(function (payload) {
-                return collectStreamsFromPayload(payload).catch(function () {
-                    return [];
-                });
-            })).then(function (sets) {
+            return collectPayloadSetsSequential(payloads).then(function (sets) {
                 var initialResults = flattenResults(sets);
                 if (!initialResults.length && payloads.length === 1 && payloads[0] && payloads[0].url && payloads[0].type !== "intermediate") {
                     initialResults = [
