@@ -168,6 +168,9 @@
             if (ogm) poster = ogm[1];
 
             var eps = extractPageEpisodes(html, url);
+            var type = /season|episode/i.test(title) ? "series" : "movie";
+            var bundledPayloads = [];
+            var i;
 
             eps.sort(function(a, b) {
                 var qa = JSON.parse(a.url).quality;
@@ -175,11 +178,26 @@
                 return qb - qa;
             });
 
+            if (type === "movie") {
+                for (i = 0; i < eps.length; i++) {
+                    try {
+                        bundledPayloads.push(JSON.parse(eps[i].url));
+                    } catch (_) {}
+                }
+                eps = bundledPayloads.length ? [new Episode({
+                    name: "Movie",
+                    url: JSON.stringify(bundledPayloads),
+                    season: 1,
+                    episode: 1,
+                    posterUrl: poster
+                })] : [];
+            }
+
             cb({ success: true, data: new MultimediaItem({
                 title: title || "Unknown",
                 url: url,
                 posterUrl: poster,
-                type: /season|episode/i.test(title) ? "series" : "movie",
+                type: type,
                 episodes: eps
             })});
         }).catch(function (e) { cb({ success: false, errorCode: "LOAD_ERROR", message: e.message }); });
@@ -772,12 +790,51 @@
             var item = results[i];
             var key;
             if (!item || !item.url) continue;
-            key = String(item.source || "") + "||" + String(item.url);
+            key = canonicalResultKey(item);
             if (seen[key]) continue;
             seen[key] = true;
             out.push(item);
         }
         return out;
+    }
+
+    function canonicalResultKey(item) {
+        var source = String(item && item.source || "");
+        var url = String(item && item.url || "");
+        var parsed;
+        var id = "";
+
+        try {
+            parsed = new URL(url);
+            if (/streamtape\./i.test(parsed.hostname) && /\/get_video/i.test(parsed.pathname)) {
+                id = parsed.searchParams.get("id") || "";
+                if (id) return source + "||streamtape||" + id;
+            }
+            if (/hglink\.to|streamwish/i.test(parsed.hostname) && /\/e\//i.test(parsed.pathname)) {
+                id = parsed.pathname.replace(/^.*\/e\//i, "").replace(/\/+$/, "");
+                if (id) return source + "||streamwish||" + id;
+            }
+            if (/pixeldrain/i.test(parsed.hostname) && /\/api\/file\//i.test(parsed.pathname)) {
+                return source + "||" + parsed.origin + parsed.pathname;
+            }
+            if (/hub\.odyssey\.surf|fsl\.gigabytes\.icu|getnowit\.site/i.test(parsed.hostname)) {
+                return source + "||" + parsed.origin + parsed.pathname;
+            }
+        } catch (_) {}
+
+        return source + "||" + url;
+    }
+
+    function sortResults(results) {
+        return (results || []).slice().sort(function (a, b) {
+            var qa = Number(a && a.quality || 0);
+            var qb = Number(b && b.quality || 0);
+            var sa = String(a && a.source || "");
+            var sb = String(b && b.source || "");
+            if (qb !== qa) return qb - qa;
+            if (sa !== sb) return sa < sb ? -1 : 1;
+            return String(a && a.url || "") < String(b && b.url || "") ? -1 : 1;
+        });
     }
 
     function looksDirect(url) {
@@ -1307,42 +1364,65 @@
 
     function loadStreams(url, cb) {
         try {
-            var p = JSON.parse(url);
-            log("Loading streams for quality:", p.quality, p.url);
-
             function resolveAndReply(results, fallback) {
                 return Promise.all((results || []).map(function (item) {
                     return resolveStreamCandidate(item, 0);
                 })).then(function (resolvedSets) {
                     var resolved = filterResolvedResults(flattenResults(resolvedSets));
                     var filteredFallback = filterResolvedResults(fallback || results || []);
-                    var finalResults = resolved.length ? resolved : filteredFallback;
+                    var finalResults = sortResults(resolved.length ? resolved : filteredFallback);
                     log("Total streams:", finalResults.length);
                     cb({ success: true, data: finalResults });
                 });
             }
 
-            if (p.type !== "intermediate") {
-                return resolveAndReply([
-                    buildStream(
-                        p.url,
-                        p.quality,
-                        p.source || detectHoster(p.url) || "Source",
-                        mergeHeaders({ "Referer": p.pageUrl || BROWSER_HEADERS.Referer })
-                    )
-                ]);
-            }
+            function collectStreamsFromPayload(p) {
+                if (!p || !p.url) return Promise.resolve([]);
+                log("Loading streams for quality:", p.quality, p.url);
 
-            unlockKmhdFilePage(p.url, p.pageUrl || BROWSER_HEADERS.Referer).then(function (page) {
-                var html = String(page && page.html || "");
-                var results = extractStreamsFromStreamedData(html, p.quality, page.headers);
-
-                if (!results.length) {
-                    log("No streamed JSON links found, falling back to anchor scan");
-                    results = extractStreamsFromAnchors(html, page.finalUrl || p.url, p.quality, page.headers);
+                if (p.type !== "intermediate") {
+                    return Promise.resolve([
+                        buildStream(
+                            p.url,
+                            p.quality,
+                            p.source || detectHoster(p.url) || "Source",
+                            mergeHeaders({ "Referer": p.pageUrl || BROWSER_HEADERS.Referer })
+                        )
+                    ]);
                 }
 
-                return resolveAndReply(results, results);
+                return unlockKmhdFilePage(p.url, p.pageUrl || BROWSER_HEADERS.Referer).then(function (page) {
+                    var html = String(page && page.html || "");
+                    var results = extractStreamsFromStreamedData(html, p.quality, page.headers);
+
+                    if (!results.length) {
+                        log("No streamed JSON links found, falling back to anchor scan");
+                        results = extractStreamsFromAnchors(html, page.finalUrl || p.url, p.quality, page.headers);
+                    }
+
+                    return results;
+                });
+            }
+
+            var parsed = JSON.parse(url);
+            var payloads = Array.isArray(parsed) ? parsed : [parsed];
+            return Promise.all(payloads.map(function (payload) {
+                return collectStreamsFromPayload(payload).catch(function () {
+                    return [];
+                });
+            })).then(function (sets) {
+                var initialResults = flattenResults(sets);
+                if (!initialResults.length && payloads.length === 1 && payloads[0] && payloads[0].url && payloads[0].type !== "intermediate") {
+                    initialResults = [
+                        buildStream(
+                            payloads[0].url,
+                            payloads[0].quality,
+                            payloads[0].source || detectHoster(payloads[0].url) || "Source",
+                            mergeHeaders({ "Referer": payloads[0].pageUrl || BROWSER_HEADERS.Referer })
+                        )
+                    ];
+                }
+                return resolveAndReply(initialResults, initialResults);
             }).catch(function (e) {
                 log("Error:", e.message);
                 cb({ success: false, errorCode: "STREAM_ERROR", message: e.message });
