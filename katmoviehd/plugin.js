@@ -659,12 +659,12 @@
             if (!hoster && !isInterestingStreamUrl(candidate)) continue;
             if (seen[candidate]) continue;
             seen[candidate] = true;
-            out.push(new StreamResult({
+            out.push({
                 url: candidate,
                 quality: quality || extractQuality(sourceHint + " " + candidate),
                 source: hoster || "Source",
                 headers: headers
-            }));
+            });
         }
     }
 
@@ -749,12 +749,12 @@
     }
 
     function buildStream(url, quality, source, headers) {
-        return new StreamResult({
+        return {
             url: url,
             quality: quality || extractQuality(source + " " + url),
             source: source || detectHoster(url) || "Source",
             headers: headers || {}
-        });
+        };
     }
 
     function pushStream(out, seen, url, quality, source, headers) {
@@ -1403,7 +1403,12 @@
                     var filteredFallback = filterResolvedResults(fallback || results || []);
                     var finalResults = sortResults(resolved.length ? resolved : filteredFallback);
                     log("Total streams:", finalResults.length);
-                    cb({ success: true, data: finalResults });
+                    cb({
+                        success: true,
+                        data: finalResults.map(function (item) {
+                            return new StreamResult(item);
+                        })
+                    });
                 });
             }
 
