@@ -588,6 +588,263 @@
         return results;
     }
 
+    function cloneHeaders(headers) {
+        var out = {};
+        for (var key in headers) {
+            if (Object.prototype.hasOwnProperty.call(headers, key) && typeof headers[key] !== "undefined") {
+                out[key] = headers[key];
+            }
+        }
+        return out;
+    }
+
+    function buildStream(url, quality, source, headers) {
+        return new StreamResult({
+            url: url,
+            quality: quality || extractQuality(source + " " + url),
+            source: source || detectHoster(url) || "Source",
+            headers: headers || {}
+        });
+    }
+
+    function pushStream(out, seen, url, quality, source, headers) {
+        var normalized = normalizeExtractedUrl(url, headers && (headers.Referer || headers.referer));
+        var key;
+        if (!normalized || !/^https?:\/\//i.test(normalized)) return;
+        key = String(source || "") + "||" + normalized;
+        if (seen[key]) return;
+        seen[key] = true;
+        out.push(buildStream(normalized, quality, source, headers));
+    }
+
+    function flattenResults(resultSets) {
+        var out = [];
+        var i;
+        var j;
+        for (i = 0; i < resultSets.length; i++) {
+            var set = resultSets[i];
+            if (!Array.isArray(set)) continue;
+            for (j = 0; j < set.length; j++) out.push(set[j]);
+        }
+        return out;
+    }
+
+    function withTimeout(promise, ms) {
+        var timer = null;
+        return Promise.race([
+            promise,
+            new Promise(function (_, reject) {
+                timer = setTimeout(function () {
+                    reject(new Error("Timeout after " + ms + "ms"));
+                }, ms);
+            })
+        ]).then(function (value) {
+            if (timer) clearTimeout(timer);
+            return value;
+        }).catch(function (err) {
+            if (timer) clearTimeout(timer);
+            throw err;
+        });
+    }
+
+    function dedupeResults(results) {
+        var out = [];
+        var seen = {};
+        for (var i = 0; i < results.length; i++) {
+            var item = results[i];
+            var key;
+            if (!item || !item.url) continue;
+            key = String(item.source || "") + "||" + String(item.url);
+            if (seen[key]) continue;
+            seen[key] = true;
+            out.push(item);
+        }
+        return out;
+    }
+
+    function looksDirect(url) {
+        return /(?:googlevideo\.com|\.m3u8|\.mp4|\.mkv|\.avi|\.mpd)(?:$|[?#])/i.test(String(url || "")) ||
+            /streamtape\.[^/]+\/get_video\?/i.test(String(url || ""));
+    }
+
+    function appendQuery(url, chunk) {
+        if (!url) return "";
+        if (!chunk) return url;
+        return url + (url.indexOf("?") === -1 ? "?" : (/[?&]$/.test(url) ? "" : "&")) + chunk;
+    }
+
+    function normalizeStreamTapeUrl(rawValue) {
+        var value = decodeHtml(String(rawValue || "").trim());
+        if (!value) return "";
+        if (/^\/(?:www\.)?streamtape\./i.test(value)) value = "https:/" + value;
+        if (/^\/\/(?:www\.)?streamtape\./i.test(value)) value = "https:" + value;
+        if (/^http:\/\//i.test(value)) value = value.replace(/^http:\/\//i, "https://");
+        value = normalizeExtractedUrl(value, "https://streamtape.com/");
+        if (/^https?:\/\/(?:www\.)?streamtape\.com\/get_video\?/i.test(value)) {
+            value = value.replace(/^(https?:\/\/)(?:www\.)?streamtape\.com\/get_video\?/i, "$1streamtape.co/get_video?");
+        }
+        return value;
+    }
+
+    function extractStreamTapeDirectUrl(html) {
+        var ids = ["botlink", "ideoolink", "robotlink"];
+        var i;
+        var assignment;
+        var hidden;
+        var value = "";
+
+        for (i = 0; i < ids.length; i++) {
+            assignment = new RegExp(
+                "document\\.getElementById\\(['\"]" + ids[i] + "['\"]\\)\\.innerHTML\\s*=\\s*['\"]([^'\"]*)['\"]\\s*\\+\\s*\\(['\"]([^'\"]*)['\"]\\)\\.substring\\((\\d+)\\)(?:\\.substring\\((\\d+)\\))?",
+                "i"
+            ).exec(String(html || ""));
+            if (assignment) {
+                value = assignment[1] + assignment[2].substring(Number(assignment[3] || 0));
+                if (assignment[4]) value = value.substring(Number(assignment[4] || 0));
+                value = normalizeStreamTapeUrl(value);
+                if (value) return value;
+            }
+        }
+
+        for (i = 0; i < ids.length; i++) {
+            hidden = new RegExp("id=['\"]" + ids[i] + "['\"][^>]*>([^<]+)<", "i").exec(String(html || ""));
+            if (!hidden) continue;
+            value = normalizeStreamTapeUrl(hidden[1]);
+            if (value) return value;
+        }
+
+        hidden = String(html || "").match(/https?:\/\/(?:www\.)?streamtape\.[^"'\s<>]+get_video\?[^"'\s<>]+/i);
+        return hidden ? normalizeStreamTapeUrl(hidden[0]) : "";
+    }
+
+    function resolveStreamTape(url, quality, headers) {
+        var pageHeaders = cloneHeaders(headers || {});
+        if (!pageHeaders.Referer && !pageHeaders.referer) pageHeaders.Referer = baseOrigin(url) + "/";
+
+        return networkRequest(url, {
+            headers: pageHeaders,
+            followRedirects: true
+        }).then(function (res) {
+            var html = String(res && res.body || "");
+            var directUrl = extractStreamTapeDirectUrl(html);
+            var shimHeaders;
+            var shimHtml;
+            var redirectMatch;
+            var redirectUrl;
+
+            if (!directUrl) return [];
+            directUrl = appendQuery(directUrl, "stream=1");
+            shimHeaders = mergeHeaders({ "Referer": res && res.finalUrl || url });
+
+            return networkRequest(directUrl, {
+                headers: shimHeaders,
+                followRedirects: true
+            }).then(function (shimRes) {
+                var out = [];
+                var seen = {};
+
+                shimHtml = String(shimRes && shimRes.body || "");
+                redirectMatch = shimHtml.match(/var\s+redirect_link\s*=\s*['"]([^'"]+)['"]/i);
+                redirectUrl = redirectMatch ? normalizeStreamTapeUrl(redirectMatch[1]) : "";
+
+                if (redirectUrl) {
+                    redirectUrl = appendQuery(redirectUrl, "fp=-7");
+                    pushStream(out, seen, redirectUrl, quality, "StreamTape Direct", shimHeaders);
+                } else {
+                    pushStream(out, seen, directUrl, quality, "StreamTape Direct", shimHeaders);
+                }
+                return out;
+            }).catch(function () {
+                return [buildStream(directUrl, quality, "StreamTape Direct", shimHeaders)];
+            });
+        }).catch(function () {
+            return [];
+        });
+    }
+
+    function resolveHubCloud(url, quality, headers) {
+        var reqHeaders = mergeHeaders({ "Referer": baseOrigin(url) + "/" });
+        var anchorHint = /hubdrive/i.test(url) ? "HubDrive" : "HubCloud";
+
+        return networkRequest(url, {
+            headers: reqHeaders,
+            followRedirects: true
+        }).then(function (firstRes) {
+            var firstHtml = String(firstRes && firstRes.body || "");
+            var firstUrl = firstRes && firstRes.finalUrl || url;
+            var innerHrefMatch = firstHtml.match(/id=["']download["'][^>]*href=["']([^"']+)["']/i) ||
+                firstHtml.match(/href=["']([^"']+)["'][^>]*id=["']download["']/i);
+            var innerUrl = innerHrefMatch ? resolveUrl(decodeHtml(innerHrefMatch[1]), baseOrigin(firstUrl) + "/") : firstUrl;
+            var innerPromise = innerUrl !== firstUrl ? networkRequest(innerUrl, {
+                headers: mergeHeaders({ "Referer": baseOrigin(firstUrl) + "/" }),
+                followRedirects: true
+            }) : Promise.resolve(firstRes);
+
+            return innerPromise.then(function (innerRes) {
+                var html = String(innerRes && innerRes.body || firstHtml);
+                var base = baseOrigin(innerRes && innerRes.finalUrl || innerUrl) || baseOrigin(innerUrl) || baseOrigin(url);
+                var anchors = parseAnchors(html, base);
+                var out = [];
+                var seen = {};
+
+                for (var i = 0; i < anchors.length; i++) {
+                    var anchor = anchors[i];
+                    var text = String(anchor.text || "");
+                    var lower = text.toLowerCase();
+                    var resultHeaders = mergeHeaders({ "Referer": innerRes && innerRes.finalUrl || innerUrl || url });
+                    var pixelUrl = "";
+
+                    if (!anchor || !anchor.href) continue;
+                    if (/\/drive\/admin\b/i.test(anchor.href) || /\badmin\b/i.test(lower)) continue;
+                    if (/pixeldra|pixelserver|pixel server|pixeldrain/i.test(lower)) {
+                        pixelUrl = /download/i.test(anchor.href)
+                            ? anchor.href
+                            : (baseOrigin(anchor.href) + "/api/file/" + anchor.href.split("/").pop() + "?download");
+                        pushStream(out, seen, pixelUrl, extractQuality(text) || quality, anchorHint + " Direct", resultHeaders);
+                        continue;
+                    }
+                    if (/download file|download|server|file|mega|s3|buzz|gofile|drive/i.test(lower + " " + anchor.href)) {
+                        pushStream(out, seen, anchor.href, extractQuality(text) || quality, detectHoster(text + " " + anchor.href) || anchorHint, resultHeaders);
+                    }
+                }
+                return out;
+            });
+        }).catch(function () {
+            return [];
+        });
+    }
+
+    function resolveStreamCandidate(item, depth) {
+        var url;
+        depth = Number(depth || 0);
+        if (!item || !item.url || depth > 2) return Promise.resolve(item ? [item] : []);
+        url = String(item.url || "");
+        if (looksDirect(url)) return Promise.resolve([item]);
+
+        if (/streamtape\.com\/e\//i.test(url)) {
+            return withTimeout(resolveStreamTape(url, item.quality, item.headers || {}), 12000).then(function (results) {
+                return results && results.length ? results : [item];
+            }).catch(function () {
+                return [item];
+            });
+        }
+
+        if (/hubcloud\.|hubcloud\.fans|hubcloud\.foo|hubdrive\.|gamerxyt\.com\/hubcloud\.php/i.test(url)) {
+            return withTimeout(resolveHubCloud(url, item.quality, item.headers || {}), 12000).then(function (results) {
+                if (!results || !results.length) return [item];
+                return Promise.all(results.map(function (resolved) {
+                    return resolveStreamCandidate(resolved, depth + 1);
+                })).then(function (nested) {
+                    return dedupeResults(flattenResults(nested));
+                });
+            }).catch(function () {
+                return [item];
+            });
+        }
+
+        return Promise.resolve([item]);
+    }
+
     function unlockKmhdFilePage(fileUrl, referer) {
         var initialHeaders = mergeHeaders({ "Referer": referer || BROWSER_HEADERS.Referer });
         return networkRequest(fileUrl, {
@@ -682,8 +939,13 @@
                     results = extractStreamsFromAnchors(html, page.finalUrl || p.url, p.quality, page.headers);
                 }
 
-                log("Total streams:", results.length);
-                cb({ success: true, data: results });
+                return Promise.all(results.map(function (item) {
+                    return resolveStreamCandidate(item, 0);
+                })).then(function (resolvedSets) {
+                    var resolved = dedupeResults(flattenResults(resolvedSets));
+                    log("Total streams:", resolved.length);
+                    cb({ success: true, data: resolved.length ? resolved : results });
+                });
             }).catch(function (e) {
                 log("Error:", e.message);
                 cb({ success: false, errorCode: "STREAM_ERROR", message: e.message });
