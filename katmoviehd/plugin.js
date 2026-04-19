@@ -1552,101 +1552,96 @@
         return payloads;
     }
 
+    async function collectStreamsFromPayload(payload) {
+        if (!payload || !payload.url) return [];
+        log("Loading streams for quality:", payload.quality, payload.url);
+
+        if (payload.type !== "intermediate") {
+            return [
+                buildStream(
+                    payload.url,
+                    payload.quality,
+                    payload.source || detectHoster(payload.url) || "Source",
+                    mergeHeaders({ "Referer": payload.pageUrl || BROWSER_HEADERS.Referer })
+                )
+            ];
+        }
+
+        var page = await unlockKmhdFilePage(payload.url, payload.pageUrl || BROWSER_HEADERS.Referer);
+        var html = String(page && page.html || "");
+        var results = extractStreamsFromStreamedData(html, payload.quality, page.headers);
+
+        if (!results.length) {
+            log("No streamed JSON links found, falling back to anchor scan");
+            results = extractStreamsFromAnchors(html, page.finalUrl || payload.url, payload.quality, page.headers);
+        }
+
+        return results;
+    }
+
+    function collectPayloadSets(payloads) {
+        return Promise.all((payloads || []).map(function (payload) {
+            return withTimeout(collectStreamsFromPayload(payload), 10000).catch(function () {
+                return [];
+            });
+        }));
+    }
+
+    function buildAppStreamResult(item) {
+        var url = String(item && item.url || "");
+        var sourceText = String(item && item.source || "") + " " + url;
+        var quality = Number(item && item.quality || extractQuality(sourceText));
+
+        return new StreamResult({
+            url: url,
+            quality: quality || undefined,
+            source: formatStreamSource(item && item.source || detectHoster(url) || "Source", quality),
+            headers: item && item.headers || {}
+        });
+    }
+
+    async function resolveFinalStreams(results, fallback) {
+        var resolvedSets = await Promise.all((results || []).map(function (item) {
+            return resolveStreamCandidate(item, 0);
+        }));
+        var resolved = filterResolvedResults(flattenResults(resolvedSets));
+        var filteredFallback = filterResolvedResults(fallback || results || []);
+        var finalResults = sortResults(resolved.length ? resolved : filteredFallback);
+        log("Total streams:", finalResults.length);
+        return finalResults.map(buildAppStreamResult);
+    }
+
     async function loadStreams(url, cb) {
         try {
-            function collectPayloadSetsSequential(payloads) {
-                return Promise.all((payloads || []).map(function (payload) {
-                    return withTimeout(collectStreamsFromPayload(payload), 10000).catch(function () {
-                        return [];
-                    });
-                }));
-            }
-
-            function resolveAndReply(results, fallback) {
-                return Promise.all((results || []).map(function (item) {
-                    return resolveStreamCandidate(item, 0);
-                })).then(function (resolvedSets) {
-                    var resolved = filterResolvedResults(flattenResults(resolvedSets));
-                    var filteredFallback = filterResolvedResults(fallback || results || []);
-                    var finalResults = sortResults(resolved.length ? resolved : filteredFallback);
-                    log("Total streams:", finalResults.length);
-                    cb({
-                        success: true,
-                        data: finalResults.map(function (item) {
-                            var quality = Number(item && item.quality || extractQuality(String(item && item.source || "") + " " + String(item && item.url || "")));
-                            return new StreamResult({
-                                url: item.url,
-                                quality: quality || undefined,
-                                source: formatStreamSource(item.source || detectHoster(item.url) || "Source", quality),
-                                headers: item.headers || {}
-                            });
-                        })
-                    });
-                });
-            }
-
-            function collectStreamsFromPayload(p) {
-                if (!p || !p.url) return Promise.resolve([]);
-                log("Loading streams for quality:", p.quality, p.url);
-
-                if (p.type !== "intermediate") {
-                    return Promise.resolve([
-                        buildStream(
-                            p.url,
-                            p.quality,
-                            p.source || detectHoster(p.url) || "Source",
-                            mergeHeaders({ "Referer": p.pageUrl || BROWSER_HEADERS.Referer })
-                        )
-                    ]);
-                }
-
-                return unlockKmhdFilePage(p.url, p.pageUrl || BROWSER_HEADERS.Referer).then(function (page) {
-                    var html = String(page && page.html || "");
-                    var results = extractStreamsFromStreamedData(html, p.quality, page.headers);
-
-                    if (!results.length) {
-                        log("No streamed JSON links found, falling back to anchor scan");
-                        results = extractStreamsFromAnchors(html, page.finalUrl || p.url, p.quality, page.headers);
-                    }
-
-                    return results;
-                });
-            }
-
             var payloads = parseLoadStreamsInput(url);
             if (!payloads.length) {
                 cb({ success: true, data: [] });
                 return;
             }
 
-            return collectPayloadSetsSequential(payloads).then(function (sets) {
-                var initialResults = flattenResults(sets);
-                if (!initialResults.length && payloads.length === 1 && payloads[0] && payloads[0].url && payloads[0].type !== "intermediate") {
-                    initialResults = [
-                        buildStream(
-                            payloads[0].url,
-                            payloads[0].quality,
-                            payloads[0].source || detectHoster(payloads[0].url) || "Source",
-                            mergeHeaders({ "Referer": payloads[0].pageUrl || BROWSER_HEADERS.Referer })
-                        )
-                    ];
-                }
-                return resolveAndReply(initialResults, initialResults);
-            }).catch(function (e) {
-                log("Error:", e.message);
-                cb({ success: false, errorCode: "STREAM_ERROR", message: e.message });
-            });
-        } catch (e) {
-            cb({ success: false, errorCode: "STREAM_ERROR", message: e.message });
+            var sets = await collectPayloadSets(payloads);
+            var initialResults = flattenResults(sets);
+            if (!initialResults.length && payloads.length === 1 && payloads[0] && payloads[0].url && payloads[0].type !== "intermediate") {
+                initialResults = [
+                    buildStream(
+                        payloads[0].url,
+                        payloads[0].quality,
+                        payloads[0].source || detectHoster(payloads[0].url) || "Source",
+                        mergeHeaders({ "Referer": payloads[0].pageUrl || BROWSER_HEADERS.Referer })
+                    )
+                ];
+            }
+
+            var streams = await resolveFinalStreams(initialResults, initialResults);
+            cb({ success: true, data: streams });
+        } catch (error) {
+            log("Error:", error && error.message || error);
+            cb({ success: false, errorCode: "STREAM_ERROR", message: String(error && error.message || error) });
         }
     }
 
-    if (typeof globalThis !== "undefined") {
-        globalThis.getHome = getHome; globalThis.search = search;
-        globalThis.load = load; globalThis.loadStreams = loadStreams;
-    }
-    if (typeof window !== "undefined") {
-        window.getHome = getHome; window.search = search;
-        window.load = load; window.loadStreams = loadStreams;
-    }
+    globalThis.getHome = getHome;
+    globalThis.search = search;
+    globalThis.load = load;
+    globalThis.loadStreams = loadStreams;
 })();
