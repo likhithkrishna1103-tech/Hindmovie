@@ -69,6 +69,25 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.castletv.sky"
   },
   {
+    "packageName": "com.igris.repo.cinestream",
+    "name": "CineStream",
+    "version": 2,
+    "baseUrl": "https://www.themoviedb.org",
+    "description": "TMDB catalog with a CineStream-style non-torrent source stack.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en"
+    ],
+    "categories": [
+      "Movies",
+      "Series",
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.cinestream.sky"
+  },
+  {
     "packageName": "com.igris.repo.cricifyliveevents",
     "name": "Cricify Live Events",
     "version": 5,
@@ -139,7 +158,7 @@
   {
     "packageName": "com.igris.repo.freetv",
     "name": "Free TV",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://playlist-storage.pages.dev/PLAYLIST/freetv.m3u",
     "description": "Free live TV with ready-to-play channels.",
     "authors": [
@@ -149,14 +168,32 @@
       "en"
     ],
     "categories": [
-      "Live TV"
+      "livestream"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.freetv.sky"
   },
   {
+    "packageName": "com.igris.repo.hdmovie2",
+    "name": "HDMovie2",
+    "version": 3,
+    "baseUrl": "https://hdmovie2.restaurant",
+    "description": "TMDB catalog with HDMovie2 stream resolution.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en"
+    ],
+    "categories": [
+      "Movies",
+      "Series"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.hdmovie2.sky"
+  },
+  {
     "packageName": "com.igris.repo.hindmoviez",
     "name": "HindMoviez",
-    "version": 6,
+    "version": 7,
     "baseUrl": "https://example.com",
     "description": "Trending movies and series, quickly.",
     "authors": [
@@ -174,7 +211,7 @@
   {
     "packageName": "com.igris.repo.playztvjio",
     "name": "Jio - PlayZTV",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://adsflw.xyz",
     "description": "Jio live TV lineup via PlayZTV.",
     "authors": [
@@ -184,14 +221,14 @@
       "en"
     ],
     "categories": [
-      "Live TV"
+      "livestream"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztvjio.sky"
   },
   {
     "packageName": "com.igris.repo.kaido",
     "name": "Kaido",
-    "version": 3,
+    "version": 4,
     "baseUrl": "https://example.com",
     "description": "Anime streaming with quick episode access.",
     "authors": [
@@ -204,6 +241,23 @@
       "Anime"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.kaido.sky"
+  },
+  {
+    "packageName": "com.igris.repo.katmoviehd",
+    "name": "Kat MovieHD",
+    "version": 11,
+    "baseUrl": "https://katmoviehd.run",
+    "description": "Kat MovieHD plugin for ZORO",
+    "authors": [
+      "Developer"
+    ],
+    "languages": [
+      "en"
+    ],
+    "categories": [
+      "Others"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.katmoviehd.sky"
   },
   {
     "packageName": "com.igris.repo.movierulz",
@@ -225,7 +279,7 @@
   {
     "packageName": "com.igris.repo.movies4u",
     "name": "Movies4U",
-    "version": 8,
+    "version": 9,
     "baseUrl": "https://movies4u.rs",
     "description": "Movie picks with straightforward stream links.",
     "authors": [
@@ -242,7 +296,7 @@
   {
     "packageName": "com.igris.repo.playztvpiratestv",
     "name": "Pirates TV - PlayZTV",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://adsflw.xyz",
     "description": "Pirates TV live channels via PlayZTV.",
     "authors": [
@@ -252,7 +306,7 @@
       "en"
     ],
     "categories": [
-      "Live TV"
+      "livestream"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztvpiratestv.sky"
   },
@@ -311,7 +365,7 @@
   {
     "packageName": "com.igris.repo.playztvsunnxt",
     "name": "Sun NXT - PlayZTV",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://adsflw.xyz",
     "description": "Sun NXT live channels via PlayZTV.",
     "authors": [
@@ -321,14 +375,50 @@
       "en"
     ],
     "categories": [
-      "Live TV"
+      "livestream"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztvsunnxt.sky"
   },
   {
+    "packageName": "com.igris.repo.tokyoinsider",
+    "name": "TokyoInsider",
+    "version": 3,
+    "baseUrl": "https://www.tokyoinsider.com",
+    "description": "TMDB anime catalog with TokyoInsider links.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.tokyoinsider.sky"
+  },
+  {
+    "packageName": "com.igris.repo.vegamovies",
+    "name": "VegaMovies",
+    "version": 78,
+    "baseUrl": "https://vegamovies.vodka",
+    "description": "VegaMovies catalog with Nexdrive and V-Cloud stream resolution.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "hi"
+    ],
+    "categories": [
+      "Movies",
+      "Series",
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.vegamovies.sky"
+  },
+  {
     "packageName": "com.igris.repo.playztvzee",
     "name": "Zee - PlayZTV",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://adsflw.xyz",
     "description": "Zee live channels via PlayZTV.",
     "authors": [
@@ -338,7 +428,7 @@
       "en"
     ],
     "categories": [
-      "Live TV"
+      "livestream"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztvzee.sky"
   }
