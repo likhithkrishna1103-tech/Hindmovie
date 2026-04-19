@@ -1,8 +1,8 @@
 {
   "packageName": "com.igris.repo.katmoviehd",
   "name": "Kat MovieHD",
-  "version": 9,
-  "baseUrl": "https://example.com",
+  "version": 10,
+  "baseUrl": "https://katmoviehd.run",
   "description": "Kat MovieHD plugin for ZORO",
   "authors": [
     "Developer"

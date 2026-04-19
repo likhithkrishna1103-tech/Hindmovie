@@ -228,6 +228,8 @@
                     episode: 1,
                     posterUrl: poster
                 })] : [];
+            } else {
+                eps = groupSeriesEpisodes(eps, poster);
             }
 
             cb({ success: true, data: new MultimediaItem({
@@ -517,8 +519,10 @@
         while ((match = re.exec(source)) !== null) {
             var inner = match[4] || "";
             var imgMatch = inner.match(/<img[^>]+(?:src|data-src)=["']([^"']+)["']/i);
-            var beforeContext = source.slice(Math.max(0, match.index - 90), match.index);
-            var afterContext = source.slice(re.lastIndex, Math.min(source.length, re.lastIndex + 90));
+            var beforeContext = source.slice(Math.max(0, match.index - 260), match.index);
+            var afterContext = source.slice(re.lastIndex, Math.min(source.length, re.lastIndex + 160));
+            var shortBeforeContext = source.slice(Math.max(0, match.index - 90), match.index);
+            var shortAfterContext = source.slice(re.lastIndex, Math.min(source.length, re.lastIndex + 90));
             out.push({
                 href: resolveUrl(decodeHtml(match[2]), base),
                 text: strip(inner),
@@ -526,7 +530,9 @@
                 img: imgMatch ? decodeHtml(imgMatch[1]) : "",
                 context: beforeContext + " " + afterContext,
                 beforeContext: beforeContext,
-                afterContext: afterContext
+                afterContext: afterContext,
+                shortBeforeContext: shortBeforeContext,
+                shortAfterContext: shortAfterContext
             });
         }
         return out;
@@ -605,6 +611,79 @@
         return false;
     }
 
+    function extractSeasonNumber(text) {
+        var value = String(text || "");
+        var match = value.match(/\bseason\s*(\d{1,3})\b/i) || value.match(/\bs(\d{1,3})\b/i);
+        return match ? Number(match[1]) : 1;
+    }
+
+    function extractEpisodeNumber(text) {
+        var value = decodeHtml(String(text || ""))
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+        var match = value.match(/\b(?:episode|ep)\s*[-.:#]?\s*(\d{1,3})\b/i) || value.match(/\bs\d{1,3}\s*e(\d{1,3})\b/i);
+        return match ? Number(match[1]) : 0;
+    }
+
+    function groupSeriesEpisodes(episodes, poster) {
+        var groups = {};
+        var order = [];
+
+        for (var i = 0; i < episodes.length; i++) {
+            var item = episodes[i];
+            var payload = parseJsonSafe(item && item.url || "", null);
+            if (!payload || !payload.url) continue;
+
+            var season = Number(item.season || payload.season || 1) || 1;
+            var episode = Number(item.episode || payload.episode || (i + 1)) || (i + 1);
+            var key = season + "_" + episode;
+
+            payload.season = season;
+            payload.episode = episode;
+
+            if (!groups[key]) {
+                groups[key] = {
+                    season: season,
+                    episode: episode,
+                    payloads: []
+                };
+                order.push(key);
+            }
+            groups[key].payloads.push(payload);
+        }
+
+        return order.sort(function (a, b) {
+            var left = groups[a];
+            var right = groups[b];
+            return left.season - right.season || left.episode - right.episode;
+        }).map(function (key) {
+            var group = groups[key];
+            var qualities = {};
+            var labels = [];
+
+            group.payloads.sort(function (a, b) {
+                return Number(b.quality || 0) - Number(a.quality || 0);
+            });
+
+            group.payloads.forEach(function (payload) {
+                var label = qualityLabel(payload.quality);
+                if (label && !qualities[label]) {
+                    qualities[label] = true;
+                    labels.push(label);
+                }
+            });
+
+            return new Episode({
+                name: "Episode " + group.episode + (labels.length ? " [" + labels.join(", ") + "]" : ""),
+                url: JSON.stringify(group.payloads),
+                season: group.season,
+                episode: group.episode,
+                posterUrl: poster || undefined
+            });
+        });
+    }
+
     function extractPageEpisodes(html, pageUrl) {
         var episodes = [];
         var anchors = parseAnchors(html, pageUrl);
@@ -613,6 +692,8 @@
         var pageTitleMatch = String(html || "").match(/<h1[^>]*>(.*?)<\/h1>/is);
         var pageTitle = pageTitleMatch ? strip(decodeHtml(pageTitleMatch[1])) : "";
         var pageQuality = extractQuality(pageTitle);
+        var seasonNumber = extractSeasonNumber(pageTitle);
+        var currentEpisode = 0;
 
         for (var i = 0; i < anchors.length; i++) {
             var anchor = anchors[i];
@@ -623,29 +704,36 @@
             var source = detectHoster(sourceHint);
             var quality = extractQuality(qualityHint);
             var payload;
+            var episodeNumber = extractEpisodeNumber(anchor.beforeContext + " " + anchor.text);
 
             if (isBlockedLink(href, sourceHint)) continue;
             if (/\/(?:tag|category|author|page)\//i.test(href)) continue;
             if (sameOrigin && !isInterestingPlayerUrl(href)) continue;
             if (!source && !isInterestingStreamUrl(href)) continue;
             if (source === "1xPlayer" && !isInterestingPlayerUrl(href)) continue;
-            if (!quality) quality = extractQuality(anchor.afterContext);
-            if (!quality) quality = extractQuality(anchor.beforeContext);
+            if (!quality) quality = extractQuality(anchor.shortAfterContext || anchor.afterContext);
+            if (!quality) quality = extractQuality(anchor.shortBeforeContext || anchor.beforeContext);
             if (!quality) continue;
             if (seen[href]) continue;
 
+            if (episodeNumber) currentEpisode = episodeNumber;
+            episodeNumber = currentEpisode || 1;
             seen[href] = true;
             payload = {
                 type: isIntermediateLink(href) ? "intermediate" : "direct",
                 url: href,
                 quality: quality,
                 pageUrl: pageUrl,
-                source: source || ""
+                source: source || "",
+                season: seasonNumber,
+                episode: episodeNumber
             };
 
             episodes.push(new Episode({
-                name: buildEpisodeName(quality, anchor.text, payload.source),
-                url: JSON.stringify(payload)
+                name: "Episode " + episodeNumber + " - " + buildEpisodeName(quality, anchor.text, payload.source),
+                url: JSON.stringify(payload),
+                season: seasonNumber,
+                episode: episodeNumber
             }));
         }
 
@@ -1404,7 +1492,7 @@
             var url = String(item && item.url || "");
             if (!url) return false;
             if (/1fichier\.com/i.test(url)) return false;
-            if (/gamerxyt\.com\/hubcloud\.php|hubcloud\.foo\/drive/i.test(url)) return false;
+            if (/gamerxyt\.com\/hubcloud\.php/i.test(url)) return false;
             if (/links\.kmhd\.eu\/play\?/i.test(url) && !looksDirect(url)) return false;
             if (isInterestingPlayerUrl(url) && !looksDirect(url)) return false;
             return true;
@@ -1437,10 +1525,24 @@
     }
 
     function parseLoadStreamsInput(input) {
-        var raw = String(input || "");
-        var parsed = parseJsonSafe(raw, null);
+        var raw = typeof input === "string" ? input : "";
+        var parsed = null;
         var payloads = [];
-        var source = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : [raw]);
+        var source;
+
+        if (typeof input === "string") {
+            parsed = parseJsonSafe(raw, null);
+        } else if (Array.isArray(input)) {
+            parsed = input;
+        } else if (input && typeof input === "object") {
+            if (input.url && typeof input.url === "string") {
+                parsed = parseJsonSafe(input.url, input);
+            } else {
+                parsed = input;
+            }
+        }
+
+        source = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : [raw]);
 
         for (var i = 0; i < source.length; i++) {
             var payload = normalizeStreamPayload(source[i], BROWSER_HEADERS.Referer);
@@ -1453,20 +1555,11 @@
     async function loadStreams(url, cb) {
         try {
             function collectPayloadSetsSequential(payloads) {
-                var sets = [];
-                var chain = Promise.resolve();
-
-                (payloads || []).forEach(function (payload) {
-                    chain = chain.then(function () {
-                        return withTimeout(collectStreamsFromPayload(payload), 10000).catch(function () {
-                            return [];
-                        }).then(function (result) {
-                            sets.push(result || []);
-                        });
+                return Promise.all((payloads || []).map(function (payload) {
+                    return withTimeout(collectStreamsFromPayload(payload), 10000).catch(function () {
+                        return [];
                     });
-                });
-
-                return chain.then(function () { return sets; });
+                }));
             }
 
             function resolveAndReply(results, fallback) {
