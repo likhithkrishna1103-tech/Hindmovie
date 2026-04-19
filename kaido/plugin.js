@@ -599,13 +599,18 @@
                             if (!exists) subtitles.push(sub);
                         });
                     }
+
+//                    // Add the subtitles array into every stream object
+//                    for (let i = 0; i < streams.length; i++) {
+//                        streams[i].subtitles = subtitles;
+//                     }
                 } catch (se) {
                     console.error("[loadStreams] Server " + server.label + " error:", se.message);
                 }
             }
 
             console.log("[loadStreams] Total streams:", streams.length, "subtitles:", subtitles.length);
-            cb({ success: true, data: streams, subtitles: subtitles });
+            cb({ success: true, data: streams });
 
         } catch (e) {
             console.error("[loadStreams] Fatal error:", e.message);
@@ -729,7 +734,7 @@
                 embedId = idMatch ? idMatch[1] : null;
                 if (!embedId) {
                     console.error("[MegaPlay] Cannot determine embed ID from:", embedUrl);
-                    return { streams: [], subtitles: [] };
+                    return { streams: [] };
                 }
             }
 
@@ -747,20 +752,20 @@
             var apiRes = await http_get(apiUrl, apiHeaders);
             if (!apiRes || !apiRes.body) {
                 console.error("[MegaPlay] Empty API response");
-                return { streams: [], subtitles: [] };
+                return { streams: [] };
             }
 
             var data = JSON.parse(apiRes.body);
 
             if (data.encrypted === true || (typeof data.sources === "string")) {
                 console.error("[MegaPlay] Encrypted sources — cannot decrypt without client key");
-                return { streams: [], subtitles: [] };
+                return { streams: [] };
             }
 
             var sources = data.sources || [];
             if (!Array.isArray(sources) || sources.length === 0) {
                 console.error("[MegaPlay] No sources in API response");
-                return { streams: [], subtitles: [] };
+                return { streams: [] };
             }
 
             // Stream headers matching Kotlin's mainHeaders exactly
@@ -809,17 +814,23 @@
                 if (kind === "captions" || kind === "subtitles") {
                     subtitles.push({
                         url:  track.file,
-                        name: track.label || "Unknown"
+                        label: track.label || "Unknown",
+                        lang: track.lang || "en"
                     });
                 }
             });
 
+            // Add the subtitles array into every stream object
+            for (let i = 0; i < streams.length; i++) {
+                streams[i].subtitles = subtitles;
+            }
+
             console.log("[MegaPlay] streams=" + streams.length + " subtitles=" + subtitles.length);
-            return { streams: streams, subtitles: subtitles };
+            return { streams: streams};
 
         } catch (e) {
             console.error("[MegaPlay] Error:", e.message);
-            return { streams: [], subtitles: [] };
+            return { streams: []};
         }
     }
 
