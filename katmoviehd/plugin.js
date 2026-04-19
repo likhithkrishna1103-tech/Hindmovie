@@ -51,6 +51,14 @@
         return "";
     }
 
+    function formatStreamSource(source, quality) {
+        var cleanSource = String(source || "Source").replace(/\s+/g, " ").trim() || "Source";
+        var label = qualityLabel(quality);
+        if (!label) return cleanSource;
+        if (/\b(?:2160p|1080p|720p|480p|4k)\b/i.test(cleanSource)) return cleanSource;
+        return cleanSource + " " + label;
+    }
+
     function isMovie(h) {
         if (!h) return false;
         if (h.indexOf("/category/") !== -1) return false;
@@ -115,18 +123,37 @@
 
     function getHome(cb) {
         getDomain().then(function (d) {
-            return http_get(d + "/", { headers: BROWSER_HEADERS });
-        }).then(function (res) {
-            var items = extractListingItems(res.body);
+            return http_get(d + "/", { headers: BROWSER_HEADERS }).then(function (res) {
+                return { domain: d, response: res };
+            });
+        }).then(function (result) {
+            var d = result.domain;
+            var items = extractListingItems(result.response.body);
 
             var sections = {};
             if (items.length > 0) {
                 var feat = items.slice(0, Math.min(6, items.length));
-                sections["\ud83d\udd25 Featured"] = feat.map(function(i) { return new MultimediaItem(i); });
+                sections["Featured"] = feat.map(function(i) {
+                    return new MultimediaItem({
+                        title: i.title,
+                        url: i.url,
+                        posterUrl: i.posterUrl,
+                        type: i.type,
+                        headers: { "User-Agent": "Mozilla/5.0", "Referer": d + "/" }
+                    });
+                });
 
                 var rest = items.slice(6);
                 if (rest.length > 0) {
-                    sections["\ud83c\udd95 Latest"] = rest.map(function(i) { return new MultimediaItem(i); });
+                    sections["Latest"] = rest.map(function(i) {
+                        return new MultimediaItem({
+                            title: i.title,
+                            url: i.url,
+                            posterUrl: i.posterUrl,
+                            type: i.type,
+                            headers: { "User-Agent": "Mozilla/5.0", "Referer": d + "/" }
+                        });
+                    });
                 }
             }
 
@@ -136,16 +163,20 @@
 
     function search(q, cb) {
         getDomain().then(function (d) {
-            return http_get(d + "/?s=" + encodeURIComponent(q), { headers: BROWSER_HEADERS });
-        }).then(function (res) {
-            var rawItems = extractListingItems(res.body);
+            return http_get(d + "/?s=" + encodeURIComponent(q), { headers: BROWSER_HEADERS }).then(function (res) {
+                return { domain: d, response: res };
+            });
+        }).then(function (result) {
+            var d = result.domain;
+            var rawItems = extractListingItems(result.response.body);
             var items = rawItems.map(function (item) {
                 return new MultimediaItem({
                     title: item.title,
                     url: item.url,
                     posterUrl: item.posterUrl,
                     type: item.type,
-                    quality: item.quality
+                    quality: item.quality,
+                    headers: { "User-Agent": "Mozilla/5.0", "Referer": d + "/" }
                 });
             });
 
@@ -203,7 +234,9 @@
                 title: title || "Unknown",
                 url: url,
                 posterUrl: poster,
+                bannerUrl: poster,
                 type: type,
+                headers: { "User-Agent": "Mozilla/5.0", "Referer": url },
                 episodes: eps
             })});
         }).catch(function (e) { cb({ success: false, errorCode: "LOAD_ERROR", message: e.message }); });
@@ -749,10 +782,12 @@
     }
 
     function buildStream(url, quality, source, headers) {
+        var resolvedQuality = Number(quality || extractQuality(source + " " + url));
+        var resolvedSource = source || detectHoster(url) || "Source";
         return {
             url: url,
-            quality: quality || extractQuality(source + " " + url),
-            source: source || detectHoster(url) || "Source",
+            quality: resolvedQuality,
+            source: formatStreamSource(resolvedSource, resolvedQuality),
             headers: headers || {}
         };
     }
@@ -1376,7 +1411,46 @@
         }));
     }
 
-    function loadStreams(url, cb) {
+    function normalizeStreamPayload(payload, fallbackReferer) {
+        if (!payload) return null;
+
+        if (typeof payload === "string") {
+            if (!/^https?:\/\//i.test(payload)) return null;
+            return {
+                type: "direct",
+                url: payload,
+                quality: extractQuality(payload),
+                pageUrl: fallbackReferer || BROWSER_HEADERS.Referer,
+                source: detectHoster(payload) || "Source"
+            };
+        }
+
+        if (typeof payload !== "object" || !payload.url) return null;
+        return {
+            type: payload.type || "direct",
+            url: String(payload.url || ""),
+            quality: Number(payload.quality || extractQuality(payload.url || payload.source || "")),
+            pageUrl: payload.pageUrl || fallbackReferer || BROWSER_HEADERS.Referer,
+            source: payload.source || detectHoster(payload.url) || "Source",
+            headers: payload.headers || null
+        };
+    }
+
+    function parseLoadStreamsInput(input) {
+        var raw = String(input || "");
+        var parsed = parseJsonSafe(raw, null);
+        var payloads = [];
+        var source = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : [raw]);
+
+        for (var i = 0; i < source.length; i++) {
+            var payload = normalizeStreamPayload(source[i], BROWSER_HEADERS.Referer);
+            if (payload && payload.url) payloads.push(payload);
+        }
+
+        return payloads;
+    }
+
+    async function loadStreams(url, cb) {
         try {
             function collectPayloadSetsSequential(payloads) {
                 var sets = [];
@@ -1406,7 +1480,13 @@
                     cb({
                         success: true,
                         data: finalResults.map(function (item) {
-                            return new StreamResult(item);
+                            var quality = Number(item && item.quality || extractQuality(String(item && item.source || "") + " " + String(item && item.url || "")));
+                            return new StreamResult({
+                                url: item.url,
+                                quality: quality || undefined,
+                                source: formatStreamSource(item.source || detectHoster(item.url) || "Source", quality),
+                                headers: item.headers || {}
+                            });
                         })
                     });
                 });
@@ -1440,8 +1520,12 @@
                 });
             }
 
-            var parsed = JSON.parse(url);
-            var payloads = Array.isArray(parsed) ? parsed : [parsed];
+            var payloads = parseLoadStreamsInput(url);
+            if (!payloads.length) {
+                cb({ success: true, data: [] });
+                return;
+            }
+
             return collectPayloadSetsSequential(payloads).then(function (sets) {
                 var initialResults = flattenResults(sets);
                 if (!initialResults.length && payloads.length === 1 && payloads[0] && payloads[0].url && payloads[0].type !== "intermediate") {
