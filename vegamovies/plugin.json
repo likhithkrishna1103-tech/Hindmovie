@@ -1,0 +1,18 @@
+{
+  "packageName": "com.igris.repo.vegamovies",
+  "name": "VegaMovies",
+  "version": 78,
+  "baseUrl": "https://vegamovies.vodka",
+  "description": "VegaMovies catalog with Nexdrive and V-Cloud stream resolution.",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "hi"
+  ],
+  "categories": [
+    "Movies",
+    "Series",
+    "Anime"
+  ]
+}
