@@ -367,7 +367,8 @@
     }
 
     function networkRequest(url, options) {
-        return request(url, options || {});
+        options = options || {};
+        return request(resolveRequestUrl(url, options), options);
     }
 
     function parseJsonSafe(value, fallback) {
@@ -393,6 +394,20 @@
         } catch (_) {
             return String(url || "");
         }
+    }
+
+    function resolveRequestUrl(url, options) {
+        var value = decodeHtml(String(url || "")).trim();
+        if (!value || /^https?:\/\//i.test(value)) return value;
+
+        var headers = options && options.headers || {};
+        var base = headers.Referer || headers.referer || BROWSER_HEADERS.Referer;
+
+        if (/^\/{2,}(?:locked|file|play)(?:[/?#]|$)/i.test(value)) {
+            value = "/" + value.replace(/^\/+/, "");
+        }
+
+        return resolveUrl(value, base);
     }
 
     function safeDecodeURIComponent(value) {
@@ -488,15 +503,16 @@
         var value = String(text || "").toLowerCase();
         if (value.indexOf("bbupload") !== -1 || value.indexOf("bullstream") !== -1 || value.indexOf("getnowit.site") !== -1) return "BBUpload";
         if (value.indexOf("gdflix") !== -1 || value.indexOf("gdlink") !== -1) return "GDFLix";
+        if (value.indexOf("gofile") !== -1) return "GoFile";
         if (value.indexOf("hubcloud") !== -1 || value.indexOf("hubdrive") !== -1) return "HubCloud";
         if (value.indexOf("1xplayer") !== -1 || value.indexOf("1xcinema") !== -1 || /\/play\/(?:f)?tt\d+/i.test(value)) return "1xPlayer";
         if (value.indexOf("katdrive") !== -1) return "Katdrive";
         if (value.indexOf("send.cm") !== -1 || value.indexOf("sendcm") !== -1) return "Send.cm";
+        if (value.indexOf("send.now") !== -1) return "Send.cm";
         if (value.indexOf("1fichier") !== -1) return "1Fichier";
         if (value.indexOf("clicknupload") !== -1) return "ClicknUpload";
-        if (value.indexOf("gofile") !== -1) return "GoFile";
         if (value.indexOf("streamtape") !== -1) return "StreamTape";
-        if (value.indexOf("streamwish") !== -1) return "StreamWish";
+        if (value.indexOf("streamwish") !== -1 || /hglink\.to|hgplaycdn|filelions|uqloads|davioad|yuguaab|guxhag|taylorplayer|mivalyo|habetar|ghbrisk/i.test(value)) return "StreamWish";
         if (value.indexOf("mega") !== -1) return "Mega";
         if (value.indexOf("drive.google") !== -1 || value.indexOf("google drive") !== -1) return "Google Drive";
         return "";
@@ -507,7 +523,7 @@
     }
 
     function isInterestingStreamUrl(url) {
-        return /links\.kmhd|gdflix|gdlink|hubcloud|hubdrive|katdrive|send\.cm|1fichier|clicknupload|gofile|streamtape|streamwish|mega\.nz|drive\.google|download\.bbupload\.to|bullstream|getnowit\.site/i.test(String(url || "")) ||
+        return /links\.kmhd|gdflix|gdlink|hubcloud|hubdrive|katdrive|send\.(?:cm|now)|1fichier|clicknupload|gofile|streamtape|streamwish|hglink\.to|hgplaycdn|filelions|uqloads|davioad|yuguaab|guxhag|taylorplayer|mivalyo|habetar|ghbrisk|mega\.nz|drive\.google|download\.bbupload\.to|bullstream|getnowit\.site/i.test(String(url || "")) ||
             isInterestingPlayerUrl(url);
     }
 
@@ -1017,7 +1033,7 @@
     }
 
     function extractStreamTapeDirectUrl(html) {
-        var ids = ["botlink", "ideoolink", "robotlink"];
+        var ids = ["botlink", "ideoolink", "robotlink", "captchalink"];
         var i;
         var assignment;
         var hidden;
@@ -1245,6 +1261,448 @@
         });
     }
 
+    function extractFormInputs(html, formName) {
+        var source = String(html || "");
+        var formMatch;
+        var formHtml;
+        var inputRe;
+        var match;
+        var payload = {};
+
+        if (formName) {
+            formMatch = source.match(new RegExp("<form[^>]*name=[\"']" + formName + "[\"'][^>]*>([\\s\\S]*?)<\\/form>", "i"));
+            if (!formMatch) return payload;
+            formHtml = formMatch[1] || "";
+        } else {
+            formMatch = source.match(/<form[^>]*>([\s\S]*?)<\/form>/i);
+            formHtml = formMatch ? formMatch[1] : "";
+        }
+
+        inputRe = /<input[^>]*name=["']([^"']+)["'][^>]*>/gi;
+        while ((match = inputRe.exec(formHtml)) !== null) {
+            var inputTag = match[0] || "";
+            var name = decodeHtml(match[1] || "");
+            var valueMatch = inputTag.match(/value=["']([^"']*)["']/i);
+            var value = decodeHtml(valueMatch ? valueMatch[1] : "");
+            payload[name] = value;
+        }
+
+        return payload;
+    }
+
+    function encodeFormBody(payload) {
+        var parts = [];
+        for (var key in payload) {
+            if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
+            parts.push(encodeURIComponent(key) + "=" + encodeURIComponent(String(payload[key] || "")));
+        }
+        return parts.join("&");
+    }
+
+    function resolveSend(url, quality, headers) {
+        var reqHeaders = cloneHeaders(headers || {});
+        if (!reqHeaders.Referer && !reqHeaders.referer) reqHeaders.Referer = baseOrigin(url) + "/";
+
+        return networkRequest(url, {
+            headers: reqHeaders,
+            followRedirects: true
+        }).then(function (pageRes) {
+            var finalUrl = pageRes && pageRes.finalUrl || url;
+            var html = String(pageRes && pageRes.body || "");
+            var formPayload = extractFormInputs(html, "F1");
+            var submitUrl = baseOrigin(finalUrl) + "/";
+            var req = mergeHeaders({
+                "Referer": finalUrl,
+                "Origin": baseOrigin(finalUrl),
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+            });
+            var target = "";
+
+            if (!Object.keys(formPayload).length) {
+                target = unwrapRedirectUrl(finalUrl, url);
+                if (target && target !== url && /^https?:\/\//i.test(target)) {
+                    return [buildStream(target, quality, "Send.cm Direct", req)];
+                }
+                return [];
+            }
+
+            return networkRequest(submitUrl, {
+                method: "POST",
+                body: encodeFormBody(formPayload),
+                headers: req,
+                followRedirects: false
+            }).then(function (postRes) {
+                var location = firstHeaderValue(postRes && postRes.headers, ["location", "x-redirect-location"]);
+                var direct = unwrapRedirectUrl(location, submitUrl);
+                if (!direct || !/^https?:\/\//i.test(direct)) return [];
+                return [buildStream(direct, quality, "Send.cm Direct", req)];
+            });
+        }).catch(function () {
+            return [];
+        });
+    }
+
+    function toBase36(num) {
+        return Number(num || 0).toString(36);
+    }
+
+    function unpackPacker(packed, count, keys) {
+        var output = String(packed || "");
+        var c = Number(count || 0);
+        var i;
+        for (i = c - 1; i >= 0; i--) {
+            if (!keys[i]) continue;
+            output = output.replace(new RegExp("\\b" + toBase36(i) + "\\b", "g"), keys[i]);
+        }
+        return output;
+    }
+
+    function extractPackedScript(html) {
+        var source = String(html || "");
+        var scripts = source.match(/<script[^>]*>[\s\S]*?<\/script>/gi) || [];
+        for (var i = 0; i < scripts.length; i++) {
+            var body = scripts[i].replace(/^<script[^>]*>/i, "").replace(/<\/script>$/i, "");
+            if (/eval\(function\(p,a,c,k,e,d\)/i.test(body)) return body;
+        }
+        return "";
+    }
+
+    function decodePackedEval(scriptBody) {
+        var source = String(scriptBody || "");
+        var argsMatch = source.match(/\}\(\s*'([\s\S]*?)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'([\s\S]*?)'\.split\('\|'\)/i);
+        if (!argsMatch) return "";
+
+        var packed = argsMatch[1]
+            .replace(/\\'/g, "'")
+            .replace(/\\\\/g, "\\")
+            .replace(/\\n/g, "\n");
+        var count = Number(argsMatch[3] || 0);
+        var keys = String(argsMatch[4] || "").split("|");
+        return unpackPacker(packed, count, keys);
+    }
+
+    function extractStreamWishUrl(html, base) {
+        var source = String(html || "");
+        var direct = source.match(/["']hls2?["']\s*:\s*["']([^"']+)["']/i) ||
+            source.match(/["']file["']\s*:\s*["']([^"']+\.m3u8[^"']*)["']/i) ||
+            source.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/i);
+        if (direct && direct[1]) return normalizeExtractedUrl(direct[1], base);
+        if (direct && direct[0]) return normalizeExtractedUrl(direct[0], base);
+
+        var packedScript = extractPackedScript(source);
+        if (!packedScript) return "";
+        var unpacked = decodePackedEval(packedScript);
+        if (!unpacked) return "";
+
+        var unpackedMatch = unpacked.match(/["']hls2?["']\s*:\s*["']([^"']+)["']/i) ||
+            unpacked.match(/["']file["']\s*:\s*["']([^"']+\.m3u8[^"']*)["']/i) ||
+            unpacked.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/i);
+        if (unpackedMatch && unpackedMatch[1]) return normalizeExtractedUrl(unpackedMatch[1], base);
+        return unpackedMatch ? normalizeExtractedUrl(unpackedMatch[0], base) : "";
+    }
+
+    function resolveStreamWish(url, quality, headers) {
+        var reqHeaders = cloneHeaders(headers || {});
+        if (!reqHeaders.Referer && !reqHeaders.referer) reqHeaders.Referer = baseOrigin(url) + "/";
+
+        return networkRequest(url, {
+            headers: reqHeaders,
+            followRedirects: true
+        }).then(function (pageRes) {
+            var finalUrl = pageRes && pageRes.finalUrl || url;
+            var html = String(pageRes && pageRes.body || "");
+            var streamUrl = extractStreamWishUrl(html, finalUrl);
+            if (!streamUrl || !/^https?:\/\//i.test(streamUrl)) return [];
+            return [buildStream(streamUrl, quality, "StreamWish Direct", mergeHeaders({ "Referer": finalUrl }))];
+        }).catch(function () {
+            return [];
+        });
+    }
+
+    function resolveOneFichier(url, quality, headers) {
+        var reqHeaders = cloneHeaders(headers || {});
+        var af = decodeQueryParam(url, "af") || "0";
+        if (!reqHeaders.Referer && !reqHeaders.referer) reqHeaders.Referer = "https://1fichier.com/";
+
+        return networkRequest(url, {
+            headers: mergeHeaders({
+                "Cookie": "AF=" + af,
+                "Referer": reqHeaders.Referer
+            }),
+            followRedirects: true
+        }).then(function (firstRes) {
+            var finalUrl = firstRes && firstRes.finalUrl || url;
+            var html = String(firstRes && firstRes.body || "");
+            var adzMatch = html.match(/<input[^>]*name=["']adz["'][^>]*value=["']([^"']+)["']/i);
+            var directMatch = html.match(/<a[^>]*class=["'][^"']*ok btn-general btn-orange[^"']*["'][^>]*href=["']([^"']+)["']/i);
+
+            if (directMatch && directMatch[1]) {
+                return [buildStream(normalizeExtractedUrl(directMatch[1], finalUrl), quality, "1Fichier Direct", mergeHeaders({ "Referer": finalUrl }))];
+            }
+            if (!adzMatch) return [];
+
+            return networkRequest(finalUrl, {
+                method: "POST",
+                body: "adz=" + encodeURIComponent(decodeHtml(adzMatch[1])),
+                headers: mergeHeaders({
+                    "Referer": finalUrl,
+                    "Origin": baseOrigin(finalUrl),
+                    "Cookie": "AF=" + af,
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+                }),
+                followRedirects: true
+            }).then(function (postRes) {
+                var body = String(postRes && postRes.body || "");
+                var hrefMatch = body.match(/<a[^>]*class=["'][^"']*ok btn-general btn-orange[^"']*["'][^>]*href=["']([^"']+)["']/i);
+                var link = normalizeExtractedUrl(hrefMatch && hrefMatch[1] || "", finalUrl);
+                if (!link) return [];
+                return [buildStream(link, quality, "1Fichier Direct", mergeHeaders({ "Referer": finalUrl }))];
+            });
+        }).catch(function () {
+            return [];
+        });
+    }
+
+    function firstHeaderValue(headers, names) {
+        var parsed = parseHeaders(headers || {});
+        for (var i = 0; i < names.length; i++) {
+            var key = String(names[i] || "").toLowerCase();
+            if (parsed[key]) return String(parsed[key]);
+        }
+        return "";
+    }
+
+    function unwrapRedirectUrl(url, base) {
+        var current = normalizeExtractedUrl(url, base);
+        var guard = 0;
+
+        while (current && guard < 5) {
+            guard += 1;
+            var nested = normalizeExtractedUrl(
+                decodeQueryParam(current, "url") ||
+                decodeQueryParam(current, "link") ||
+                decodeQueryParam(current, "redirect"),
+                current
+            );
+            if (!nested || nested === current) break;
+            current = nested;
+        }
+
+        if (/#$/.test(current)) current = current.slice(0, -1);
+        return current;
+    }
+
+    async function sha256Hex(input) {
+        try {
+            if (typeof crypto !== "undefined" && crypto.subtle && typeof TextEncoder !== "undefined") {
+                var encoded = new TextEncoder().encode(String(input || ""));
+                var digest = await crypto.subtle.digest("SHA-256", encoded);
+                var bytes = Array.from(new Uint8Array(digest));
+                return bytes.map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+            }
+        } catch (_) {}
+        return "";
+    }
+
+    function extractGdflixCandidates(html, base) {
+        var out = [];
+        var seen = {};
+        var source = String(html || "");
+        var match;
+        var styleHref = /<a[^>]*style=["'][^"']*min-width[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>/gi;
+        var hrefStyle = /<a[^>]*href=["']([^"']+)["'][^>]*style=["'][^"']*min-width[^"']*["'][^>]*>/gi;
+        var direct = /https?:\/\/(?:instant\.[^\s"'<>]+|[^"'\s<>]*gdflix[^"'\s<>]*\/(?:zfile|file)\/[^"'\s<>]+)/gi;
+        var anchors = parseAnchors(source, base);
+        var i;
+
+        function push(url) {
+            var normalized = normalizeExtractedUrl(url, base);
+            if (!normalized || seen[normalized]) return;
+            seen[normalized] = true;
+            out.push(normalized);
+        }
+
+        while ((match = styleHref.exec(source)) !== null) push(match[1]);
+        while ((match = hrefStyle.exec(source)) !== null) push(match[1]);
+        while ((match = direct.exec(source)) !== null) push(match[0]);
+
+        for (i = 0; i < anchors.length; i++) {
+            var href = anchors[i] && anchors[i].href || "";
+            if (/instant\.|gdflix|gdlink|zfile\//i.test(href)) push(href);
+        }
+
+        return out;
+    }
+
+    function resolveGdflix(url, quality, headers) {
+        var reqHeaders = cloneHeaders(headers || {});
+        if (!reqHeaders.Referer && !reqHeaders.referer) reqHeaders.Referer = baseOrigin(url) + "/";
+
+        return networkRequest(url, {
+            headers: reqHeaders,
+            followRedirects: true
+        }).then(function (pageRes) {
+            var finalUrl = pageRes && pageRes.finalUrl || url;
+            var html = String(pageRes && pageRes.body || "");
+            var candidates = extractGdflixCandidates(html, finalUrl);
+            var instant = "";
+            var selected;
+            var refererHeaders = mergeHeaders({ "Referer": finalUrl, "Origin": baseOrigin(finalUrl) });
+            var mfilePath;
+            var keyMatch;
+            var tokenMatch;
+            var formBody;
+            var mfileHeaders;
+
+            for (var i = 0; i < candidates.length; i++) {
+                if (/instant\./i.test(candidates[i])) {
+                    instant = candidates[i];
+                    break;
+                }
+            }
+
+            if (!instant && candidates.length) instant = candidates[0];
+
+            if (!instant) {
+                mfilePath = new URL(finalUrl).pathname.replace("/file/", "/mfile/");
+                keyMatch = html.match(/formData\.append\("key",\s*"([^"]+)"\)/i);
+                tokenMatch = html.match(/(?:var|let|const)\s+cf_token\s*=\s*['"]([^'"]+)['"]/i);
+                if (!keyMatch || !tokenMatch) return [];
+
+                formBody = "action=instant&key=" + encodeURIComponent(keyMatch[1]) + "&action_token=" + encodeURIComponent(tokenMatch[1]);
+                mfileHeaders = mergeHeaders({
+                    "Referer": finalUrl,
+                    "Origin": baseOrigin(finalUrl),
+                    "x-token": (new URL(finalUrl)).hostname,
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                    "Accept": "application/json, text/plain, */*"
+                });
+
+                return networkRequest(resolveUrl(mfilePath, finalUrl), {
+                    method: "POST",
+                    body: formBody,
+                    headers: mfileHeaders,
+                    followRedirects: true
+                }).then(function (mfileRes) {
+                    var payload = parseJsonSafe(mfileRes && mfileRes.body || "", {});
+                    var jumpUrl = normalizeExtractedUrl(payload && (payload.visit_url || payload.url), finalUrl);
+                    if (!jumpUrl) return [];
+                    return [buildStream(unwrapRedirectUrl(jumpUrl, finalUrl), quality, "GDFLix Direct", refererHeaders)];
+                });
+            }
+
+            return networkRequest(instant, {
+                headers: refererHeaders,
+                followRedirects: false
+            }).then(function (instantRes) {
+                var location = firstHeaderValue(instantRes && instantRes.headers, ["location", "x-redirect-location"]);
+                var target = unwrapRedirectUrl(location || "", instant);
+                var source;
+
+                if (target && /^https?:\/\//i.test(target)) {
+                    source = /googleusercontent|googlevideo/i.test(target) ? "Google Drive" : "GDFLix Direct";
+                    return [buildStream(target, quality, source, refererHeaders)];
+                }
+
+                return networkRequest(instant, {
+                    headers: refererHeaders,
+                    followRedirects: true
+                }).then(function (followRes) {
+                    var followBody = String(followRes && followRes.body || "");
+                    var followUrl = followRes && followRes.finalUrl || instant;
+                    var found = unwrapRedirectUrl(followUrl, instant) ||
+                        unwrapRedirectUrl((followBody.match(/https?:\/\/[^\s"'<>]*\?url=[^\s"'<>]+/i) || [])[0] || "", followUrl);
+                    var finalSource = /googleusercontent|googlevideo/i.test(found) ? "Google Drive" : "GDFLix Direct";
+                    if (!found || !/^https?:\/\//i.test(found)) return [];
+                    return [buildStream(found, quality, finalSource, refererHeaders)];
+                });
+            });
+        }).catch(function () {
+            return [];
+        });
+    }
+
+    function resolveGofile(url, quality, headers) {
+        var reqHeaders = cloneHeaders(headers || {});
+        var finalQuality = Number(quality || 0);
+        var referer = reqHeaders.Referer || reqHeaders.referer || baseOrigin(url) + "/";
+        var parsed;
+        var fileId = "";
+        var ua = reqHeaders["User-Agent"] || reqHeaders["user-agent"] || BROWSER_HEADERS["User-Agent"];
+
+        try {
+            parsed = new URL(url);
+            fileId = parsed.pathname.replace(/^\/+/, "").split("/").pop() || "";
+            if (/^d$/i.test(fileId)) fileId = "";
+            if (/\/d\//i.test(parsed.pathname)) {
+                fileId = (parsed.pathname.match(/\/d\/([^/?#]+)/i) || [])[1] || fileId;
+            }
+        } catch (_) {}
+
+        if (!fileId) return Promise.resolve([]);
+
+        return networkRequest("https://api.gofile.io/accounts", {
+            method: "POST",
+            body: "",
+            headers: mergeHeaders({
+                "Referer": "https://gofile.io/",
+                "Accept": "application/json, text/plain, */*"
+            }),
+            followRedirects: true
+        }).then(function (tokenRes) {
+            var tokenJson = parseJsonSafe(tokenRes && tokenRes.body || "", {});
+            var token = tokenJson && tokenJson.data && tokenJson.data.token || "";
+            if (!token) return [];
+
+            var interval = String(Math.floor(Date.now() / 1000 / 14400));
+            var baseHeaders = mergeHeaders({
+                "Authorization": "Bearer " + token,
+                "Referer": "https://gofile.io/",
+                "Accept": "application/json, text/plain, */*",
+                "User-Agent": ua
+            });
+            var message = [ua, "en-GB", token, interval, "gf2026x"].join("::");
+
+            return sha256Hex(message).then(function (siteToken) {
+                if (siteToken) {
+                    baseHeaders["X-BL"] = "en-GB";
+                    baseHeaders["X-Website-Token"] = siteToken;
+                }
+
+                var contentsUrl = "https://api.gofile.io/contents/" + encodeURIComponent(fileId) + "?contentFilter=&page=1&pageSize=1000&sortField=name&sortDirection=1";
+                return networkRequest(contentsUrl, {
+                    headers: baseHeaders,
+                    followRedirects: true
+                }).then(function (contentRes) {
+                    var payload = parseJsonSafe(contentRes && contentRes.body || "", {});
+                    var data = payload && payload.data || {};
+                    var children = data.children || {};
+                    var childKeys = Object.keys(children);
+                    var out = [];
+                    var seen = {};
+
+                    for (var i = 0; i < childKeys.length; i++) {
+                        var child = children[childKeys[i]] || {};
+                        var link = normalizeExtractedUrl(
+                            child.link || child.directLink || child.downloadPage || child.publicLink || "",
+                            "https://gofile.io/"
+                        );
+                        if (!link || seen[link]) continue;
+                        seen[link] = true;
+                        pushStream(out, seen, link, finalQuality, /googleusercontent|googlevideo/i.test(link) ? "Google Drive" : "GoFile Direct", mergeHeaders({
+                            "Referer": referer,
+                            "Cookie": "accountToken=" + token
+                        }));
+                    }
+
+                    return out;
+                });
+            });
+        }).catch(function () {
+            return [];
+        });
+    }
+
     function resolveHubCloud(url, quality, headers) {
         var reqHeaders = mergeHeaders({ "Referer": baseOrigin(url) + "/" });
         var anchorHint = /hubdrive/i.test(url) ? "HubDrive" : "HubCloud";
@@ -1375,9 +1833,36 @@
             });
         }
 
-        if (/streamtape\.com\/e\//i.test(url)) {
+        if (/streamtape\.(?:com|co)\/(?:e|v)\//i.test(url) || /shavetape\.cash\/(?:e|v)\//i.test(url)) {
             return withTimeout(resolveStreamTape(url, item.quality, item.headers || {}), 12000).then(function (results) {
                 return results && results.length ? results : [item];
+            }).catch(function () {
+                return [item];
+            });
+        }
+
+        if (/streamwish|hglink\.to|hgplaycdn|filelions|uqloads|davioad|yuguaab|guxhag|taylorplayer|mivalyo|habetar|ghbrisk/i.test(url)) {
+            return withTimeout(resolveStreamWish(url, item.quality, item.headers || {}), 12000).then(function (results) {
+                if (!results || !results.length) return [item];
+                return results;
+            }).catch(function () {
+                return [item];
+            });
+        }
+
+        if (/send\.cm|send\.now/i.test(url)) {
+            return withTimeout(resolveSend(url, item.quality, item.headers || {}), 12000).then(function (results) {
+                if (!results || !results.length) return [item];
+                return results;
+            }).catch(function () {
+                return [item];
+            });
+        }
+
+        if (/1fichier\.com/i.test(url)) {
+            return withTimeout(resolveOneFichier(url, item.quality, item.headers || {}), 12000).then(function (results) {
+                if (!results || !results.length) return [item];
+                return results;
             }).catch(function () {
                 return [item];
             });
@@ -1386,6 +1871,28 @@
         if (/download\.bbupload\.to\/download\?|bullstream\.|getnowit\.site\/get\//i.test(url)) {
             return withTimeout(resolveBBUpload(url, item.quality, item.headers || {}), 12000).then(function (results) {
                 return results && results.length ? results : [item];
+            }).catch(function () {
+                return [item];
+            });
+        }
+
+        if (/gofile\.io\/(?:d|file|download)\//i.test(url)) {
+            return withTimeout(resolveGofile(url, item.quality, item.headers || {}), 12000).then(function (results) {
+                if (!results || !results.length) return [item];
+                return results;
+            }).catch(function () {
+                return [item];
+            });
+        }
+
+        if (/gdflix|gdlink|instant\.[^/]+|fastcdn-dl\.pages\.dev/i.test(url)) {
+            return withTimeout(resolveGdflix(url, item.quality, item.headers || {}), 12000).then(function (results) {
+                if (!results || !results.length) return [item];
+                return Promise.all(results.map(function (resolved) {
+                    return resolveStreamCandidate(resolved, depth + 1);
+                })).then(function (nested) {
+                    return dedupeResults(flattenResults(nested));
+                });
             }).catch(function () {
                 return [item];
             });
@@ -1424,7 +1931,8 @@
                 };
             }
 
-            var actionMatch = firstHtml.match(/action=["']\?\/unlock(?:&amp;|&)redirect=([^"'&]+(?:={0,2})?)[^"']*["']/i);
+            var actionMatch = firstHtml.match(/<form[^>]*method=["']POST["'][^>]*action=["']([^"']+)["']/i) ||
+                firstHtml.match(/action=["']([^"']*\?\/unlock(?:&amp;|&)[^"']*)["']/i);
             if (!actionMatch) {
                 return {
                     html: firstHtml,
@@ -1433,9 +1941,18 @@
                 };
             }
 
-            var redirectToken = decodeHtml(actionMatch[1]);
-            var lockedUrl = base + "/locked?redirect=" + redirectToken;
-            var unlockUrl = base + "/locked?/unlock&redirect=" + redirectToken;
+            var actionUrl = decodeHtml(actionMatch[1]);
+            var finalUrl = resolveRequestUrl(firstRes && firstRes.finalUrl || fileUrl, {
+                headers: { "Referer": fileUrl }
+            });
+            var redirectToken = decodeQueryParam(resolveUrl(actionUrl, finalUrl), "redirect") ||
+                decodeQueryParam(finalUrl, "redirect") ||
+                (actionUrl.match(/(?:\?|&)redirect=([^&"']+)/i) || [])[1] ||
+                "";
+            var lockedUrl = /\/locked\?/i.test(finalUrl) ? finalUrl : base + "/locked?redirect=" + redirectToken;
+            var unlockUrl = resolveRequestUrl(actionUrl, {
+                headers: { "Referer": lockedUrl }
+            });
             log("Unlocking page:", unlockUrl);
             return networkRequest(unlockUrl, {
                 method: "POST",
@@ -1491,7 +2008,6 @@
         return dedupeResults((results || []).filter(function (item) {
             var url = String(item && item.url || "");
             if (!url) return false;
-            if (/1fichier\.com/i.test(url)) return false;
             if (/gamerxyt\.com\/hubcloud\.php/i.test(url)) return false;
             if (/links\.kmhd\.eu\/play\?/i.test(url) && !looksDirect(url)) return false;
             if (isInterestingPlayerUrl(url) && !looksDirect(url)) return false;
@@ -1563,6 +2079,19 @@
                     payload.quality,
                     payload.source || detectHoster(payload.url) || "Source",
                     mergeHeaders({ "Referer": payload.pageUrl || BROWSER_HEADERS.Referer })
+                )
+            ];
+        }
+
+        if (!/links\.kmhd\.eu\/(?:file|play)\b/i.test(String(payload.url || ""))) {
+            return [
+                buildStream(
+                    payload.url,
+                    payload.quality,
+                    payload.source || detectHoster(payload.url) || "Source",
+                    mergeHeaders(payload.headers || {
+                        "Referer": payload.pageUrl || baseOrigin(payload.url) + "/"
+                    })
                 )
             ];
         }
