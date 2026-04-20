@@ -1,6 +1,6 @@
 {
   "packageName": "com.igris.repo.cinemaos",
-  "name": "CinemaOS",
+  "name": "Cinema OS",
   "version": 1,
   "baseUrl": "https://cinemaos.live",
   "description": "CinemaOS movies, TV and anime with provider extraction.",
