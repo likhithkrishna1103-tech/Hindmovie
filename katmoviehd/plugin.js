@@ -2067,7 +2067,6 @@
         return dedupeResults((results || []).filter(function (item) {
             var url = String(item && item.url || "");
             if (!url) return false;
-            if (/gamerxyt\.com\/hubcloud\.php/i.test(url)) return false;
             if (/links\.kmhd\.eu\/play\?/i.test(url) && !looksDirect(url)) return false;
             return true;
         }));
