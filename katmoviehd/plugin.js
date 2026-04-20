@@ -388,6 +388,18 @@
         }
     }
 
+    function isKnownErrorUrl(url) {
+        try {
+            var parsed = new URL(String(url || ""));
+            var host = String(parsed.hostname || "").toLowerCase();
+            var path = String(parsed.pathname || "").toLowerCase();
+            if (!/(?:^|\.)kmhd\.eu$|(?:^|\.)links\.kmhd\.eu$|(?:^|\.)katmoviehd\./i.test(host)) return false;
+            return /^\/(?:error|errors|404|not-found)(?:\/|$)/i.test(path);
+        } catch (_) {
+            return /(?:^|\/)(?:error|errors|404|not-found)(?:[/?#]|$)/i.test(String(url || ""));
+        }
+    }
+
     function resolveUrl(url, base) {
         try {
             return new URL(url, base).toString();
@@ -402,6 +414,10 @@
 
         var headers = options && options.headers || {};
         var base = headers.Referer || headers.referer || BROWSER_HEADERS.Referer;
+
+        if (/^\/?(?:error|errors|404|not-found)(?:[/?#]|$)/i.test(value)) {
+            return baseOrigin(base) + "/";
+        }
 
         if (/^\/{2,}(?:locked|file|play)(?:[/?#]|$)/i.test(value)) {
             value = "/" + value.replace(/^\/+/, "");
@@ -441,6 +457,7 @@
             }
         }
         if (/^(?:javascript|mailto|tel|data):/i.test(value) || /^#/.test(value)) return "";
+        if (isKnownErrorUrl(value)) return "";
         return value;
     }
 
@@ -1953,6 +1970,14 @@
             var unlockUrl = resolveRequestUrl(actionUrl, {
                 headers: { "Referer": lockedUrl }
             });
+            if (!unlockUrl || isKnownErrorUrl(unlockUrl)) {
+                log("Unlock action resolved to error path, skipping:", unlockUrl);
+                return {
+                    html: firstHtml,
+                    finalUrl: firstRes && firstRes.finalUrl || fileUrl,
+                    headers: mergeHeaders({ "Referer": fileUrl })
+                };
+            }
             log("Unlocking page:", unlockUrl);
             return networkRequest(unlockUrl, {
                 method: "POST",
@@ -1979,6 +2004,7 @@
                     fileUrl,
                     base + "/"
                 ) || fileUrl;
+                if (isKnownErrorUrl(nextUrl)) nextUrl = fileUrl;
                 log("Unlock response:", unlockRes && unlockRes.status, "cookie:", cookieHeader ? "yes" : "no", "next:", nextUrl);
 
                 return networkRequest(nextUrl, {
