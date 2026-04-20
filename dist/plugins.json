@@ -69,6 +69,25 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.castletv.sky"
   },
   {
+    "packageName": "com.igris.repo.cinemaos",
+    "name": "Cinema OS",
+    "version": 1,
+    "baseUrl": "https://cinemaos.live",
+    "description": "CinemaOS movies, TV and anime with provider extraction.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en"
+    ],
+    "categories": [
+      "Movies",
+      "Series",
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.cinemaos.sky"
+  },
+  {
     "packageName": "com.igris.repo.cinestream",
     "name": "CineStream",
     "version": 2,
