@@ -1,0 +1,18 @@
+{
+  "packageName": "com.igris.repo.cinemaos",
+  "name": "CinemaOS",
+  "version": 1,
+  "baseUrl": "https://cinemaos.live",
+  "description": "CinemaOS movies, TV and anime with provider extraction.",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Movies",
+    "Series",
+    "Anime"
+  ]
+}
