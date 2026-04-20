@@ -2069,7 +2069,6 @@
             if (!url) return false;
             if (/gamerxyt\.com\/hubcloud\.php/i.test(url)) return false;
             if (/links\.kmhd\.eu\/play\?/i.test(url) && !looksDirect(url)) return false;
-            if (isInterestingPlayerUrl(url) && !looksDirect(url)) return false;
             return true;
         }));
     }
