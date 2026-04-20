@@ -531,7 +531,7 @@
         if (value.indexOf("streamtape") !== -1) return "StreamTape";
         if (value.indexOf("streamwish") !== -1 || /hglink\.to|hgplaycdn|filelions|uqloads|davioad|yuguaab|guxhag|taylorplayer|mivalyo|habetar|ghbrisk/i.test(value)) return "StreamWish";
         if (value.indexOf("mega") !== -1) return "Mega";
-        if (value.indexOf("drive.google") !== -1 || value.indexOf("google drive") !== -1) return "Google Drive";
+        if (value.indexOf("drive.google") !== -1 || value.indexOf("google drive") !== -1 || value.indexOf("googleusercontent.com") !== -1 || value.indexOf("googlevideo.com") !== -1 || value.indexOf("video-downloads.googleusercontent.com") !== -1) return "Google Drive";
         return "";
     }
 
@@ -540,7 +540,7 @@
     }
 
     function isInterestingStreamUrl(url) {
-        return /links\.kmhd|gdflix|gdlink|hubcloud|hubdrive|katdrive|send\.(?:cm|now)|1fichier|clicknupload|gofile|streamtape|streamwish|hglink\.to|hgplaycdn|filelions|uqloads|davioad|yuguaab|guxhag|taylorplayer|mivalyo|habetar|ghbrisk|mega\.nz|drive\.google|download\.bbupload\.to|bullstream|getnowit\.site/i.test(String(url || "")) ||
+        return /links\.kmhd|gdflix|gdlink|hubcloud|hubdrive|katdrive|send\.(?:cm|now)|1fichier|clicknupload|gofile|streamtape|streamwish|hglink\.to|hgplaycdn|filelions|uqloads|davioad|yuguaab|guxhag|taylorplayer|mivalyo|habetar|ghbrisk|mega\.nz|drive\.google|googleusercontent\.com|googlevideo\.com|video-downloads\.googleusercontent\.com|download\.bbupload\.to|bullstream|getnowit\.site/i.test(String(url || "")) ||
             isInterestingPlayerUrl(url);
     }
 
@@ -807,7 +807,7 @@
         if (!candidates.length) candidates = [normalizeExtractedUrl(rawUrl, base)];
 
         for (var i = 0; i < candidates.length; i++) {
-            var candidate = candidates[i];
+            var candidate = unwrapRedirectUrl(candidates[i], base) || candidates[i];
             if (!candidate || !/^https?:\/\//i.test(candidate)) continue;
             var hoster = detectHoster(sourceHint + " " + candidate);
             if (!hoster && !isInterestingStreamUrl(candidate)) continue;
@@ -1008,9 +1008,11 @@
     }
 
     function looksDirect(url) {
-        return /(?:googlevideo\.com|\.m3u8|\.mp4|\.mkv|\.avi|\.mpd)(?:$|[?#])/i.test(String(url || "")) ||
-            /streamtape\.[^/]+\/get_video\?/i.test(String(url || "")) ||
-            /getnowit\.site\/get\//i.test(String(url || ""));
+        var value = String(url || "");
+        if (/googlevideo\.com|googleusercontent\.com|video-downloads\.googleusercontent\.com/i.test(value)) return true;
+        return /(?:\.m3u8|\.mp4|\.mkv|\.avi|\.mpd)(?:$|[?#])/i.test(value) ||
+            /streamtape\.[^/]+\/get_video\?/i.test(value) ||
+            /getnowit\.site\/get\//i.test(value);
     }
 
     function headerValue(headers, key) {
@@ -1240,12 +1242,25 @@
             });
             var directUrl = normalizeExtractedUrl(token, finalUrl);
             var playlistUrl;
+            var fallbackResults = [];
+            var fallbackSeen = {};
+            var iframeList = parseIframes(html, finalUrl);
+            var directLike = html.match(/https?:\/\/[^\s"'<>\\]+/gi) || [];
+
+            for (var f = 0; f < iframeList.length; f++) {
+                var iframeSrc = iframeList[f] && iframeList[f].src || "";
+                if (!iframeSrc) continue;
+                addStreamResult(fallbackResults, fallbackSeen, iframeSrc, finalUrl, iframeSrc + " " + html, quality, outputHeaders);
+            }
+            for (var m = 0; m < directLike.length; m++) {
+                addStreamResult(fallbackResults, fallbackSeen, directLike[m], finalUrl, directLike[m], quality, outputHeaders);
+            }
 
             if (directUrl && /^https?:\/\//i.test(directUrl)) {
                 return [buildStream(directUrl, quality, "1xPlayer Direct", outputHeaders)];
             }
 
-            if (!token || !csrf) return [];
+            if (!token || !csrf) return fallbackResults;
 
             token = token.replace(/^[~#]+/, "");
             if (!token) return [];
@@ -1271,7 +1286,7 @@
                 for (var i = 0; i < matches.length; i++) {
                     pushStream(results, seen, matches[i], quality, "1xPlayer Direct", outputHeaders);
                 }
-                return results;
+                return results.length ? results : fallbackResults;
             });
         }).catch(function () {
             return [];
@@ -1824,9 +1839,22 @@
 
     function resolveStreamCandidate(item, depth) {
         var url;
+        var unwrapped;
+        var unwrappedSource;
+        var unwrappedHeaders;
         depth = Number(depth || 0);
         if (!item || !item.url || depth > 2) return Promise.resolve(item ? [item] : []);
         url = String(item.url || "");
+        unwrapped = unwrapRedirectUrl(url, url);
+        if (unwrapped && unwrapped !== url && looksDirect(unwrapped)) {
+            unwrappedSource = /googleusercontent|googlevideo/i.test(unwrapped)
+                ? "Google Drive"
+                : (item.source || detectHoster(unwrapped) || "Direct");
+            unwrappedHeaders = mergeHeaders(item.headers || {
+                "Referer": baseOrigin(url) + "/"
+            });
+            return Promise.resolve([buildStream(unwrapped, item.quality, unwrappedSource, unwrappedHeaders)]);
+        }
         if (looksDirect(url)) return Promise.resolve([item]);
 
         if (/links\.kmhd\.eu\/play\?/i.test(url)) {
@@ -1844,7 +1872,12 @@
 
         if (/1xplayer/i.test(String(item.source || "")) || isInterestingPlayerUrl(url)) {
             return withTimeout(resolve1xPlayer(url, item.quality, item.headers || {}), 12000).then(function (results) {
-                return results && results.length ? results : [item];
+                if (!results || !results.length) return [item];
+                return Promise.all(results.map(function (resolved) {
+                    return resolveStreamCandidate(resolved, depth + 1);
+                })).then(function (nested) {
+                    return dedupeResults(flattenResults(nested));
+                });
             }).catch(function () {
                 return [item];
             });
