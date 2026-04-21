@@ -19,7 +19,7 @@
   {
     "packageName": "com.igris.repo.animetsu",
     "name": "Animetsu",
-    "version": 3,
+    "version": 4,
     "baseUrl": "https://example.com",
     "description": "Clean anime picks with sub and dub.",
     "authors": [
@@ -71,7 +71,7 @@
   {
     "packageName": "com.igris.repo.cinemaos",
     "name": "testing",
-    "version": 2,
+    "version": 4,
     "baseUrl": "https://cinemaos.live",
     "description": "CinemaOS movies, TV and anime with provider extraction.",
     "authors": [
@@ -82,8 +82,7 @@
     ],
     "categories": [
       "Movies",
-      "Series",
-      "Anime"
+      "Series"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.cinemaos.sky"
   },
