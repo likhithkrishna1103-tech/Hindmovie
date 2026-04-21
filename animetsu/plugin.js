@@ -9,7 +9,7 @@
 
     const MAIN_URL = "https://animetsu.net";
     const API_BASE = MAIN_URL + "/v2/api/anime";
-    const PROXY_BASE = "https://ani.metsu.site/proxy";
+    const PROXY_BASE = "https://mega-cloud.top/proxy";
 
     const HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",
