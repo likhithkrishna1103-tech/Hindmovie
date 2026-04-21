@@ -1,7 +1,7 @@
 (function () {
     "use strict";
 
-    var DEFAULT_BASE_URL = "https://movies4u.md";
+    var DEFAULT_BASE_URL = "https://new1.movies4u.style";
     var DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
     var TMDB_WORKER_API = "https://wild-surf-4a0d.phisher1.workers.dev";
     var TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original";
