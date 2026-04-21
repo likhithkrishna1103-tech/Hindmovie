@@ -88,23 +88,6 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.cinestream.sky"
   },
   {
-    "packageName": "com.igris.repo.cricifyliveevents",
-    "name": "Cricify Live Events",
-    "version": 5,
-    "baseUrl": "https://cfymarkscanjiostar80.top",
-    "description": "Live sports events, fast and direct.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "en"
-    ],
-    "categories": [
-      "Livestream"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.cricifyliveevents.sky"
-  },
-  {
     "packageName": "com.igris.repo.darktv",
     "name": "Dark TV",
     "version": 2,
