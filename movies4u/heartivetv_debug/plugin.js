@@ -421,13 +421,15 @@
         return undefined;
     }
 
-    function buildStreamResult(url, source, headers, quality) {
-        return new StreamResult({
+    function buildStreamResult(url, source, headers, quality, subtitles) {
+        var stream = new StreamResult({
             url: url,
             source: quality ? (source + " [" + quality + "p]") : source,
             quality: quality,
             headers: headers || {}
         });
+        if (subtitles && subtitles.length) stream.subtitles = subtitles;
+        return stream;
     }
 
     function extractFirstMatch(text, pattern) {
@@ -728,6 +730,7 @@
         var config = opts || {};
         var referer = config.referer || (headers && (headers.Referer || headers.referer)) || "";
         var mirrorHosts = config.mirrorHosts || [];
+        var subtitles = config.subtitles || [];
         if (!mirrorHosts.length) {
             try {
                 mirrorHosts = [new URL(url).hostname];
@@ -736,15 +739,634 @@
             }
         }
         if (config.forceProxy || isLikelyHls(url, config.body)) {
-            return new StreamResult({
+            var proxied = new StreamResult({
                 url: proxifyUrl(url, headers, referer, mirrorHosts),
                 source: quality ? (source + " [" + quality + "p]") : source,
                 quality: quality,
                 type: "hls",
                 headers: {}
             });
+            if (subtitles.length) proxied.subtitles = subtitles;
+            return proxied;
         }
-        return buildStreamResult(url, source, headers, quality);
+        return buildStreamResult(url, source, headers, quality, subtitles);
+    }
+
+    function normalizeSubtitleTracks(tracks) {
+        var out = [];
+        var seen = {};
+        var rows = tracks || [];
+        for (var i = 0; i < rows.length; i++) {
+            var track = rows[i] || {};
+            var url = trim(track.file || track.url || track.src || "");
+            if (!/^https?:\/\//i.test(url) || seen[url]) continue;
+            seen[url] = true;
+            var langValue = normalizeSubtitleLang(track.lang || track.language || track.label || track.name || "en");
+            out.push({
+                url: url,
+                label: trim(track.label || track.name || track.lang || track.language || "Unknown"),
+                lang: langValue
+            });
+        }
+        return out;
+    }
+
+    function parseHlsAttributes(line) {
+        var attributes = {};
+        var regex = /([A-Z0-9-]+)=("[^"]*"|[^,]*)/ig;
+        var match;
+        while ((match = regex.exec(String(line || ""))) !== null) {
+            attributes[match[1]] = String(match[2] || "").replace(/^"|"$/g, "");
+        }
+        return attributes;
+    }
+
+    function scoreStream(item) {
+        var source = String(item && item.source || "").toLowerCase();
+        var quality = Number(item && item.quality || 0) || 0;
+        var sourceRank = /vidzee/.test(source) ? 0 :
+            (/vidfast/.test(source) ? 1 :
+            (/moviesclub|primewire/.test(source) ? 2 :
+            (/vidlink/.test(source) ? 3 :
+            (/vixsrc/.test(source) ? 4 :
+            (/vidsrc/.test(source) ? 5 : 6)))));
+        var targetQuality = /vidsrc/.test(source) ? 480 : 720;
+        var qualityRank = quality ? Math.abs(quality - targetQuality) : 9999;
+        return (sourceRank * 10000) + qualityRank;
+    }
+
+    function sortStreams(streams) {
+        return (streams || []).slice().sort(function (a, b) {
+            return scoreStream(a) - scoreStream(b);
+        });
+    }
+
+    async function expandHlsStreams(masterUrl, streamHeaders, sourceName, opts, manifestText) {
+        var config = opts || {};
+        var subtitles = normalizeSubtitleTracks(config.subtitles || []);
+        var results = [];
+        try {
+            var manifest = String(manifestText || "");
+            if (!manifest) {
+                var response = await request(masterUrl, { headers: streamHeaders });
+                manifest = String(response && response.body || "");
+            }
+            if (!manifest || !/^#EXTM3U/i.test(manifest)) {
+                return [buildPlayableStreamResult(masterUrl, sourceName, streamHeaders, config.quality, {
+                    subtitles: subtitles,
+                    forceProxy: true,
+                    referer: config.referer,
+                    mirrorHosts: config.mirrorHosts || []
+                })];
+            }
+
+            var lines = manifest.split(/\r?\n/);
+            var baseUrl = masterUrl.substring(0, masterUrl.lastIndexOf("/") + 1);
+            var pending = null;
+            var mediaSubs = [];
+            var seenSubs = {};
+
+            for (var i = 0; i < lines.length; i++) {
+                var rawLine = trim(lines[i]);
+                if (!rawLine) continue;
+                if (rawLine.indexOf("#EXT-X-MEDIA:") === 0) {
+                    var mediaAttrs = parseHlsAttributes(rawLine.slice("#EXT-X-MEDIA:".length));
+                    if (String(mediaAttrs.TYPE || "").toUpperCase() === "SUBTITLES" && mediaAttrs.URI) {
+                        var subUrl = absoluteUrl(baseUrl, mediaAttrs.URI);
+                        if (!seenSubs[subUrl]) {
+                            seenSubs[subUrl] = true;
+                            mediaSubs.push({
+                                url: subUrl,
+                                label: trim(mediaAttrs.NAME || mediaAttrs.LANGUAGE || "Unknown"),
+                                lang: trim(mediaAttrs.LANGUAGE || "en").toLowerCase()
+                            });
+                        }
+                    }
+                    continue;
+                }
+                if (rawLine.indexOf("#EXT-X-STREAM-INF:") === 0) {
+                    pending = parseHlsAttributes(rawLine.slice("#EXT-X-STREAM-INF:".length));
+                    continue;
+                }
+                if (rawLine.indexOf("#") === 0) continue;
+                if (!pending) continue;
+
+                var variantUrl = absoluteUrl(baseUrl, rawLine);
+                var bandwidth = Number(pending.BANDWIDTH || 0) || 0;
+                var resolution = String(pending.RESOLUTION || "");
+                var heightMatch = resolution.match(/x(\d+)/i);
+                var quality = heightMatch ? Number(heightMatch[1]) : 0;
+                if (!quality) {
+                    quality = bandwidth >= 12000000 ? 2160 :
+                        bandwidth >= 5000000 ? 1080 :
+                        bandwidth >= 2500000 ? 720 :
+                        bandwidth >= 1200000 ? 480 : 360;
+                }
+                if (quality >= 470 && quality <= 490) quality = 480;
+                if (quality >= 350 && quality <= 370) quality = 360;
+                results.push(buildPlayableStreamResult(variantUrl, sourceName, streamHeaders, quality, {
+                    subtitles: subtitles.concat(mediaSubs),
+                    forceProxy: true,
+                    referer: config.referer,
+                    mirrorHosts: config.mirrorHosts || []
+                }));
+                pending = null;
+            }
+
+            if (!results.length) {
+                results.push(buildPlayableStreamResult(masterUrl, sourceName, streamHeaders, config.quality, {
+                    subtitles: subtitles.concat(mediaSubs),
+                    forceProxy: true,
+                    referer: config.referer,
+                    mirrorHosts: config.mirrorHosts || []
+                }));
+            }
+        } catch (_) {
+            results.push(buildPlayableStreamResult(masterUrl, sourceName, streamHeaders, config.quality, {
+                subtitles: subtitles,
+                forceProxy: true,
+                referer: config.referer,
+                mirrorHosts: config.mirrorHosts || []
+            }));
+        }
+        return results;
+    }
+
+    function extractInlineTracks(text, baseUrl) {
+        var html = String(text || "");
+        var payload = extractFirstMatch(html, /tracks\s*:\s*(\[[\s\S]*?\])/i)
+            || extractFirstMatch(html, /tracks\s*=\s*(\[[\s\S]*?\])/i);
+        if (!payload) return [];
+        var out = [];
+        var seen = {};
+        var objectRegex = /\{[\s\S]*?\}/g;
+        var match;
+        while ((match = objectRegex.exec(payload)) !== null) {
+            var block = match[0];
+            var file = extractFirstMatch(block, /(?:file|src|url)\s*:\s*["']([^"']+)["']/i);
+            if (!file) continue;
+            var url = absoluteUrl(baseUrl, file);
+            if (!/^https?:\/\//i.test(url) || seen[url]) continue;
+            seen[url] = true;
+            out.push({
+                url: url,
+                label: trim(
+                    extractFirstMatch(block, /(?:label|name)\s*:\s*["']([^"']+)["']/i)
+                    || extractFirstMatch(block, /(?:lang|language)\s*:\s*["']([^"']+)["']/i)
+                    || "Unknown"
+                ),
+                lang: trim(
+                    extractFirstMatch(block, /(?:lang|language)\s*:\s*["']([^"']+)["']/i)
+                    || "en"
+                ).toLowerCase()
+            });
+        }
+        return out;
+    }
+
+    function decodePackedNumber(value, base) {
+        var alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
+        var input = String(value || "").toLowerCase();
+        var result = 0;
+        for (var i = 0; i < input.length; i++) {
+            var index = alphabet.indexOf(input.charAt(i));
+            if (index < 0 || index >= base) return NaN;
+            result = (result * base) + index;
+        }
+        return result;
+    }
+
+    function parsePackedStringArray(value) {
+        var raw = trim(String(value || ""));
+        if (!raw) return [];
+        if ((raw.charAt(0) === "'" && raw.charAt(raw.length - 1) === "'")
+            || (raw.charAt(0) === "\"" && raw.charAt(raw.length - 1) === "\"")) {
+            raw = raw.slice(1, -1);
+        }
+        raw = raw.replace(/\\'/g, "'").replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
+        return raw.split("|");
+    }
+
+    function unpackDeanEdwards(text) {
+        var html = String(text || "");
+        var match = html.match(/eval\(function\(p,a,c,k,e,d\)\{[\s\S]*?\}\(\s*'((?:\\.|[^'])*)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'((?:\\.|[^'])*)'\.split\('\\\|'\)/i)
+            || html.match(/eval\(function\(p,a,c,k,e,d\)\{[\s\S]*?\}\(\s*'((?:\\.|[^'])*)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'((?:\\.|[^'])*)'\.split\('\|'\)/i);
+        if (!match) return "";
+        var payload = match[1]
+            .replace(/\\'/g, "'")
+            .replace(/\\"/g, "\"")
+            .replace(/\\\\/g, "\\");
+        var base = Number(match[2]) || 36;
+        var count = Number(match[3]) || 0;
+        var words = parsePackedStringArray(match[4]);
+        if (!payload || !words.length) return "";
+        return payload.replace(/\b[0-9a-z]+\b/gi, function (token) {
+            var index = decodePackedNumber(token, base);
+            if (!isFinite(index) || index < 0 || index >= count) return token;
+            return typeof words[index] === "string" && words[index] ? words[index] : token;
+        });
+    }
+
+    function inferSubtitleMeta(url) {
+        var value = String(url || "").toLowerCase();
+        var lastToken = trim(value.split("/").pop() || "");
+        var lang = extractFirstMatch(lastToken, /[_\-.]([a-z]{2,3})(?:[_\-.]|\.vtt\b)/i) || "en";
+        var labelMap = {
+            en: "English",
+            eng: "English",
+            es: "Spanish",
+            spa: "Spanish",
+            fr: "French",
+            fre: "French",
+            de: "German",
+            ger: "German",
+            pt: "Portuguese",
+            por: "Portuguese",
+            ar: "Arabic",
+            ara: "Arabic",
+            tr: "Turkish",
+            tur: "Turkish",
+            pl: "Polish",
+            pol: "Polish",
+            it: "Italian",
+            ind: "Indonesian",
+            nl: "Dutch",
+            dut: "Dutch",
+            sv: "Swedish",
+            swe: "Swedish",
+            da: "Danish",
+            ro: "Romanian",
+            ron: "Romanian",
+            fi: "Finnish",
+            ko: "Korean",
+            kor: "Korean",
+            he: "Hebrew",
+            heb: "Hebrew",
+            el: "Greek",
+            gre: "Greek",
+            cs: "Czech",
+            cze: "Czech",
+            fa: "Persian",
+            per: "Persian",
+            bg: "Bulgarian",
+            bul: "Bulgarian",
+            sr: "Serbian",
+            srp: "Serbian",
+            sl: "Slovenian",
+            slv: "Slovenian",
+            sq: "Albanian",
+            alb: "Albanian"
+        };
+        return {
+            lang: normalizeSubtitleLang(lang),
+            label: labelMap[lang] || (lang ? (lang.toUpperCase()) : "Unknown")
+        };
+    }
+
+    function normalizeSubtitleLang(value) {
+        var raw = trim(String(value || "").toLowerCase());
+        var langMap = {
+            arabic: "ar",
+            ar: "ar",
+            ara: "ar",
+            bengali: "bn",
+            bn: "bn",
+            chinese: "zh",
+            zh: "zh",
+            eng: "en",
+            english: "en",
+            en: "en",
+            filipino: "fil",
+            fil: "fil",
+            french: "fr",
+            fre: "fr",
+            fr: "fr",
+            german: "de",
+            ger: "de",
+            de: "de",
+            greek: "el",
+            gre: "el",
+            el: "el",
+            hebrew: "he",
+            heb: "he",
+            he: "he",
+            hindi: "hi",
+            hi: "hi",
+            indonesian: "id",
+            ind: "id",
+            id: "id",
+            italian: "it",
+            it: "it",
+            korean: "ko",
+            kor: "ko",
+            ko: "ko",
+            malay: "ms",
+            ms: "ms",
+            panjabi: "pa",
+            punjabi: "pa",
+            pa: "pa",
+            persian: "fa",
+            per: "fa",
+            fa: "fa",
+            polish: "pl",
+            pol: "pl",
+            pl: "pl",
+            portuguese: "pt",
+            por: "pt",
+            pt: "pt",
+            romanian: "ro",
+            ron: "ro",
+            ro: "ro",
+            russian: "ru",
+            ru: "ru",
+            serbian: "sr",
+            srp: "sr",
+            sr: "sr",
+            slovenian: "sl",
+            slv: "sl",
+            sl: "sl",
+            spanish: "es",
+            spa: "es",
+            es: "es",
+            swedish: "sv",
+            swe: "sv",
+            sv: "sv",
+            tamil: "ta",
+            ta: "ta",
+            telugu: "te",
+            te: "te",
+            turkish: "tr",
+            tur: "tr",
+            tr: "tr",
+            urdu: "ur",
+            ur: "ur",
+            vietnamese: "vi",
+            viet: "vi",
+            vi: "vi"
+        };
+        return langMap[raw] || (raw ? raw.slice(0, 3) : "en");
+    }
+
+    function extractSubtitleUrls(text, baseUrl) {
+        var source = String(text || "");
+        var out = [];
+        var seen = {};
+        var regex = /https?:\/\/[^"' )]+\.vtt(?:\?[^"' )]*)?/ig;
+        var match;
+        while ((match = regex.exec(source)) !== null) {
+            var url = absoluteUrl(baseUrl, match[0]);
+            if (!/^https?:\/\//i.test(url) || seen[url]) continue;
+            seen[url] = true;
+            var meta = inferSubtitleMeta(url);
+            out.push({
+                url: url,
+                label: meta.label || "Unknown",
+                lang: meta.lang || "en"
+            });
+        }
+        return out;
+    }
+
+    function extractMediaUrls(text, extension) {
+        var source = String(text || "");
+        var pattern = new RegExp("https?:\\\\/\\\\/[^\\\"' )]+\\." + extension + "(?:\\?[^\\\"' )]*)?", "ig");
+        var out = [];
+        var seen = {};
+        var match;
+        while ((match = pattern.exec(source)) !== null) {
+            var url = trim(match[0]);
+            if (!seen[url]) {
+                seen[url] = true;
+                out.push(url);
+            }
+        }
+        return out;
+    }
+
+    async function resolveVidoraEmbed(embedUrl, sourceName) {
+        var pageHtml = await getText(embedUrl, {
+            "User-Agent": USER_AGENT,
+            "Referer": "https://moviesapi.club/"
+        }).catch(function () {
+            return "";
+        });
+        if (!pageHtml) return [];
+
+        var unpacked = unpackDeanEdwards(pageHtml);
+        var scanText = unpacked || pageHtml;
+        var subtitles = normalizeSubtitleTracks(extractSubtitleUrls(scanText, embedUrl));
+        var hlsUrls = extractMediaUrls(scanText, "m3u8");
+        if (!hlsUrls.length) return [];
+
+        var headers = {
+            "User-Agent": USER_AGENT,
+            "Referer": "https://vidora.stream/",
+            "Origin": "https://vidora.stream"
+        };
+        var results = [];
+        for (var i = 0; i < hlsUrls.length; i++) {
+            results = results.concat(await expandHlsStreams(hlsUrls[i], headers, sourceName || "MoviesClub", {
+                subtitles: subtitles,
+                quality: qualityFromText(hlsUrls[i] + " " + scanText),
+                referer: "https://vidora.stream/",
+                mirrorHosts: ["vidora.stream", "netrocdn.site", "box.netrocdn.site"]
+            }).catch(function () {
+                return [];
+            }));
+        }
+        return results;
+    }
+
+    async function resolveMoviesclub(payload) {
+        var pageUrl = payload.mediaType === "tv"
+            ? ("https://moviesapi.club/tv/" + payload.tmdbId + "-" + payload.season + "-" + payload.episode)
+            : ("https://moviesapi.club/movie/" + payload.tmdbId);
+
+        var pageHtml = await getText(pageUrl, {
+            "User-Agent": USER_AGENT,
+            "Referer": BASE_URL + "/"
+        }).catch(function () {
+            return "";
+        });
+        if (!pageHtml) return [];
+
+        var iframeUrl = extractFirstMatch(pageHtml, /<iframe[^>]+src=["']([^"']+)["']/i);
+        if (!iframeUrl) return [];
+        iframeUrl = absoluteUrl(pageUrl, iframeUrl);
+
+        if (/vidora\.stream/i.test(iframeUrl)) {
+            return resolveVidoraEmbed(iframeUrl, "MoviesClub");
+        }
+
+        return [];
+    }
+
+    async function resolveVidlink(payload) {
+        var apiUrl = payload.mediaType === "tv"
+            ? ("https://vidlink.pro/api/b/tv/" + payload.tmdbId + "/" + payload.season + "/" + payload.episode + "?multiLang=0")
+            : ("https://vidlink.pro/api/b/movie/" + payload.tmdbId + "?multiLang=0");
+
+        var response = await request(apiUrl, {
+            headers: {
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json, text/plain, */*",
+                "Referer": payload.mediaType === "tv"
+                    ? ("https://vidlink.pro/tv/" + payload.tmdbId + "/" + payload.season + "/" + payload.episode + "?autoplay=false&poster=true&title=true&nextbutton=false&primaryColor=ffffff")
+                    : ("https://vidlink.pro/movie/" + payload.tmdbId + "?autoplay=false&poster=true&title=true&nextbutton=false&primaryColor=ffffff")
+            }
+        }).catch(function () {
+            return null;
+        });
+        if (!response) return [];
+
+        var json = parseJsonSafe(response.body, null);
+        var stream = json && (json.stream || json.data && json.data.stream) || null;
+        var payloadData = stream && (stream.stream || stream) || null;
+        if (!payloadData) return [];
+
+        var playlist = trim(payloadData.playlist || payloadData.file || "");
+        var subtitles = normalizeSubtitleTracks(payloadData.captions || payloadData.tracks || []);
+        var headers = defaultHeaders({
+            "Referer": "https://vidlink.pro/",
+            "Origin": "https://vidlink.pro"
+        });
+        if (playlist && /^https?:\/\//i.test(playlist)) {
+            return expandHlsStreams(playlist, headers, "VidLink", {
+                subtitles: subtitles,
+                quality: qualityFromText(playlist),
+                referer: "https://vidlink.pro/",
+                mirrorHosts: ["vidlink.pro"]
+            });
+        }
+
+        var qualities = payloadData.qualities || [];
+        var results = [];
+        for (var i = 0; i < qualities.length; i++) {
+            var row = qualities[i] || {};
+            var url = trim(row.url || row.file || row.src || "");
+            if (!/^https?:\/\//i.test(url)) continue;
+            results.push(buildPlayableStreamResult(url, "VidLink", headers, qualityFromText((row.quality || row.label || "") + " " + url), {
+                subtitles: subtitles,
+                forceProxy: isLikelyHls(url),
+                referer: "https://vidlink.pro/",
+                mirrorHosts: ["vidlink.pro"]
+            }));
+        }
+        return results;
+    }
+
+    async function resolveVixsrc(payload) {
+        var apiUrl = payload.mediaType === "tv"
+            ? ("https://vixsrc.to/api/tv/" + payload.tmdbId + "/" + payload.season + "/" + payload.episode + "?primaryColor=ffffff")
+            : ("https://vixsrc.to/api/movie/" + payload.tmdbId + "?primaryColor=ffffff");
+        var json = await getJson(apiUrl, {
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json, text/plain, */*",
+            "Referer": payload.mediaType === "tv"
+                ? ("https://vixsrc.to/tv/" + payload.tmdbId + "/" + payload.season + "/" + payload.episode + "?primaryColor=ffffff")
+                : ("https://vixsrc.to/movie/" + payload.tmdbId + "?primaryColor=ffffff")
+        }).catch(function () {
+            return {};
+        });
+
+        var embedUrl = absoluteUrl("https://vixsrc.to/", json && json.src || "");
+        if (!embedUrl) return [];
+
+        var embedHtml = await getText(embedUrl, {
+            "User-Agent": USER_AGENT,
+            "Referer": payload.mediaType === "tv"
+                ? ("https://vixsrc.to/tv/" + payload.tmdbId + "/" + payload.season + "/" + payload.episode + "?primaryColor=ffffff")
+                : ("https://vixsrc.to/movie/" + payload.tmdbId + "?primaryColor=ffffff")
+        }).catch(function () {
+            return "";
+        });
+        if (!embedHtml) return [];
+
+        var subtitles = normalizeSubtitleTracks(extractInlineTracks(embedHtml, embedUrl).concat(extractSubtitleUrls(embedHtml, embedUrl)));
+        var masterUrl = extractFirstMatch(embedHtml, /file:\s*["']([^"']+\.m3u8[^"']*)["']/i)
+            || extractFirstMatch(embedHtml, /source:\s*["']([^"']+\.m3u8[^"']*)["']/i)
+            || extractFirstMatch(embedHtml, /(https?:\/\/[^"' )]+\.m3u8(?:\?[^"' )]*)?)/i);
+        if (!masterUrl) return [];
+
+        return expandHlsStreams(masterUrl, defaultHeaders({
+            "Referer": "https://vixsrc.to/",
+            "Origin": "https://vixsrc.to"
+        }), "VixSrc", {
+            subtitles: subtitles,
+            quality: qualityFromText(masterUrl),
+            referer: "https://vixsrc.to/",
+            mirrorHosts: ["vixsrc.to"]
+        });
+    }
+
+    async function resolvePrimewire(payload) {
+        var query = payload.mediaType === "tv"
+            ? ("tmdb=" + payload.tmdbId + "&type=tv&season=" + payload.season + "&episode=" + payload.episode)
+            : ("tmdb=" + payload.tmdbId + "&type=movie");
+
+        var listJson = await getJson("https://primewire.mov/api/v1/s?" + query, {
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json, text/plain, */*",
+            "Referer": payload.mediaType === "tv"
+                ? ("https://primewire.mov/embed/tv?tmdb=" + payload.tmdbId + "&season=" + payload.season + "&episode=" + payload.episode)
+                : ("https://primewire.mov/embed/movie?tmdb=" + payload.tmdbId)
+        }).catch(function () {
+            return {};
+        });
+
+        var servers = listJson && listJson.servers || [];
+        if (!servers.length) return [];
+
+        var preferred = ["PrimeVid", "Voe", "Streamwish", "Filemoon", "Mixdrop", "VidNest", "Vidmoly"];
+        servers = servers.slice().sort(function (a, b) {
+            var aName = trim(a && a.name || "");
+            var bName = trim(b && b.name || "");
+            var aRank = preferred.indexOf(aName);
+            var bRank = preferred.indexOf(bName);
+            if (aRank < 0) aRank = preferred.length + 10;
+            if (bRank < 0) bRank = preferred.length + 10;
+            return aRank - bRank;
+        }).slice(0, 8);
+
+        var results = [];
+        for (var i = 0; i < servers.length; i++) {
+            var server = servers[i] || {};
+            var key = trim(server.key || "");
+            if (!key) continue;
+            var linkJson = await getJson("https://primewire.mov/api/v1/l?key=" + encodeURIComponent(key), {
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json, text/plain, */*",
+                "Referer": payload.mediaType === "tv"
+                    ? ("https://primewire.mov/embed/tv?tmdb=" + payload.tmdbId + "&season=" + payload.season + "&episode=" + payload.episode)
+                    : ("https://primewire.mov/embed/movie?tmdb=" + payload.tmdbId)
+            }).catch(function () {
+                return {};
+            });
+            var link = trim(linkJson && linkJson.link || "");
+            if (!link) continue;
+
+            if (/vidora\.stream/i.test(link)) {
+                results = results.concat(await resolveVidoraEmbed(link, "PrimeWire - " + trim(server.name || "Vidora")).catch(function () {
+                    return [];
+                }));
+                continue;
+            }
+
+            if (/\.m3u8(?:$|\?)/i.test(link)) {
+                results = results.concat(await expandHlsStreams(link, defaultHeaders({
+                    "Referer": "https://primewire.mov/",
+                    "Origin": "https://primewire.mov"
+                }), "PrimeWire - " + trim(server.name || "Stream"), {
+                    subtitles: [],
+                    quality: qualityFromText((server.file_name || "") + " " + link),
+                    referer: "https://primewire.mov/",
+                    mirrorHosts: ["primewire.mov"]
+                }).catch(function () {
+                    return [];
+                }));
+            }
+        }
+        return results;
     }
 
     function customBase64Encode(inputBytes) {
@@ -811,7 +1433,7 @@
 
     async function resolveVidzee(payload) {
         var baseApi = "https://player.vidzee.wtf/api/server?id=" + payload.tmdbId;
-        var serverIds = [3, 4, 5, 7, 9, 10];
+        var serverIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         var results = [];
         var dedupe = {};
         for (var i = 0; i < serverIds.length; i++) {
@@ -825,6 +1447,7 @@
                     "Referer": "https://player.vidzee.wtf/"
                 });
                 var rows = json && json.url || [];
+                var subtitles = normalizeSubtitleTracks(json && json.tracks || []);
                 for (var j = 0; j < rows.length; j++) {
                     var row = rows[j];
                     if (!row || !row.link) continue;
@@ -836,20 +1459,33 @@
                     var quality = qualityFromText(direct + " " + (row.name || "") + " " + (row.message || ""));
                     var serverName = trim((json.serverInfo && json.serverInfo.name) || row.name || ("Server " + serverIds[i]));
                     var lang = trim(row.lang || (json.serverInfo && json.serverInfo.language) || "");
-                    results.push(buildPlayableStreamResult(
-                        direct,
-                        "Vidzee - " + serverName + (lang ? " [" + lang + "]" : ""),
-                        defaultHeaders({
-                            "Referer": "https://player.vidzee.wtf/",
-                            "Origin": "https://player.vidzee.wtf"
-                        }),
-                        quality,
-                        {
-                            forceProxy: isLikelyHls(direct),
+                    var sourceLabel = "Vidzee - " + serverName + (lang ? " [" + lang + "]" : "");
+                    var headers = defaultHeaders({
+                        "Referer": "https://player.vidzee.wtf/",
+                        "Origin": "https://player.vidzee.wtf"
+                    });
+                    if (isLikelyHls(direct)) {
+                        var expanded = await expandHlsStreams(direct, headers, sourceLabel, {
+                            subtitles: subtitles,
+                            quality: quality,
                             referer: "https://player.vidzee.wtf/",
                             mirrorHosts: ["player.vidzee.wtf", "vidzee.wtf"]
-                        }
-                    ));
+                        });
+                        results = results.concat(expanded);
+                    } else {
+                        results.push(buildPlayableStreamResult(
+                            direct,
+                            sourceLabel,
+                            headers,
+                            quality,
+                            {
+                                subtitles: subtitles,
+                                forceProxy: false,
+                                referer: "https://player.vidzee.wtf/",
+                                mirrorHosts: ["player.vidzee.wtf", "vidzee.wtf"]
+                            }
+                        ));
+                    }
                 }
             } catch (_) {}
         }
@@ -909,6 +1545,7 @@
         var fileString = extractFirstMatch(playerHtml, /file:\s*"([^"]+)"/i)
             || extractFirstMatch(playerHtml, /file:\s*'([^']+)'/i);
         if (!fileString) return [];
+        var inlineTracks = extractInlineTracks(playerHtml, prorcpUrl);
 
         var headers = {
             "User-Agent": USER_AGENT,
@@ -944,18 +1581,12 @@
                 var probe = await request(candidate, { headers: headers });
                 var body = String(probe && probe.body || "");
                 if ((probe && probe.status >= 200 && probe.status < 300) && /^#EXTM3U/i.test(body)) {
-                    results.push(buildPlayableStreamResult(
-                        candidate,
-                        "VidSrc ICU",
-                        headers,
-                        qualityFromText(candidate + " " + body),
-                        {
-                            body: body,
-                            forceProxy: true,
-                            referer: "https://cloudnestra.com/",
-                            mirrorHosts: ["tmstr5.cloudnestra.com", "cloudnestra.com"]
-                        }
-                    ));
+                    results = results.concat(await expandHlsStreams(candidate, headers, "VidSrc ICU", {
+                        subtitles: inlineTracks,
+                        quality: qualityFromText(candidate + " " + body),
+                        referer: "https://cloudnestra.com/",
+                        mirrorHosts: ["tmstr5.cloudnestra.com", "cloudnestra.com"]
+                    }, body));
                 }
             } catch (_) {}
         }
@@ -1064,19 +1695,31 @@
         });
         var finalUrl = trim(streamJson && streamJson.url || "");
         if (!/^https?:\/\//i.test(finalUrl)) return [];
+        var subtitles = normalizeSubtitleTracks(streamJson && streamJson.tracks || []);
+
+        var headers = defaultHeaders({
+            "Referer": "https://vidfast.pro/",
+            "Origin": "https://vidfast.pro"
+        });
+        if (isLikelyHls(finalUrl)) {
+            return await expandHlsStreams(finalUrl, headers, "VidFast", {
+                subtitles: subtitles,
+                quality: qualityFromText(finalUrl + " " + server),
+                referer: "https://vidfast.pro/",
+                mirrorHosts: ["vidfast.pro", "begin.10017.workers.dev", "workers.dev"]
+            });
+        }
 
         return [buildPlayableStreamResult(
             finalUrl,
             "VidFast",
-            defaultHeaders({
-                "Referer": "https://vidfast.pro/",
-                "Origin": "https://vidfast.pro"
-            }),
+            headers,
             qualityFromText(finalUrl + " " + server),
             {
-                forceProxy: isLikelyHls(finalUrl),
+                subtitles: subtitles,
+                forceProxy: false,
                 referer: "https://vidfast.pro/",
-                mirrorHosts: ["vidfast.pro", "workers.dev"]
+                mirrorHosts: ["vidfast.pro", "begin.10017.workers.dev", "workers.dev"]
             }
         )];
     }
@@ -1249,9 +1892,24 @@
             streams = streams.concat(await resolveVidsrcIcu(payload).catch(function () {
                 return [];
             }));
+            if (payload.mediaType === "movie") {
+                streams = streams.concat(await resolveMoviesclub(payload).catch(function () {
+                    return [];
+                }));
+                streams = streams.concat(await resolvePrimewire(payload).catch(function () {
+                    return [];
+                }));
+                streams = streams.concat(await resolveVidlink(payload).catch(function () {
+                    return [];
+                }));
+                streams = streams.concat(await resolveVixsrc(payload).catch(function () {
+                    return [];
+                }));
+            }
             streams = uniqueBy(streams, function (item) {
                 return item && item.url;
             });
+            streams = sortStreams(streams);
             cb({ success: true, data: streams });
         } catch (error) {
             cb({ success: false, errorCode: "STREAM_ERROR", message: toErrorMessage(error) });
