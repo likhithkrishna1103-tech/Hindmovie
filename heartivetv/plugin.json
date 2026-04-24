@@ -1,0 +1,17 @@
+{
+  "packageName": "com.igris.repo.heartivetv",
+  "name": "HeartiveTV",
+  "version": 1,
+  "baseUrl": "https://heartivetv.pages.dev",
+  "description": "Heartive movies and shows",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Movies",
+    "Series"
+  ]
+}
