@@ -1,8 +1,30 @@
 {
   "packageName": "com.igris.repo.animekai",
   "name": "AnimeKai",
-  "version": 3,
+  "version": 4,
   "baseUrl": "https://anikai.to",
+  "domains": [
+    {
+      "name": "anikai.to",
+      "url": "https://anikai.to"
+    },
+    {
+      "name": "animekai.fi",
+      "url": "https://animekai.fi"
+    },
+    {
+      "name": "animekai.fo",
+      "url": "https://animekai.fo"
+    },
+    {
+      "name": "animekai.gs",
+      "url": "https://animekai.gs"
+    },
+    {
+      "name": "animekai.la",
+      "url": "https://animekai.la"
+    }
+  ],
   "description": "AnimeKai anime streaming plugin",
   "authors": [
     "IGRIS"

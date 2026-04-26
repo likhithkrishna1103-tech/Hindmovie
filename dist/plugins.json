@@ -2,8 +2,30 @@
   {
     "packageName": "com.igris.repo.animekai",
     "name": "AnimeKai",
-    "version": 3,
+    "version": 4,
     "baseUrl": "https://anikai.to",
+    "domains": [
+      {
+        "name": "anikai.to",
+        "url": "https://anikai.to"
+      },
+      {
+        "name": "animekai.fi",
+        "url": "https://animekai.fi"
+      },
+      {
+        "name": "animekai.fo",
+        "url": "https://animekai.fo"
+      },
+      {
+        "name": "animekai.gs",
+        "url": "https://animekai.gs"
+      },
+      {
+        "name": "animekai.la",
+        "url": "https://animekai.la"
+      }
+    ],
     "description": "AnimeKai anime streaming plugin",
     "authors": [
       "IGRIS"
@@ -20,8 +42,13 @@
   {
     "packageName": "com.igris.repo.animepahe",
     "name": "AnimePahe",
-    "version": 9,
-    "baseUrl": "https://example.com",
+    "version": 10,
+    "baseUrl": "https://animepahe.com",
+    "domains": [
+      "animepahe.com",
+      "animepahe.org",
+      "animepahe.pw"
+    ],
     "description": "Fast anime streaming with sub and dub.",
     "authors": [
       "IGRIS"
@@ -218,44 +245,6 @@
       "Movies"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.movies4u.sky"
-  },
-  {
-    "packageName": "com.igris.repo.netmirror",
-    "name": "NetMirror",
-    "version": 4,
-    "baseUrl": "https://net22.cc",
-    "providers": [
-      {
-        "id": "netflix",
-        "name": "Netflix"
-      },
-      {
-        "id": "primevideo",
-        "name": "PrimeVideo"
-      },
-      {
-        "id": "jiohotstar",
-        "name": "JioHotstar"
-      }
-    ],
-    "description": "Netflix, PrimeVideo(Lionsgate),JioHotstar(Hotstar, Disney, Paramount, HBO, Peacock) Content in Multiple Languages",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "en",
-      "hi",
-      "ta",
-      "te",
-      "ml",
-      "kn"
-    ],
-    "categories": [
-      "Movies",
-      "Series",
-      "Anime"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.netmirror.sky"
   },
   {
     "packageName": "com.igris.repo.piratexplay",

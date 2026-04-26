@@ -429,7 +429,7 @@
         for (var j = 0; j < urls.length; j++) {
             var candidate = absoluteUrl(urls[j], currentUrl || BASE_URL);
             if (!candidate) continue;
-            if (/anikai\.to\/iframe\//i.test(candidate) || /animekai\.(?:to|fi|gs|la)\/iframe\//i.test(candidate)) continue;
+            if (/anikai\.to\/iframe\//i.test(candidate) || /animekai\.(?:to|fi|fo|gs|la)\/iframe\//i.test(candidate)) continue;
             if (/cloudflare|cdnjs|jquery|bootstrap|swiper/i.test(candidate)) continue;
             return candidate;
         }

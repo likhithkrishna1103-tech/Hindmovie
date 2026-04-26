@@ -1,5 +1,5 @@
 (function() {
-    const MAIN_URL = "https://animepahe.org";
+    const MAIN_URL = (((typeof manifest !== "undefined" && manifest && manifest.baseUrl) || "https://animepahe.com") + "").replace(/\/+$/, "");
     const PROXY = "https://animepaheproxy.phisheranimepahe.workers.dev/?url=";
     const HEADERS = {
         "Cookie": "__ddg2_=1234567890",
