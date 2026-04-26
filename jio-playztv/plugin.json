@@ -1,14 +1,22 @@
 {
   "packageName": "com.igris.repo.playztvjio",
   "name": "Jio - PlayZTV",
-  "version": 3,
+  "version": 4,
   "baseUrl": "https://adsflw.xyz",
   "description": "Jio live TV lineup via PlayZTV.",
   "authors": [
     "IGRIS"
   ],
   "languages": [
-    "en"
+    "hi",
+    "en",
+    "ta",
+    "te",
+    "ml",
+    "kn",
+    "bn",
+    "mr",
+    "pa"
   ],
   "categories": [
     "livestream"

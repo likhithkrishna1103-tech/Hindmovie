@@ -1,14 +1,19 @@
 {
   "packageName": "com.igris.repo.movierulz",
   "name": "Movierulz",
-  "version": 4,
+  "version": 5,
   "baseUrl": "https://example.com",
   "description": "Fresh movie drops with fast links.",
   "authors": [
     "IGRIS"
   ],
   "languages": [
-    "en"
+    "hi",
+    "en",
+    "ta",
+    "te",
+    "ml",
+    "kn"
   ],
   "categories": [
     "Movies"

@@ -1,14 +1,15 @@
 {
   "packageName": "com.igris.repo.kaido",
   "name": "Kaido",
-  "version": 5,
+  "version": 6,
   "baseUrl": "https://example.com",
   "description": "Anime streaming with quick episode access.",
   "authors": [
     "IGRIS"
   ],
   "languages": [
-    "en"
+    "en",
+    "ja"
   ],
   "categories": [
     "Anime"

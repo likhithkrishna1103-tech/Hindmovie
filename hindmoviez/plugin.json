@@ -1,14 +1,19 @@
 {
   "packageName": "com.igris.repo.hindmoviez",
   "name": "HindMoviez",
-  "version": 7,
+  "version": 8,
   "baseUrl": "https://example.com",
   "description": "Trending movies and series, quickly.",
   "authors": [
     "IGRIS"
   ],
   "languages": [
-    "en"
+    "hi",
+    "en",
+    "ta",
+    "te",
+    "ml",
+    "kn"
   ],
   "categories": [
     "Movies",

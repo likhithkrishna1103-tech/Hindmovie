@@ -1,14 +1,19 @@
 {
   "packageName": "com.igris.repo.movies4u",
   "name": "Movies4U",
-  "version": 9,
+  "version": 10,
   "baseUrl": "https://movies4u.rs",
   "description": "Movie picks with straightforward stream links.",
   "authors": [
     "IGRIS"
   ],
   "languages": [
-    "en"
+    "hi",
+    "en",
+    "ta",
+    "te",
+    "ml",
+    "kn"
   ],
   "categories": [
     "Movies"

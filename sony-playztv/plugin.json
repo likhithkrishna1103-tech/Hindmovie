@@ -1,14 +1,20 @@
 {
   "packageName": "com.igris.repo.playztvsony",
   "name": "Sony - PlayZTV",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://adsflw.xyz",
   "description": "Sony live channels via PlayZTV.",
   "authors": [
     "IGRIS"
   ],
   "languages": [
-    "en"
+    "hi",
+    "en",
+    "ta",
+    "te",
+    "ml",
+    "bn",
+    "mr"
   ],
   "categories": [
     "Livestream"

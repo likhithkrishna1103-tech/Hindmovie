@@ -1,14 +1,15 @@
 {
   "packageName": "com.igris.repo.piratexplay",
   "name": "PirateXPlay",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://example.com",
   "description": "Movies and shows with fast stream picks.",
   "authors": [
     "IGRIS"
   ],
   "languages": [
-    "en"
+    "en",
+    "hi"
   ],
   "categories": [
     "Movies",

@@ -1,14 +1,14 @@
 {
   "packageName": "com.igris.repo.animepahe",
   "name": "AnimePahe",
-  "version": 8,
+  "version": 9,
   "baseUrl": "https://example.com",
   "description": "Fast anime streaming with sub and dub.",
   "authors": [
     "IGRIS"
   ],
   "languages": [
-    "en"
+    "en","ja"
   ],
   "categories": [
     "Anime"

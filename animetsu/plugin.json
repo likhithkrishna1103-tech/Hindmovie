@@ -1,14 +1,14 @@
 {
   "packageName": "com.igris.repo.animetsu",
   "name": "Animetsu",
-  "version": 4,
+  "version": 5,
   "baseUrl": "https://example.com",
   "description": "Clean anime picks with sub and dub.",
   "authors": [
     "IGRIS"
   ],
   "languages": [
-    "en"
+    "en","ja"
   ],
   "categories": [
     "Anime"

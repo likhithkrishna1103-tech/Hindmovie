@@ -1,13 +1,17 @@
 {
   "packageName": "com.igris.repo.playztvsunnxt",
   "name": "Sun NXT - PlayZTV",
-  "version": 3,
+  "version": 4,
   "baseUrl": "https://adsflw.xyz",
   "description": "Sun NXT live channels via PlayZTV.",
   "authors": [
     "IGRIS"
   ],
   "languages": [
+    "ta",
+    "te",
+    "ml",
+    "kn",
     "en"
   ],
   "categories": [

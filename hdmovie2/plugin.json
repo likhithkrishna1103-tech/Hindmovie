@@ -1,14 +1,19 @@
 {
   "packageName": "com.igris.repo.hdmovie2",
   "name": "HDMovie2",
-  "version": 3,
+  "version": 4,
   "baseUrl": "https://hdmovie2.restaurant",
   "description": "TMDB catalog with HDMovie2 stream resolution.",
   "authors": [
     "IGRIS"
   ],
   "languages": [
-    "en"
+    "en",
+    "hi",
+    "ta",
+    "te",
+    "ml",
+    "kn"
   ],
   "categories": [
     "Movies",
