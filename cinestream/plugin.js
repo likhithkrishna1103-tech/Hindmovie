@@ -171,6 +171,297 @@
         });
     }
 
+    function getNodeCrypto() {
+        try {
+            if (typeof require === "function") return require("crypto");
+        } catch (_) {}
+        return null;
+    }
+
+    function utf8ToBytes(value) {
+        var text = String(value == null ? "" : value);
+        if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(text);
+        if (typeof Buffer !== "undefined") return new Uint8Array(Buffer.from(text, "utf8"));
+        var out = [];
+        for (var i = 0; i < text.length; i++) out.push(text.charCodeAt(i) & 255);
+        return new Uint8Array(out);
+    }
+
+    function bytesToUtf8(bytes) {
+        var view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+        if (typeof TextDecoder !== "undefined") return new TextDecoder().decode(view);
+        if (typeof Buffer !== "undefined") return Buffer.from(view).toString("utf8");
+        var out = "";
+        for (var i = 0; i < view.length; i++) out += String.fromCharCode(view[i]);
+        return out;
+    }
+
+    function bytesToBinary(bytes) {
+        var view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+        var out = "";
+        for (var i = 0; i < view.length; i++) out += String.fromCharCode(view[i]);
+        return out;
+    }
+
+    function binaryToBytes(binary) {
+        var out = new Uint8Array(String(binary || "").length);
+        for (var i = 0; i < out.length; i++) out[i] = binary.charCodeAt(i) & 255;
+        return out;
+    }
+
+    function base64EncodeBytes(bytes) {
+        var binary = bytesToBinary(bytes);
+        if (typeof btoa === "function") return btoa(binary);
+        if (typeof Buffer !== "undefined") return Buffer.from(binary, "binary").toString("base64");
+        throw new Error("Base64 encoding not available");
+    }
+
+    function base64DecodeToBytes(value) {
+        var text = String(value || "");
+        if (!text) return new Uint8Array(0);
+        if (typeof atob === "function") return binaryToBytes(atob(text));
+        if (typeof Buffer !== "undefined") return new Uint8Array(Buffer.from(text, "base64"));
+        throw new Error("Base64 decoding not available");
+    }
+
+    function hexToBytes(value) {
+        var text = String(value || "").replace(/[^0-9a-f]/gi, "");
+        var out = new Uint8Array(Math.floor(text.length / 2));
+        for (var i = 0; i < out.length; i++) out[i] = parseInt(text.substr(i * 2, 2), 16) & 255;
+        return out;
+    }
+
+    function bytesToHex(bytes) {
+        var view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+        var out = "";
+        for (var i = 0; i < view.length; i++) {
+            var hex = view[i].toString(16);
+            out += hex.length === 1 ? "0" + hex : hex;
+        }
+        return out;
+    }
+
+    function concatBytes(parts) {
+        var total = 0;
+        var arrays = [];
+        for (var i = 0; i < (parts || []).length; i++) {
+            var value = parts[i] instanceof Uint8Array ? parts[i] : new Uint8Array(parts[i] || []);
+            arrays.push(value);
+            total += value.length;
+        }
+        var out = new Uint8Array(total);
+        var offset = 0;
+        for (var j = 0; j < arrays.length; j++) {
+            out.set(arrays[j], offset);
+            offset += arrays[j].length;
+        }
+        return out;
+    }
+
+    async function sha256Bytes(bytes) {
+        var view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+        if (globalThis.crypto && globalThis.crypto.subtle && typeof globalThis.crypto.subtle.digest === "function") {
+            return new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", view));
+        }
+        var nodeCrypto = getNodeCrypto();
+        if (nodeCrypto && typeof nodeCrypto.createHash === "function") {
+            return new Uint8Array(nodeCrypto.createHash("sha256").update(Buffer.from(view)).digest());
+        }
+        throw new Error("SHA-256 not available");
+    }
+
+    async function hmacSha256Hex(keyText, messageText) {
+        var keyBytes = utf8ToBytes(keyText);
+        var messageBytes = utf8ToBytes(messageText);
+        if (globalThis.crypto && globalThis.crypto.subtle && typeof globalThis.crypto.subtle.importKey === "function") {
+            var imported = await globalThis.crypto.subtle.importKey(
+                "raw",
+                keyBytes,
+                { name: "HMAC", hash: "SHA-256" },
+                false,
+                ["sign"]
+            );
+            var signature = await globalThis.crypto.subtle.sign("HMAC", imported, messageBytes);
+            return bytesToHex(new Uint8Array(signature));
+        }
+        var nodeCrypto = getNodeCrypto();
+        if (nodeCrypto && typeof nodeCrypto.createHmac === "function") {
+            return nodeCrypto.createHmac("sha256", Buffer.from(keyBytes)).update(Buffer.from(messageBytes)).digest("hex");
+        }
+        throw new Error("HMAC-SHA256 not available");
+    }
+
+    async function pbkdf2Sha256(passwordBytes, saltBytes, iterations, keyLength) {
+        var pass = passwordBytes instanceof Uint8Array ? passwordBytes : new Uint8Array(passwordBytes || []);
+        var salt = saltBytes instanceof Uint8Array ? saltBytes : new Uint8Array(saltBytes || []);
+        if (globalThis.crypto && globalThis.crypto.subtle && typeof globalThis.crypto.subtle.importKey === "function") {
+            var baseKey = await globalThis.crypto.subtle.importKey("raw", pass, "PBKDF2", false, ["deriveBits"]);
+            var derived = await globalThis.crypto.subtle.deriveBits({
+                name: "PBKDF2",
+                hash: "SHA-256",
+                salt: salt,
+                iterations: Number(iterations || 100000)
+            }, baseKey, Number(keyLength || 32) * 8);
+            return new Uint8Array(derived);
+        }
+        var nodeCrypto = getNodeCrypto();
+        if (nodeCrypto && typeof nodeCrypto.pbkdf2Sync === "function") {
+            return new Uint8Array(nodeCrypto.pbkdf2Sync(Buffer.from(pass), Buffer.from(salt), Number(iterations || 100000), Number(keyLength || 32), "sha256"));
+        }
+        throw new Error("PBKDF2 not available");
+    }
+
+    async function encryptAesCbcPkcs7(plainBytes, keyBytes, ivBytes) {
+        var blockSize = 16;
+        var source = plainBytes instanceof Uint8Array ? plainBytes : new Uint8Array(plainBytes || []);
+        var remainder = source.length % blockSize;
+        var padLength = remainder === 0 ? blockSize : (blockSize - remainder);
+        var padded = new Uint8Array(source.length + padLength);
+        padded.set(source, 0);
+        for (var i = source.length; i < padded.length; i++) padded[i] = padLength;
+        if (globalThis.crypto && globalThis.crypto.subtle && typeof globalThis.crypto.subtle.importKey === "function") {
+            var imported = await globalThis.crypto.subtle.importKey("raw", keyBytes, { name: "AES-CBC" }, false, ["encrypt"]);
+            var encrypted = await globalThis.crypto.subtle.encrypt({ name: "AES-CBC", iv: ivBytes }, imported, padded);
+            return new Uint8Array(encrypted);
+        }
+        var nodeCrypto = getNodeCrypto();
+        if (nodeCrypto && typeof nodeCrypto.createCipheriv === "function") {
+            var cipher = nodeCrypto.createCipheriv("aes-256-cbc", Buffer.from(keyBytes), Buffer.from(ivBytes));
+            cipher.setAutoPadding(false);
+            var part1 = cipher.update(Buffer.from(padded));
+            var part2 = cipher.final();
+            return new Uint8Array(Buffer.concat([part1, part2]));
+        }
+        throw new Error("AES-CBC encryption not available");
+    }
+
+    async function decryptAesGcm(cipherBytes, keyBytes, ivBytes, tagBytes) {
+        var payload = concatBytes([cipherBytes, tagBytes]);
+        if (globalThis.crypto && globalThis.crypto.subtle && typeof globalThis.crypto.subtle.importKey === "function") {
+            var imported = await globalThis.crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
+            var plain = await globalThis.crypto.subtle.decrypt({
+                name: "AES-GCM",
+                iv: ivBytes,
+                tagLength: 128
+            }, imported, payload);
+            return new Uint8Array(plain);
+        }
+        var nodeCrypto = getNodeCrypto();
+        if (nodeCrypto && typeof nodeCrypto.createDecipheriv === "function") {
+            var decipher = nodeCrypto.createDecipheriv("aes-256-gcm", Buffer.from(keyBytes), Buffer.from(ivBytes));
+            decipher.setAuthTag(Buffer.from(tagBytes));
+            var part1 = decipher.update(Buffer.from(cipherBytes));
+            var part2 = decipher.final();
+            return new Uint8Array(Buffer.concat([part1, part2]));
+        }
+        throw new Error("AES-GCM decryption not available");
+    }
+
+    async function decryptAesCbcPkcs7(cipherBytes, keyBytes, ivBytes) {
+        var encrypted = cipherBytes instanceof Uint8Array ? cipherBytes : new Uint8Array(cipherBytes || []);
+        var plain;
+        if (globalThis.crypto && globalThis.crypto.subtle && typeof globalThis.crypto.subtle.importKey === "function") {
+            var imported = await globalThis.crypto.subtle.importKey("raw", keyBytes, { name: "AES-CBC" }, false, ["decrypt"]);
+            plain = new Uint8Array(await globalThis.crypto.subtle.decrypt({ name: "AES-CBC", iv: ivBytes }, imported, encrypted));
+        } else {
+            var nodeCrypto = getNodeCrypto();
+            if (!(nodeCrypto && typeof nodeCrypto.createDecipheriv === "function")) {
+                throw new Error("AES-CBC decryption not available");
+            }
+            var decipher = nodeCrypto.createDecipheriv("aes-128-cbc", Buffer.from(keyBytes), Buffer.from(ivBytes));
+            var part1 = decipher.update(Buffer.from(encrypted));
+            var part2 = decipher.final();
+            plain = new Uint8Array(Buffer.concat([part1, part2]));
+        }
+        if (!plain.length) return plain;
+        var padLength = plain[plain.length - 1];
+        if (padLength > 0 && padLength <= 16 && padLength <= plain.length) {
+            var valid = true;
+            for (var i = plain.length - padLength; i < plain.length; i++) {
+                if (plain[i] !== padLength) {
+                    valid = false;
+                    break;
+                }
+            }
+            if (valid) return plain.slice(0, plain.length - padLength);
+        }
+        return plain;
+    }
+
+    async function encryptAesGcm(plainBytes, keyBytes, ivBytes) {
+        var source = plainBytes instanceof Uint8Array ? plainBytes : new Uint8Array(plainBytes || []);
+        if (globalThis.crypto && globalThis.crypto.subtle && typeof globalThis.crypto.subtle.importKey === "function") {
+            var imported = await globalThis.crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
+            var encrypted = new Uint8Array(await globalThis.crypto.subtle.encrypt({ name: "AES-GCM", iv: ivBytes }, imported, source));
+            return {
+                cipher: encrypted.slice(0, Math.max(0, encrypted.length - 16)),
+                tag: encrypted.slice(Math.max(0, encrypted.length - 16))
+            };
+        }
+        var nodeCrypto = getNodeCrypto();
+        if (nodeCrypto && typeof nodeCrypto.createCipheriv === "function") {
+            var cipher = nodeCrypto.createCipheriv("aes-256-gcm", Buffer.from(keyBytes), Buffer.from(ivBytes));
+            var part1 = cipher.update(Buffer.from(source));
+            var part2 = cipher.final();
+            return {
+                cipher: new Uint8Array(Buffer.concat([part1, part2])),
+                tag: new Uint8Array(cipher.getAuthTag())
+            };
+        }
+        throw new Error("AES-GCM encryption not available");
+    }
+
+    function randomBytes(length) {
+        var size = Math.max(0, Number(length || 0));
+        var out = new Uint8Array(size);
+        if (globalThis.crypto && typeof globalThis.crypto.getRandomValues === "function") {
+            globalThis.crypto.getRandomValues(out);
+            return out;
+        }
+        var nodeCrypto = getNodeCrypto();
+        if (nodeCrypto && typeof nodeCrypto.randomBytes === "function") {
+            return new Uint8Array(nodeCrypto.randomBytes(size));
+        }
+        for (var i = 0; i < size; i++) out[i] = Math.floor(Math.random() * 256) & 255;
+        return out;
+    }
+
+    function xorBytes(dataBytes, keyBytes) {
+        var data = dataBytes instanceof Uint8Array ? dataBytes : new Uint8Array(dataBytes || []);
+        var key = keyBytes instanceof Uint8Array ? keyBytes : new Uint8Array(keyBytes || []);
+        var out = new Uint8Array(data.length);
+        for (var i = 0; i < data.length; i++) out[i] = data[i] ^ key[i % key.length];
+        return out;
+    }
+
+    function parsePemPublicKey(pemText) {
+        var cleaned = String(pemText || "").replace(/-----BEGIN PUBLIC KEY-----/g, "").replace(/-----END PUBLIC KEY-----/g, "").replace(/\s+/g, "");
+        return base64DecodeToBytes(cleaned);
+    }
+
+    async function encryptRsaOaepSha256(publicKeyPem, plainBytes) {
+        var spki = parsePemPublicKey(publicKeyPem);
+        if (globalThis.crypto && globalThis.crypto.subtle && typeof globalThis.crypto.subtle.importKey === "function") {
+            var imported = await globalThis.crypto.subtle.importKey(
+                "spki",
+                spki,
+                { name: "RSA-OAEP", hash: "SHA-256" },
+                false,
+                ["encrypt"]
+            );
+            return new Uint8Array(await globalThis.crypto.subtle.encrypt({ name: "RSA-OAEP" }, imported, plainBytes));
+        }
+        var nodeCrypto = getNodeCrypto();
+        if (nodeCrypto && typeof nodeCrypto.publicEncrypt === "function") {
+            return new Uint8Array(nodeCrypto.publicEncrypt({
+                key: String(publicKeyPem || ""),
+                oaepHash: "sha256",
+                padding: nodeCrypto.constants.RSA_PKCS1_OAEP_PADDING
+            }, Buffer.from(plainBytes)));
+        }
+        throw new Error("RSA-OAEP encryption not available");
+    }
+
     function absoluteUrl(base, path) {
         if (!path) return "";
         try {
@@ -332,7 +623,7 @@
         ]);
     }
 
-    var DOMAINS_JSON_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
+    var DOMAINS_JSON_URL = "https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json";
     var COMMON_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
     var domainsCache = null;
     var domainsCacheAt = 0;
@@ -454,6 +745,24 @@
             quality: quality || qualityFromText(url),
             headers: headers || {}
         };
+    }
+
+    function buildSearchTitleForEpisode(title, year, season, episode) {
+        var clean = trim(String(title || "").replace(/:/g, ""));
+        if (!clean) return "";
+        if (season == null) return trim(clean + (year ? " " + year : ""));
+        var seasonSlug = String(season).padStart(2, "0");
+        var episodeSlug = String(episode || 1).padStart(2, "0");
+        return clean + " S" + seasonSlug + "E" + episodeSlug;
+    }
+
+    function parseJsonResultsRows(payload) {
+        if (!payload) return [];
+        if (Array.isArray(payload)) return payload;
+        if (Array.isArray(payload.results)) return payload.results;
+        if (Array.isArray(payload.data)) return payload.data;
+        if (payload.items && Array.isArray(payload.items)) return payload.items;
+        return [];
     }
 
     function baseConvertGlobal(number, radix) {
@@ -1410,7 +1719,6 @@
 
     var Movies4uSource = (function () {
         var DEFAULT_BASE_URL = "https://movies4u.rs";
-        var DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
         var domainCache = null;
 
         function defaultHeaders(extra) {
@@ -1443,9 +1751,8 @@
 
         async function getMainUrl() {
             if (domainCache) return domainCache;
-            var json = await getJson(DOMAINS_URL, defaultHeaders()).catch(function () { return {}; });
             var candidates = uniqueBy([
-                json && json.movies4u,
+                await getDynamicDomain("movies4u", ""),
                 DEFAULT_BASE_URL
             ].filter(Boolean), function (item) { return item; });
             for (var i = 0; i < candidates.length; i++) {
@@ -2222,7 +2529,7 @@
     })();
 
     var AnimePaheSource = (function () {
-        var MAIN_URL = "https://animepahe.org";
+        var MAIN_URL = "https://animepahe.pw";
         var PROXY = "https://animepaheproxy.phisheranimepahe.workers.dev/?url=";
         var HEADERS = {
             "Cookie": "__ddg2_=1234567890",
@@ -2435,7 +2742,6 @@
     })();
 
     var HindmoviezSource = (function () {
-        var DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
         var FALLBACK_DOMAINS = [
             "https://hindmoviez.cafe",
             "https://hindmoviez.com",
@@ -2508,7 +2814,7 @@
             if (!force && cachedMainUrl && (now - cachedMainUrlAt) < DOMAIN_TTL) return cachedMainUrl;
             var candidates = [];
             try {
-                var domainJson = await getJson(DOMAINS_URL, { "Accept": "application/json" });
+                var domainJson = await getDomainsJson();
                 if (domainJson && domainJson.hindmoviez) candidates.push(domainJson.hindmoviez);
                 if (domainJson && domainJson.hindmoviez_url) candidates.push(domainJson.hindmoviez_url);
             } catch (_) {}
@@ -2934,6 +3240,854 @@
 
     var StreamvixSource = createStremioSource("p_streamvix", "Streamvix", "https://streamvix.hayd.uk");
     var NoTorrentSource = createStremioSource("p_notorrent", "NoTorrent", "https://addon-osvh.onrender.com");
+    var VidSrcSource = (function () {
+        var PRIMARY_BASE = "https://vidsrc.cc";
+        var FALLBACK_BASE = "https://vidsrc.to";
+        var HEADERS = commonHeaders({
+            "Referer": PRIMARY_BASE + "/"
+        });
+
+        function buildEmbedUrl(base, media) {
+            var prefix = String(base || "").replace(/\/+$/g, "");
+            var id = trim(media && (media.imdbId || media.tmdbId) || "");
+            if (!id) return "";
+            if (/vidsrc\.cc$/i.test(prefix)) {
+                if (media && media.isMovie) return prefix + "/v2/embed/movie/" + encodeURIComponent(id);
+                return prefix + "/v2/embed/tv/" + encodeURIComponent(id) + "/" + encodeURIComponent(media && media.season || 1) + "/" + encodeURIComponent(media && media.episode || 1);
+            }
+            if (media && media.isMovie) return prefix + "/embed/movie/" + encodeURIComponent(id);
+            return prefix + "/embed/tv/" + encodeURIComponent(id) + "/" + encodeURIComponent(media && media.season || 1) + "/" + encodeURIComponent(media && media.episode || 1);
+        }
+
+        async function resolve(media) {
+            if (!media || !media.tmdbId) return [];
+            var bases = [PRIMARY_BASE, FALLBACK_BASE];
+            for (var i = 0; i < bases.length; i++) {
+                var embedUrl = buildEmbedUrl(bases[i], media);
+                if (!embedUrl) continue;
+                try {
+                    var html = await getText(embedUrl, commonHeaders({ "Referer": bases[i] + "/" }), true);
+                    var iframeSrc = firstMatch(html, [
+                        /id=["']player_iframe["'][^>]*src=["']([^"']+)["']/i,
+                        /<iframe[^>]+id=["']player_iframe["'][^>]+src=["']([^"']+)["']/i
+                    ]);
+                    iframeSrc = normalizeResolvedUrl(iframeSrc, bases[i]);
+                    if (!iframeSrc) continue;
+
+                    var firstReferer = baseOrigin(iframeSrc) + "/";
+                    var firstHtml = await getText(iframeSrc, commonHeaders({ "Referer": bases[i] + "/" }), true);
+                    var nestedPath = firstMatch(firstHtml, [/src:\s*['"]([^'"]+)['"]/i]);
+                    var finalIframe = normalizeResolvedUrl(nestedPath, firstReferer);
+                    if (!finalIframe) continue;
+
+                    var finalHtml = await getText(finalIframe, commonHeaders({ "Referer": firstReferer }), true);
+                    var streamUrl = firstMatch(finalHtml, [
+                        /file:\s*['"]([^'"]+)['"]/i,
+                        /(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i
+                    ]);
+                    if (!streamUrl) continue;
+
+                    return [buildResolvedStream(streamUrl, "VidsrcCC", qualityFromText(streamUrl), commonHeaders({
+                        "Referer": firstReferer
+                    }))];
+                } catch (_) {}
+            }
+            return [];
+        }
+
+        return {
+            key: "p_vidsrccc",
+            name: "VidsrcCC",
+            resolve: resolve
+        };
+    })();
+
+    var VidRockSource = (function () {
+        var MAIN_URL = "https://vidrock.net";
+        var PASSPHRASE = "x7k9mPqT2rWvY8zA5bC3nF6hJ2lK4mN9";
+        var HEADERS = commonHeaders({
+            "Referer": MAIN_URL + "/"
+        });
+
+        function toUrlSafeBase64(bytes) {
+            return base64EncodeBytes(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+        }
+
+        async function resolve(media) {
+            if (!media || !media.tmdbId) return [];
+            var itemType = media.isMovie ? "movie" : "tv";
+            var itemId = media.isMovie
+                ? String(media.tmdbId)
+                : String(media.tmdbId) + "_" + String(media.season || 1) + "_" + String(media.episode || 1);
+            var keyBytes = utf8ToBytes(PASSPHRASE);
+            var ivBytes = keyBytes.slice(0, 16);
+            var encrypted = await encryptAesCbcPkcs7(utf8ToBytes(itemId), keyBytes, ivBytes);
+            var encoded = encodeURIComponent(toUrlSafeBase64(encrypted));
+            var json = await getJson(MAIN_URL + "/api/" + itemType + "/" + encoded, HEADERS).catch(function () { return {}; });
+            var streams = [];
+            for (var key in (json || {})) {
+                if (!Object.prototype.hasOwnProperty.call(json, key)) continue;
+                var source = json[key];
+                var streamUrl = trim(source && source.url || "");
+                if (!streamUrl) continue;
+                streams.push(buildResolvedStream(streamUrl, "VidRock", qualityFromText(streamUrl), HEADERS));
+            }
+            return dedupeStreams(streams);
+        }
+
+        return {
+            key: "p_vidrock",
+            name: "VidRock",
+            resolve: resolve
+        };
+    })();
+
+    var PrimeSrcSource = (function () {
+        var BASES = ["https://primesrc.me", "https://primesrc.click"];
+        var AES_KEY = utf8ToBytes("kiemtienmua911ca");
+        var AES_IV = utf8ToBytes("1234567890oiuytr");
+
+        function buildEmbedUrl(base, media) {
+            var root = String(base || "").replace(/\/+$/g, "");
+            if (!media || !media.imdbId) return "";
+            if (media.isMovie) return root + "/embed/movie?imdb=" + encodeURIComponent(media.imdbId);
+            return root + "/embed/tv?imdb=" + encodeURIComponent(media.imdbId) + "&season=" + encodeURIComponent(media.season || 1) + "&episode=" + encodeURIComponent(media.episode || 1);
+        }
+
+        async function resolve(media) {
+            if (!media || !media.imdbId) return [];
+            for (var i = 0; i < BASES.length; i++) {
+                var base = BASES[i];
+                var embedUrl = buildEmbedUrl(base, media);
+                try {
+                    var contentType = media.isMovie ? "movie" : "tv";
+                    var serversJson = await getJson(base + "/api/v1/s?imdb=" + encodeURIComponent(media.imdbId) + "&type=" + encodeURIComponent(contentType), commonHeaders({
+                        "Referer": base + "/",
+                        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                    })).catch(function () { return {}; });
+                    var servers = serversJson && serversJson.servers || [];
+                    if (!servers.length || !servers[0].key) continue;
+                    var linkJson = await getJson(base + "/api/v1/l?key=" + encodeURIComponent(servers[0].key), commonHeaders({
+                        "Referer": embedUrl
+                    })).catch(function () { return {}; });
+                    var serverUrl = trim(linkJson && linkJson.link || "");
+                    if (!serverUrl) continue;
+                    var serverId = trim(serverUrl.split("#")[1] || "");
+                    var serverOrigin = baseOrigin(serverUrl);
+                    if (!serverId || !serverOrigin) continue;
+                    var encryptedHex = await getText(serverOrigin + "/api/v1/video?id=" + encodeURIComponent(serverId), commonHeaders({
+                        "Referer": serverOrigin + "/",
+                        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                    }), true).catch(function () { return ""; });
+                    encryptedHex = trim(encryptedHex);
+                    if (!encryptedHex) continue;
+                    var plain = await decryptAesCbcPkcs7(hexToBytes(encryptedHex), AES_KEY, AES_IV);
+                    var payload = bytesToUtf8(plain).replace(/\\/g, "");
+                    var streamUrl = firstMatch(payload, [/\"source\":\"(.*?)\"/i, /"source":"(.*?)"/i]);
+                    if (!streamUrl) continue;
+                    return [buildResolvedStream(streamUrl, "PrimeSrc", qualityFromText(streamUrl), commonHeaders({
+                        "Referer": serverOrigin + "/",
+                        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                    }))];
+                } catch (_) {}
+            }
+            return [];
+        }
+
+        return {
+            key: "p_primesrc",
+            name: "PrimeSrc",
+            resolve: resolve
+        };
+    })();
+
+    var CinemaOSSource = (function () {
+        var MAIN_URL = "https://cinemaos.live";
+        var USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36";
+        var PRIMARY_HMAC_KEY = "a7f3b9c2e8d4f1a6b5c9e2d7f4a8b3c6e1d9f7a4b2c8e5d3f9a6b4c1e7d2f8a5";
+        var SECONDARY_HMAC_KEY = "d3f8a5b2c9e6d1f7a4b8c5e2d9f3a6b1c7e4d8f2a9b5c3e7d4f1a8b6c2e9d5f3";
+        var PASSWORD_BYTES = utf8ToBytes("a1b2c3d4e4f6477658455678901477567890abcdef1234567890abcdef123456");
+        var DEFAULT_HEADERS = {
+            "Origin": MAIN_URL,
+            "Referer": MAIN_URL + "/",
+            "User-Agent": USER_AGENT
+        };
+
+        async function resolve(media) {
+            if (!media || !media.tmdbId || !media.imdbId) return [];
+            var contentType = media.isMovie ? "movie" : "tv";
+            var message = "tmdbId:" + String(media.tmdbId) + "|imdbId:" + String(media.imdbId);
+            if (!media.isMovie) {
+                message += "|seasonId:" + String(media.season || 1) + "|episodeId:" + String(media.episode || 1);
+            }
+            var primarySecret = await hmacSha256Hex(PRIMARY_HMAC_KEY, message);
+            var finalSecret = await hmacSha256Hex(SECONDARY_HMAC_KEY, primarySecret);
+            var apiUrl = MAIN_URL + "/api/providerv3?type=" + encodeURIComponent(contentType)
+                + "&tmdbId=" + encodeURIComponent(media.tmdbId)
+                + "&imdbId=" + encodeURIComponent(media.imdbId)
+                + "&seasonId=" + encodeURIComponent(media.isMovie ? "" : (media.season || 1))
+                + "&episodeId=" + encodeURIComponent(media.isMovie ? "" : (media.episode || 1))
+                + "&t=&ry=&secret=" + encodeURIComponent(finalSecret);
+            var payload = await getJson(apiUrl, DEFAULT_HEADERS).catch(function () { return {}; });
+            var data = payload && payload.data || {};
+            if (!data.encrypted || !data.cin || !data.mao || !data.salt) return [];
+
+            var derivedKey = await pbkdf2Sha256(PASSWORD_BYTES, hexToBytes(data.salt), 100000, 32);
+            var plainBytes = await decryptAesGcm(hexToBytes(data.encrypted), derivedKey, hexToBytes(data.cin), hexToBytes(data.mao));
+            var parsed = parseJsonSafe(bytesToUtf8(plainBytes), {});
+            var sources = parsed && parsed.sources || {};
+            var streams = [];
+            for (var key in sources) {
+                if (!Object.prototype.hasOwnProperty.call(sources, key)) continue;
+                var source = sources[key];
+                var streamUrl = trim(source && source.url || "");
+                if (!streamUrl) continue;
+                streams.push(buildResolvedStream(streamUrl, "CinemaOS [" + cleanProviderLabel(key) + "]", qualityFromText(key + " " + streamUrl), DEFAULT_HEADERS));
+            }
+            return dedupeStreams(streams);
+        }
+
+        return {
+            key: "p_cinemaos",
+            name: "CinemaOS",
+            resolve: resolve
+        };
+    })();
+
+    var VidFastProSource = (function () {
+        var MAIN_URL = "https://vidfast.pro";
+        var USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36";
+        var AES_KEY = hexToBytes("50bb6a529bfb4abb1969c1a29c8cac6df1f00ec63a7297c4c06dcc9473cdacc4");
+        var AES_IV = hexToBytes("ffe7765f45669a794181d0b4a8d9e96b");
+        var XOR_SEED_KEY = hexToBytes("1a5d66c3fbf2");
+        var STATIC_PATH = "hezushon/8ee77bc2e110fd6e6ac7659b33c6f9146497cb81b1a2694590a68f22c5b495b9/APA91DQqR0e_8UTJpaNhNS9c2Bgrg21PeT12bVxpsCvoUhB9rNLJgMZMHxO7oigbPWv7eXn4NavycM9jt2EGVHBmkXIeSJUXh2AOEvWyji1iNx4Txr2OZONKK5IjKp8GBmmzCCb6-rh1I0o50c5eLc_cZ6KnwX7TrB_UsqfYsbMwBqhvWBEEZ1Q/bdf45bbf7c054d8a75d7575767e40745f967d0a8";
+        var CHAR_SOURCE = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
+        var CHAR_TARGET = "4jrpDdPNYKMiBLgwczuHGksmOIoS2-JVRCnbfl769A0UeE5Qyt_aWq1xTF3vhXZ8";
+
+        function headers() {
+            return {
+                "Accept": "*/*",
+                "Referer": MAIN_URL + "/",
+                "User-Agent": USER_AGENT,
+                "X-Csrf-Token": "22Xg4bhHnx4uUolyJWs7rdNBbIzYVz8z",
+                "X-Requested-With": "XMLHttpRequest"
+            };
+        }
+
+        function customEncode(inputBytes) {
+            var encoded = base64EncodeBytes(inputBytes).replace(/=+$/g, "");
+            var out = "";
+            for (var i = 0; i < encoded.length; i++) {
+                var index = CHAR_SOURCE.indexOf(encoded.charAt(i));
+                out += index >= 0 ? CHAR_TARGET.charAt(index) : encoded.charAt(i);
+            }
+            return out;
+        }
+
+        function generateKsa(seedBytes, size) {
+            var seed = seedBytes instanceof Uint8Array ? seedBytes : new Uint8Array(seedBytes || []);
+            var view = new DataView(seed.buffer, seed.byteOffset, seed.byteLength);
+            var state = ((view.getUint32(0, true) ^ view.getUint32(4, true) ^ view.getUint32(8, true) ^ view.getUint32(12, true)) >>> 0);
+            var out = [];
+            for (var i = 0; i < size; i++) out[i] = i;
+            for (var j = size - 1; j > 0; j--) {
+                state ^= (state << 13) >>> 0;
+                state ^= state >>> 17;
+                state ^= (state << 5) >>> 0;
+                state >>>= 0;
+                var idx = state % (j + 1);
+                var tmp = out[j];
+                out[j] = out[idx];
+                out[idx] = tmp;
+            }
+            return out;
+        }
+
+        function transformByte(inputByte, keyByte) {
+            var rotate = keyByte % 8;
+            var rotated = (((inputByte << rotate) | (inputByte >> (8 - rotate))) & 255);
+            return (rotated + ((keyByte ^ 0xA5) & 255)) & 255;
+        }
+
+        function shuffleBlocks(payloadBytes, pbox) {
+            var payload = payloadBytes instanceof Uint8Array ? payloadBytes : new Uint8Array(payloadBytes || []);
+            var count = pbox.length;
+            if (!count || payload.length % count !== 0) throw new Error("Invalid VidFast payload size");
+            var blockSize = payload.length / count;
+            var out = new Uint8Array(payload.length);
+            for (var i = 0; i < count; i++) {
+                var srcStart = pbox[i] * blockSize;
+                var dstStart = i * blockSize;
+                out.set(payload.slice(srcStart, srcStart + blockSize), dstStart);
+            }
+            return out;
+        }
+
+        async function resolve(media) {
+            if (!media || !media.tmdbId) return [];
+            var pageUrl = media.isMovie
+                ? MAIN_URL + "/movie/" + encodeURIComponent(media.tmdbId)
+                : MAIN_URL + "/tv/" + encodeURIComponent(media.tmdbId) + "/" + encodeURIComponent(media.season || 1) + "/" + encodeURIComponent(media.episode || 1);
+            var html = await getText(pageUrl, headers(), true).catch(function () { return ""; });
+            var rawData = firstMatch(html, [/\\\"en\\\":\\\"(.*?)\\\"/i]);
+            if (!rawData) return [];
+
+            var timestampBytes = new Uint8Array(8);
+            var timestamp = Date.now();
+            for (var i = 0; i < 8; i++) {
+                timestampBytes[i] = timestamp & 255;
+                timestamp = Math.floor(timestamp / 256);
+            }
+
+            var randomIv = randomBytes(16);
+            var combined = concatBytes([randomIv, timestampBytes, utf8ToBytes(rawData)]);
+            var encrypted = await encryptAesCbcPkcs7(combined, AES_KEY, AES_IV);
+
+            var xorSeed = concatBytes([XOR_SEED_KEY, randomIv]);
+            var xorHash = await sha256Bytes(xorSeed);
+            var xorOutput = new Uint8Array(encrypted.length);
+            for (var j = 0; j < encrypted.length; j++) {
+                if (j > 0 && (j % xorHash.length) === 0) xorHash = await sha256Bytes(xorHash);
+                xorOutput[j] = encrypted[j] ^ xorHash[j % xorHash.length];
+            }
+
+            var transformSeed = concatBytes([AES_KEY, randomIv]);
+            var transformHash = await sha256Bytes(transformSeed);
+            var transformOutput = new Uint8Array(xorOutput.length);
+            for (var k = 0; k < xorOutput.length; k++) {
+                transformOutput[k] = transformByte(xorOutput[k], transformHash[k % transformHash.length]);
+            }
+
+            var ksaSeed = concatBytes([randomIv, XOR_SEED_KEY, AES_IV]);
+            var ksaHash = await sha256Bytes(ksaSeed);
+            var ksa = generateKsa(ksaHash, 256);
+            var payloadSwaps = new Uint8Array(transformOutput.length);
+            for (var m = 0; m < transformOutput.length; m++) {
+                payloadSwaps[m] = ksa[transformOutput[m] & 255] & 255;
+            }
+
+            var permutationCount = Math.floor(payloadSwaps.length / 16);
+            if (!permutationCount) return [];
+            var blockShuffleSeed = concatBytes([XOR_SEED_KEY, randomIv]);
+            var blockShuffleHash = await sha256Bytes(blockShuffleSeed);
+            var permKsa = generateKsa(blockShuffleHash, permutationCount);
+            var shuffled = shuffleBlocks(payloadSwaps, permKsa);
+
+            var permSeed = concatBytes([AES_KEY, randomIv, new Uint8Array([shuffled.length & 255])]);
+            var permHash = await sha256Bytes(permSeed);
+            var permSBox = generateKsa(permHash, 112);
+            var finalPayload = new Uint8Array(permSBox.length);
+            for (var n = 0; n < permSBox.length; n++) finalPayload[n] = shuffled[permSBox[n]];
+
+            var swapOrder = new Uint8Array(permKsa.length * 4);
+            for (var p = 0; p < permKsa.length; p++) swapOrder[p * 4] = permKsa[p] & 255;
+            var finalBuffer = concatBytes([swapOrder, finalPayload]);
+            var footerHash = await sha256Bytes(finalBuffer);
+            var footer = footerHash.slice(0, 8);
+            var finalPacket = concatBytes([new Uint8Array([1]), randomIv, new Uint8Array([permutationCount & 255, 0]), finalBuffer, footer]);
+            var encoded = customEncode(finalPacket).split("").reverse().join("");
+            var serversToken = bytesToHex(utf8ToBytes(encoded));
+
+            var serverRows = await getJson(MAIN_URL + "/" + STATIC_PATH + "/N1dm4OEpPc8/" + serversToken, headers()).catch(function () { return []; });
+            if (!Array.isArray(serverRows) || !serverRows.length || !serverRows[0].data) return [];
+            var serverId = serverRows[0].data;
+            var streamJson = await getJson(MAIN_URL + "/" + STATIC_PATH + "/HSgMMZOauoo/" + encodeURIComponent(serverId), headers()).catch(function () { return {}; });
+            var streamUrl = trim(streamJson && streamJson.url || "");
+            if (!streamUrl) return [];
+            return [buildResolvedStream(streamUrl, "VidFastPro", qualityFromText(streamUrl), headers())];
+        }
+
+        return {
+            key: "p_vidfastpro",
+            name: "VidFastPro",
+            resolve: resolve
+        };
+    })();
+
+    var FlixIndiaSource = (function () {
+        var cachedMainUrl = "";
+
+        async function getMainUrl() {
+            if (cachedMainUrl) return cachedMainUrl;
+            cachedMainUrl = await getDynamicDomain("flixindia", "https://m.flixindia.xyz");
+            return cachedMainUrl;
+        }
+
+        function buildHeaders(mainUrl, cookieHeader) {
+            return commonHeaders({
+                "Accept": "*/*",
+                "Referer": mainUrl + "/",
+                "Origin": mainUrl,
+                "X-Requested-With": "XMLHttpRequest",
+                "Cookie": cookieHeader || ""
+            });
+        }
+
+        function extractPhpSession(headers) {
+            var raw = headers && headers["set-cookie"];
+            if (!raw) return "";
+            var parts = Array.isArray(raw) ? raw : String(raw || "").split(/,(?=[^;]+=[^;]+)/);
+            for (var i = 0; i < parts.length; i++) {
+                var match = String(parts[i] || "").match(/PHPSESSID=([^;]+)/i);
+                if (match) return "PHPSESSID=" + match[1];
+            }
+            return "";
+        }
+
+        async function createSearchContext() {
+            var mainUrl = await getMainUrl();
+            var res = await request(mainUrl + "/", {
+                headers: commonHeaders({
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Referer": mainUrl + "/",
+                    "Origin": mainUrl
+                }),
+                allowRedirects: true
+            }).catch(function () { return null; });
+            var html = res ? String(res.body || "") : "";
+            var csrfToken = firstMatch(html, [/window\.CSRF_TOKEN\s*=\s*['"]([a-f0-9]{64})['"]/i]);
+            return {
+                mainUrl: mainUrl,
+                csrfToken: csrfToken,
+                cookieHeader: extractPhpSession(res && res.headers || {})
+            };
+        }
+
+        async function searchRows(media) {
+            var ctx = await createSearchContext();
+            if (!ctx.csrfToken) return [];
+            var titles = uniqueBy([
+                buildSearchTitleForEpisode(media.title, media.year, media.isMovie ? null : media.season, media.episode),
+                buildSearchTitleForEpisode(media.originalTitle, media.year, media.isMovie ? null : media.season, media.episode),
+                trim(String(media.title || "")),
+                trim(String(media.originalTitle || ""))
+            ], function (item) { return normalizeTitle(item); }).filter(Boolean);
+
+            for (var i = 0; i < titles.length; i++) {
+                var form = "action=search"
+                    + "&csrf_token=" + encodeURIComponent(ctx.csrfToken)
+                    + "&q=" + encodeURIComponent(titles[i]);
+                var res = await request(ctx.mainUrl + "/", {
+                    method: "POST",
+                    body: form,
+                    headers: Object.assign({}, buildHeaders(ctx.mainUrl, ctx.cookieHeader), {
+                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+                    }),
+                    allowRedirects: true
+                }).catch(function () { return null; });
+                var json = res ? parseJsonSafe(res.body, null) : null;
+                var rows = parseJsonResultsRows(json).map(function (item) {
+                    var href = trim(String(item && (item.url || item.link || item.href) || ""));
+                    var title = trim(String(item && (item.title || item.name || item.label) || ""));
+                    return href ? {
+                        title: title,
+                        url: absoluteUrl(ctx.mainUrl, href),
+                        year: Number(item && item.year) || undefined,
+                        type: /series|season|episode|tv/i.test(title + " " + href) ? "series" : "movie"
+                    } : null;
+                }).filter(Boolean);
+                if (rows.length) return { rows: rows, ctx: ctx };
+            }
+            return { rows: [], ctx: ctx };
+        }
+
+        async function resolveResultPage(url, referer) {
+            if (!url) return [];
+            var resolved = await resolveCommonExtractorUrl(url, "FlixIndia", referer || url, 0);
+            if (resolved.length) return resolved;
+
+            var html = await getText(url, commonHeaders({ "Referer": referer || (baseOrigin(url) + "/") }), true).catch(function () { return ""; });
+            if (!html) return [];
+            var links = extractExternalSourceLinks(html, url);
+            var out = [];
+            for (var i = 0; i < links.length; i++) {
+                out = out.concat(await resolveCommonExtractorUrl(links[i].url, "FlixIndia", url, 0));
+            }
+            return dedupeStreams(out);
+        }
+
+        async function resolve(media) {
+            if (!media || !media.title) return [];
+            var search = await searchRows(media);
+            var rows = search.rows || [];
+            var ctx = search.ctx || {};
+            if (!rows.length) return [];
+            var queries = uniqueBy([media.title, media.originalTitle], function (item) { return normalizeTitle(item); }).filter(Boolean);
+            var match = bestMatch(rows, queries, media.year, media.isMovie ? "movie" : null) || rows[0];
+            if (!match || !match.url) return [];
+            return resolveResultPage(match.url, (ctx.mainUrl || "") + "/");
+        }
+
+        return {
+            key: "p_flixindia",
+            name: "FlixIndia",
+            resolve: resolve
+        };
+    })();
+
+    var VegaMoviesSource = (function () {
+        var cachedMainUrl = "";
+        var CINEMETA_URL = "https://v3-cinemeta.strem.io/meta";
+
+        async function getMainUrl() {
+            if (cachedMainUrl) return cachedMainUrl;
+            cachedMainUrl = await getDynamicDomain("vegamovies", "https://vegamovies.vodka");
+            return cachedMainUrl;
+        }
+
+        function vmHeaders(extra) {
+            return commonHeaders(Object.assign({
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9"
+            }, extra || {}));
+        }
+
+        async function vmGetDocument(url, headers, allowRedirects) {
+            var res = await request(url, {
+                headers: headers || vmHeaders(),
+                allowRedirects: allowRedirects !== false
+            }).catch(function () { return null; });
+            if (!res || res.status >= 400) return null;
+            return {
+                body: String(res.body || ""),
+                finalUrl: res.finalUrl || url,
+                headers: res.headers || {}
+            };
+        }
+
+        function vmExtractAttr(tag, name) {
+            var quoted = new RegExp("\\b" + name + "\\s*=\\s*([\"'])([\\s\\S]*?)\\1", "i").exec(String(tag || ""));
+            if (quoted) return decodeHtml(quoted[2]);
+            var bare = new RegExp("\\b" + name + "\\s*=\\s*([^\\s>]+)", "i").exec(String(tag || ""));
+            return bare ? decodeHtml(bare[1]) : "";
+        }
+
+        function vmExtractMeta(html, property) {
+            var escaped = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            return firstMatch(html, [
+                new RegExp("<meta[^>]+property=[\"']" + escaped + "[\"'][^>]+content=[\"']([^\"']+)[\"']", "i"),
+                new RegExp("<meta[^>]+name=[\"']" + escaped + "[\"'][^>]+content=[\"']([^\"']+)[\"']", "i"),
+                new RegExp("<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+property=[\"']" + escaped + "[\"']", "i"),
+                new RegExp("<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+name=[\"']" + escaped + "[\"']", "i")
+            ]);
+        }
+
+        function vmParseAnchors(html, base) {
+            var source = String(html || "");
+            var out = [];
+            var regex = /<a\b([^>]*)href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi;
+            var match;
+            while ((match = regex.exec(source)) !== null) {
+                out.push({
+                    href: absoluteUrl(base, decodeHtml(match[2])),
+                    text: stripTags(match[4]),
+                    html: match[0],
+                    attrs: (match[1] || "") + " " + (match[3] || "")
+                });
+            }
+            return out;
+        }
+
+        function vmExtractImdbUrl(html) {
+            var anchors = vmParseAnchors(html, "");
+            for (var i = 0; i < anchors.length; i++) {
+                if (/imdb\.com\/title\//i.test(anchors[i].href)) return anchors[i].href;
+            }
+            return "";
+        }
+
+        function vmCleanTitle(value) {
+            return trim(decodeHtml(String(value || ""))
+                .replace(/^Download\s+/i, "")
+                .replace(/\s*[-|]\s*Vegamovies(?:\.[a-z]+)?(?:\.hot|\.is|\.to|\.vodka)?\s*$/i, "")
+                .replace(/\s*-\s*Nexdrive\.Pro\s*$/i, ""));
+        }
+
+        function vmMediaType(value) {
+            return /\b(?:season|series|episode|web[\s-]*series)\b/i.test(String(value || "")) ? "series" : "movie";
+        }
+
+        function vmExtractListingItems(html, pageUrl) {
+            var items = [];
+            var seen = {};
+            var anchors = vmParseAnchors(html, pageUrl);
+            for (var i = 0; i < anchors.length; i++) {
+                var anchor = anchors[i];
+                if (!/\/download-/i.test(anchor.href)) continue;
+                if (seen[anchor.href]) continue;
+                var imgTag = firstMatch(anchor.html, [/(<img\b[\s\S]*?>)/i]);
+                var title = vmCleanTitle(vmExtractAttr(imgTag, "alt") || anchor.text);
+                var poster = vmExtractAttr(imgTag, "data-src") || vmExtractAttr(imgTag, "src");
+                if (/^data:image\//i.test(poster)) poster = vmExtractAttr(imgTag, "data-src");
+                if (!title || title.length < 3) continue;
+                seen[anchor.href] = true;
+                items.push({
+                    title: title,
+                    url: anchor.href,
+                    posterUrl: absoluteUrl(pageUrl, poster),
+                    type: vmMediaType(title),
+                    quality: qualityFromText(title)
+                });
+            }
+            return items;
+        }
+
+        function vmQualityGroups(html, base) {
+            var groups = [];
+            var re = /<h([35])\b[^>]*>([\s\S]*?)<\/h\1>\s*<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+            var match;
+            while ((match = re.exec(String(html || ""))) !== null) {
+                var headingText = stripTags(match[2] || "");
+                if (!/(?:4k|\d{3,4}\s*p)/i.test(headingText) || /zip/i.test(headingText)) continue;
+                var anchors = vmParseAnchors(match[3] || "", base);
+                if (!anchors.length) continue;
+                groups.push({
+                    title: headingText,
+                    season: Number(firstMatch(headingText, [/(?:Season\s*|S)(\d+)/i])) || 1,
+                    quality: qualityFromText(headingText),
+                    size: firstMatch(headingText, [/\[((?:\d+(?:\.\d+)?\s*)?(?:GB|MB|KB)(?:\/E)?)\]/i, /\b(\d+(?:\.\d+)?\s*(?:GB|MB|KB)(?:\/E)?)\b/i]),
+                    anchors: anchors
+                });
+            }
+            return groups;
+        }
+
+        function vmSourceLabel(anchor) {
+            var value = String((anchor && (anchor.href + " " + anchor.text)) || "");
+            if (/vcloud/i.test(value)) return "V-Cloud";
+            if (/fastdl|g-direct/i.test(value)) return "G-Direct";
+            if (/gdtot/i.test(value)) return "GDToT";
+            if (/filebee/i.test(value)) return "FileBee";
+            if (/filepress/i.test(value)) return "Filepress";
+            if (/pixeldrain/i.test(value)) return "Pixeldrain";
+            if (/hubcloud|hubdrive/i.test(value)) return "HubCloud";
+            return trim(anchor && anchor.text) || "Source";
+        }
+
+        function vmUsefulAnchor(anchor) {
+            var value = String((anchor && (anchor.href + " " + anchor.text)) || "");
+            if (!/^https?:\/\//i.test(anchor && anchor.href || "")) return false;
+            if (/#(?:content)?$/i.test(anchor && anchor.href || "")) return false;
+            if (/vglist|xmlrpc|wp-json|wp-content|telegram|google\.com\/search|one\.one\.one\.one|tinyurl\.com\/Unblock/i.test(value)) return false;
+            return /vcloud|fastdl|g-direct|filebee|filepress|gdtot|drive|hubcloud|hubdrive|pixeldrain|dropgalaxy|uploadever/i.test(value);
+        }
+
+        function vmExtractNexdriveSources(html, pageUrl, context) {
+            var anchors = vmParseAnchors(html, pageUrl).filter(vmUsefulAnchor);
+            var vcloud = anchors.filter(function (anchor) { return /vcloud/i.test(anchor.href + " " + anchor.text); });
+            var chosen = vcloud.length ? [vcloud[0]] : anchors;
+            return uniqueBy(chosen.map(function (anchor) {
+                return {
+                    source: anchor.href,
+                    sourceName: vmSourceLabel(anchor),
+                    title: context && context.title || "",
+                    quality: (context && context.quality) || qualityFromText(anchor.text + " " + anchor.href),
+                    referer: pageUrl
+                };
+            }), function (item) { return item.source; });
+        }
+
+        function vmHubButtons(html, base) {
+            return vmParseAnchors(html, base).filter(function (anchor) {
+                var value = anchor.text + " " + anchor.href + " " + anchor.html + " " + anchor.attrs;
+                if (/telegram|tutorial|admin|login|one\.one\.one\.one|tinyurl\.com\/Unblock/i.test(value)) return false;
+                return /btn|FSL|Mega|Download File|BuzzServer|10Gbps|pixeldrain|hub\.shipcdn|hubcdn\.fans/i.test(value);
+            });
+        }
+
+        async function vmResolveFinalUrl(startUrl, referer) {
+            var currentUrl = startUrl;
+            for (var i = 0; i < 7; i++) {
+                try {
+                    var res = await request(currentUrl, {
+                        method: "HEAD",
+                        headers: vmHeaders({ "Referer": referer || baseOrigin(currentUrl) + "/" }),
+                        allowRedirects: false
+                    });
+                    var location = res.headers.location || res.headers.Location || "";
+                    if (!location) return currentUrl;
+                    currentUrl = absoluteUrl(currentUrl, location);
+                } catch (_) {
+                    return currentUrl;
+                }
+            }
+            return currentUrl;
+        }
+
+        function vmVcloudJump(html, baseUrl) {
+            var link = firstMatch(html, [
+                /var\s+url\s*=\s*'([^']+)'/i,
+                /var\s+url\s*=\s*"([^"]+)"/i,
+                /<div\b[^>]*class=["'][^"']*\bvd\b[^"']*["'][^>]*>[\s\S]*?<center>[\s\S]*?<a\b[^>]+href=["']([^"']+)["']/i
+            ]);
+            return link ? absoluteUrl(baseUrl, link) : "";
+        }
+
+        function vmIntentUrls(html) {
+            var out = [];
+            var re = /createIntentURL\(\{[\s\S]*?host:\s*(['"])(https?:\/\/[\s\S]*?)\1[\s\S]*?\}/gi;
+            var match;
+            while ((match = re.exec(String(html || ""))) !== null) out.push(decodeHtml(match[2]).replace(/\\\//g, "/"));
+            return out;
+        }
+
+        async function vmResolveVcloud(source, context) {
+            var sourceUrl = typeof source === "string" ? source : source.source;
+            var base = baseOrigin(sourceUrl);
+            var latestBase = await getDynamicDomain(/hubcloud|gamerxyt/i.test(sourceUrl) ? "hubcloud" : "vcloud", base);
+            var newUrl = base && latestBase && base !== latestBase ? sourceUrl.replace(base, latestBase) : sourceUrl;
+            var entry = await vmGetDocument(newUrl, vmHeaders({ "Referer": source.referer || context.sourceUrl || ((await getMainUrl()) + "/") }), true);
+            if (!entry) return [];
+            var jumpUrl = /gamerxyt\.com\/hubcloud\.php|hubcloud\./i.test(newUrl) ? newUrl : vmVcloudJump(entry.body, entry.finalUrl || newUrl);
+            if (!jumpUrl) return [];
+            var document = await vmGetDocument(jumpUrl, vmHeaders({ "Referer": entry.finalUrl || newUrl }), true);
+            if (!document) return [];
+            var quality = source.quality || qualityFromText(source.title + " " + sourceUrl + " " + context.title);
+            var results = [];
+            var buttons = vmHubButtons(document.body, document.finalUrl || jumpUrl);
+            for (var i = 0; i < buttons.length; i++) {
+                var text = buttons[i].text;
+                var link = buttons[i].href;
+                if (!link) continue;
+                if (/BuzzServer/i.test(text)) {
+                    try {
+                        var buzzRes = await request(link.replace(/\/$/, "") + "/download", {
+                            headers: vmHeaders({ "Referer": link }),
+                            allowRedirects: false
+                        });
+                        var redirect = buzzRes.headers["hx-redirect"] || buzzRes.headers.location || "";
+                        if (redirect) results.push(buildResolvedStream(absoluteUrl(baseOrigin(link), redirect), "VegaMovies [BuzzServer]", quality, {}));
+                    } catch (_) {}
+                    continue;
+                }
+                if (/pixeldra/i.test(link + " " + text)) {
+                    var pixelBase = baseOrigin(link);
+                    var pixelUrl = /download/i.test(link) ? link : pixelBase + "/api/file/" + link.split("/").pop() + "?download";
+                    results.push(buildResolvedStream(pixelUrl, "VegaMovies [Pixeldrain]", quality, {}));
+                    continue;
+                }
+                if (/Server\s*:\s*10Gbps/i.test(text)) {
+                    var redirectUrl = await vmResolveFinalUrl(link, document.finalUrl || jumpUrl);
+                    if (/link=/i.test(redirectUrl)) redirectUrl = decodeURIComponent(redirectUrl.substring(redirectUrl.indexOf("link=") + 5));
+                    results.push(buildResolvedStream(redirectUrl, "VegaMovies [Download]", quality, {}));
+                    continue;
+                }
+                if (/FSLv2/i.test(text)) results.push(buildResolvedStream(link, "VegaMovies [FSLv2]", quality, {}));
+                else if (/FSL Server/i.test(text)) results.push(buildResolvedStream(link, "VegaMovies [FSL]", quality, {}));
+                else if (/Mega Server/i.test(text)) results.push(buildResolvedStream(link, "VegaMovies [Mega]", quality, {}));
+                else if (/Download File/i.test(text)) results.push(buildResolvedStream(link, "VegaMovies", quality, {}));
+            }
+            var directUrls = vmIntentUrls(document.body);
+            for (var j = 0; j < directUrls.length; j++) results.push(buildResolvedStream(directUrls[j], "VegaMovies [Direct]", quality, {}));
+            return uniqueBy(results, function (item) { return item.url + "|" + item.source; });
+        }
+
+        async function vmResolveGeneric(source, context) {
+            var sourceUrl = typeof source === "string" ? source : source.source;
+            var sourceName = source.sourceName || "VegaMovies";
+            var headers = { "Referer": source.referer || context.sourceUrl || ((await getMainUrl()) + "/") };
+            var quality = source.quality || qualityFromText(source.title + " " + sourceUrl + " " + context.title);
+            if (/vcloud|gamerxyt\.com\/hubcloud\.php|hubcloud\./i.test(sourceUrl)) {
+                var vcloud = await vmResolveVcloud(source, context);
+                if (vcloud.length) return vcloud;
+            }
+            if (isCommonDirectMediaUrl(sourceUrl)) return [buildResolvedStream(sourceUrl, sourceName, quality, headers)];
+            return [buildResolvedStream(sourceUrl, sourceName, quality, headers)];
+        }
+
+        async function vmFetchCinemeta(type, imdbUrl) {
+            var imdbId = firstMatch(imdbUrl, [/title\/(tt\d+)/i]);
+            if (!imdbId) return null;
+            try {
+                var mediaType = type === "movie" ? "movie" : "series";
+                var json = await getJson(CINEMETA_URL + "/" + mediaType + "/" + imdbId + ".json", vmHeaders({ "Accept": "application/json,*/*" }));
+                return json && json.meta ? json.meta : null;
+            } catch (_) {
+                return null;
+            }
+        }
+
+        async function searchTitles(queries) {
+            var mainUrl = await getMainUrl();
+            for (var i = 0; i < queries.length; i++) {
+                var query = trim(queries[i]);
+                if (!query) continue;
+                try {
+                    var json = await getJson(mainUrl + "/search.php?q=" + encodeURIComponent(query) + "&page=1", vmHeaders({ "Accept": "application/json,*/*", "Referer": mainUrl + "/" }));
+                    var hits = json && Array.isArray(json.hits) ? json.hits : [];
+                    var rows = hits.map(function (hit) {
+                        var doc = hit && hit.document || {};
+                        return {
+                            title: vmCleanTitle(doc.post_title || ""),
+                            url: absoluteUrl(mainUrl, doc.permalink || ""),
+                            posterUrl: doc.post_thumbnail || "",
+                            type: vmMediaType((doc.post_title || "") + " " + ((doc.category || []).join ? doc.category.join(" ") : "")),
+                            quality: qualityFromText(doc.post_title || "")
+                        };
+                    }).filter(function (item) { return item && item.title && item.url; });
+                    if (rows.length) return rows;
+                } catch (_) {}
+            }
+            return [];
+        }
+
+        async function resolve(media) {
+            if (media.anime) return [];
+            var queries = uniqueBy([media.title, media.originalTitle, media.imdbId], function (item) { return trim(String(item || "").toLowerCase()); }).filter(Boolean);
+            var rows = await searchTitles(queries);
+            var match = bestMatch(rows, queries, media.year, media.isMovie ? "movie" : null);
+            if (!match || !match.url) return [];
+
+            var pageUrl = match.url;
+            var res = await vmGetDocument(pageUrl, vmHeaders({ "Referer": (await getMainUrl()) + "/" }), true);
+            if (!res) return [];
+            pageUrl = res.finalUrl || pageUrl;
+            var html = res.body || "";
+            var title = vmCleanTitle(firstMatch(html, [/<h1\b[^>]*>([\s\S]*?)<\/h1>/i, /<title\b[^>]*>([\s\S]*?)<\/title>/i])) || match.title || media.title;
+            var imdbUrl = vmExtractImdbUrl(html);
+            var type = /Series-SYNOPSIS\/PLOT|Series Info|Series synopsis\/PLOT/i.test(html) || vmMediaType(title) === "series" ? "series" : "movie";
+            var meta = await vmFetchCinemeta(type, imdbUrl);
+
+            if (type === "movie" && media.isMovie) {
+                var groups = vmQualityGroups(html, pageUrl);
+                var sources = [];
+                for (var i = 0; i < groups.length; i++) {
+                    for (var j = 0; j < groups[i].anchors.length; j++) {
+                        var anchor = groups[i].anchors[j];
+                        if (!/dwd-button|Download/i.test(anchor.html + " " + anchor.text)) continue;
+                        try {
+                            var linkPage = await vmGetDocument(anchor.href, vmHeaders({ "Referer": pageUrl }), true);
+                            if (!linkPage) continue;
+                            sources = sources.concat(vmExtractNexdriveSources(linkPage.body, linkPage.finalUrl || anchor.href, {
+                                title: groups[i].title,
+                                quality: groups[i].quality
+                            }));
+                        } catch (_) {}
+                    }
+                }
+                sources = uniqueBy(sources, function (item) { return item.source; });
+                var streams = [];
+                for (var x = 0; x < sources.length; x++) {
+                    streams = streams.concat(await vmResolveGeneric(sources[x], {
+                        sourceUrl: pageUrl,
+                        title: meta && meta.name || title,
+                        type: "movie",
+                        season: 1,
+                        episode: 1
+                    }));
+                }
+                return dedupeStreams(streams);
+            }
+            return [];
+        }
+
+        return {
+            key: "p_vegamovies",
+            name: "VegaMovies",
+            resolve: resolve
+        };
+    })();
+
     var MoviesDriveExtraSource = (function () {
         var cachedMainUrl = "";
 
@@ -3665,6 +4819,10 @@
         CastleSource,
         StreamvixSource,
         NoTorrentSource,
+        VidSrcSource,
+        VidRockSource,
+        FlixIndiaSource,
+        VegaMoviesSource,
         Movies4uSource,
         MoviesDriveExtraSource,
         BollyflixSource,
@@ -3693,6 +4851,10 @@
                 return provider === CastleSource
                     || provider === StreamvixSource
                     || provider === NoTorrentSource
+                    || provider === VidSrcSource
+                    || provider === VidRockSource
+                    || provider === FlixIndiaSource
+                    || provider === VegaMoviesSource
                     || provider === Movies4uSource
                     || provider === MoviesDriveExtraSource
                     || provider === BollyflixSource

@@ -1,9 +1,9 @@
 {
   "packageName": "com.igris.repo.cinestream",
   "name": "CineStream",
-  "version": 3,
-  "baseUrl": "https://www.themoviedb.org",
-  "description": "TMDB catalog with a CineStream-style non-torrent source stack.",
+  "version": 9,
+  "baseUrl": "https://cinemeta-catalogs.strem.io",
+  "description": "CineMeta-powered catalog with an expanded CineStream source stack, including Stremio, direct OTT mirrors, and embedded stream resolvers.",
   "authors": [
     "IGRIS"
   ],
