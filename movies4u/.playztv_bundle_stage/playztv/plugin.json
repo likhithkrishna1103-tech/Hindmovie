@@ -1,0 +1,58 @@
+{
+  "packageName": "com.igris.repo.playztv",
+  "name": "PlayZTV",
+  "version": 1,
+  "baseUrl": "https://adsflw.xyz",
+  "providers": [
+    {
+      "id": "jio",
+      "name": "Jio"
+    },
+    {
+      "id": "zee",
+      "name": "Zee"
+    },
+    {
+      "id": "sony",
+      "name": "Sony"
+    },
+    {
+      "id": "bdixtv",
+      "name": "BDIX TV"
+    },
+    {
+      "id": "sunnxt",
+      "name": "Sun NXT"
+    },
+    {
+      "id": "dishtv",
+      "name": "DishTV"
+    },
+    {
+      "id": "freesports",
+      "name": "FreeSports"
+    },
+    {
+      "id": "piratestv",
+      "name": "Pirates TV"
+    }
+  ],
+  "description": "Bundled PlayZTV live TV providers. Live events remain in the separate PlayEZTV Live Events plugin.",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "hi",
+    "ta",
+    "te",
+    "ml",
+    "kn",
+    "bn",
+    "mr",
+    "pa"
+  ],
+  "categories": [
+    "Livestream"
+  ]
+}

@@ -6,22 +6,22 @@
             "key": "netflix",
             "displayName": "Netflix",
             "ott": "nf",
-            "defaultBaseUrl": "https://net52.cc",
+            "defaultBaseUrl": "https://net22.cc",
             "contentBases": [
-                "https://net52.cc",
-                "https://net22.cc"
+                "https://net22.cc",
+                "https://net52.cc"
             ],
             "homeBases": [
                 "https://net22.cc",
                 "https://net52.cc"
             ],
             "streamBases": [
-                "https://net52.cc",
-                "https://net22.cc"
+                "https://net22.cc",
+                "https://net52.cc"
             ],
             "cookieBases": [
-                "https://net52.cc",
-                "https://net22.cc"
+                "https://net22.cc",
+                "https://net52.cc"
             ],
             "tokenBases": [
                 "https://net22.cc",
@@ -45,22 +45,22 @@
             "key": "primevideo",
             "displayName": "PrimeVideo",
             "ott": "pv",
-            "defaultBaseUrl": "https://net52.cc",
+            "defaultBaseUrl": "https://net22.cc",
             "contentBases": [
-                "https://net52.cc",
-                "https://net22.cc"
+                "https://net22.cc",
+                "https://net52.cc"
             ],
             "homeBases": [
-                "https://net52.cc",
-                "https://net22.cc"
+                "https://net22.cc",
+                "https://net52.cc"
             ],
             "streamBases": [
-                "https://net52.cc",
-                "https://net22.cc"
+                "https://net22.cc",
+                "https://net52.cc"
             ],
             "cookieBases": [
-                "https://net52.cc",
-                "https://net22.cc"
+                "https://net22.cc",
+                "https://net52.cc"
             ],
             "tokenBases": [],
             "homeMode": "prime_json",
@@ -91,12 +91,12 @@
                 "https://net52.cc"
             ],
             "streamBases": [
-                "https://net52.cc",
-                "https://net22.cc"
+                "https://net22.cc",
+                "https://net52.cc"
             ],
             "cookieBases": [
-                "https://net52.cc",
-                "https://net22.cc"
+                "https://net22.cc",
+                "https://net52.cc"
             ],
             "tokenBases": [],
             "homeMode": "jio_html",

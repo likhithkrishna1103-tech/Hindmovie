@@ -1,8 +1,8 @@
 {
   "packageName": "com.igris.repo.netmirror",
   "name": "NetMirror",
-  "version": 2,
-  "baseUrl": "https://net52.cc",
+  "version": 3,
+  "baseUrl": "https://net22.cc",
   "providers": [
     {
       "id": "netflix",

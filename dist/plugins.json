@@ -54,24 +54,6 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animetsu.sky"
   },
   {
-    "packageName": "com.igris.repo.playztvbdixtv",
-    "name": "BDIX TV - PlayZTV",
-    "version": 3,
-    "baseUrl": "https://adsflw.xyz",
-    "description": "BDIX live TV, powered by PlayZTV.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "bn",
-      "en"
-    ],
-    "categories": [
-      "Livestream"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztvbdixtv.sky"
-  },
-  {
     "packageName": "com.igris.repo.castletv",
     "name": "Castle TV",
     "version": 8,
@@ -127,48 +109,6 @@
       "Livestream"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.darktv.sky"
-  },
-  {
-    "packageName": "com.igris.repo.playztvdishtv",
-    "name": "DishTV - PlayZTV",
-    "version": 3,
-    "baseUrl": "https://adsflw.xyz",
-    "description": "DishTV live channels via PlayZTV.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "hi",
-      "en",
-      "ta",
-      "te",
-      "ml",
-      "kn",
-      "bn",
-      "mr",
-      "pa"
-    ],
-    "categories": [
-      "Livestream"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztvdishtv.sky"
-  },
-  {
-    "packageName": "com.igris.repo.playztvfreesports",
-    "name": "FreeSports - PlayZTV",
-    "version": 2,
-    "baseUrl": "https://adsflw.xyz",
-    "description": "Free sports streams through PlayZTV.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "en"
-    ],
-    "categories": [
-      "livestream"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztvfreesports.sky"
   },
   {
     "packageName": "com.igris.repo.freetv",
@@ -252,31 +192,6 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.hindmoviez.sky"
   },
   {
-    "packageName": "com.igris.repo.playztvjio",
-    "name": "Jio - PlayZTV",
-    "version": 4,
-    "baseUrl": "https://adsflw.xyz",
-    "description": "Jio live TV lineup via PlayZTV.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "hi",
-      "en",
-      "ta",
-      "te",
-      "ml",
-      "kn",
-      "bn",
-      "mr",
-      "pa"
-    ],
-    "categories": [
-      "livestream"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztvjio.sky"
-  },
-  {
     "packageName": "com.igris.repo.kaido",
     "name": "Kaido",
     "version": 6,
@@ -342,7 +257,7 @@
     "packageName": "com.igris.repo.netmirror",
     "name": "NetMirror",
     "version": 2,
-    "baseUrl": "https://net52.cc",
+    "baseUrl": "https://net22.cc",
     "providers": [
       {
         "id": "netflix",
@@ -375,23 +290,6 @@
       "Anime"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.netmirror.sky"
-  },
-  {
-    "packageName": "com.igris.repo.playztvpiratestv",
-    "name": "Pirates TV - PlayZTV",
-    "version": 3,
-    "baseUrl": "https://adsflw.xyz",
-    "description": "Pirates TV live channels via PlayZTV.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "en"
-    ],
-    "categories": [
-      "livestream"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztvpiratestv.sky"
   },
   {
     "packageName": "com.igris.repo.piratexplay",
@@ -431,48 +329,63 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playeztvliveevents.sky"
   },
   {
-    "packageName": "com.igris.repo.playztvsony",
-    "name": "Sony - PlayZTV",
-    "version": 3,
+    "packageName": "com.igris.repo.playztv",
+    "name": "PlayZTV",
+    "version": 1,
     "baseUrl": "https://adsflw.xyz",
-    "description": "Sony live channels via PlayZTV.",
+    "providers": [
+      {
+        "id": "jio",
+        "name": "Jio"
+      },
+      {
+        "id": "zee",
+        "name": "Zee"
+      },
+      {
+        "id": "sony",
+        "name": "Sony"
+      },
+      {
+        "id": "bdixtv",
+        "name": "BDIX TV"
+      },
+      {
+        "id": "sunnxt",
+        "name": "Sun NXT"
+      },
+      {
+        "id": "dishtv",
+        "name": "DishTV"
+      },
+      {
+        "id": "freesports",
+        "name": "FreeSports"
+      },
+      {
+        "id": "piratestv",
+        "name": "Pirates TV"
+      }
+    ],
+    "description": "Bundled PlayZTV live TV providers. Live events remain in the separate PlayEZTV Live Events plugin.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "hi",
       "en",
-      "ta",
-      "te",
-      "ml",
-      "bn",
-      "mr"
-    ],
-    "categories": [
-      "Livestream"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztvsony.sky"
-  },
-  {
-    "packageName": "com.igris.repo.playztvsunnxt",
-    "name": "Sun NXT - PlayZTV",
-    "version": 4,
-    "baseUrl": "https://adsflw.xyz",
-    "description": "Sun NXT live channels via PlayZTV.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
+      "hi",
       "ta",
       "te",
       "ml",
       "kn",
-      "en"
+      "bn",
+      "mr",
+      "pa"
     ],
     "categories": [
-      "livestream"
+      "Livestream"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztvsunnxt.sky"
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztv.sky"
   },
   {
     "packageName": "com.igris.repo.tokyoinsider",
@@ -516,30 +429,5 @@
       "Anime"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.vegamovies.sky"
-  },
-  {
-    "packageName": "com.igris.repo.playztvzee",
-    "name": "Zee - PlayZTV",
-    "version": 4,
-    "baseUrl": "https://adsflw.xyz",
-    "description": "Zee live channels via PlayZTV.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "hi",
-      "en",
-      "bn",
-      "ta",
-      "te",
-      "ml",
-      "kn",
-      "mr",
-      "pa"
-    ],
-    "categories": [
-      "livestream"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztvzee.sky"
   }
 ]
