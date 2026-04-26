@@ -52,6 +52,13 @@
         return String(value);
     }
 
+    function integerOrUndefined(value) {
+        if (value == null || value === "") return undefined;
+        var num = Number(value);
+        if (!isFinite(num)) return undefined;
+        return Math.round(num);
+    }
+
     function absoluteUrl(url) {
         if (!url) return "";
         if (url.indexOf("http://") === 0 || url.indexOf("https://") === 0) return url;
@@ -90,7 +97,7 @@
 
     function numericYear(data) {
         var y = data && data.year;
-        return typeof y === "number" ? y : undefined;
+        return integerOrUndefined(y);
     }
 
     function coverUrl(data) {
@@ -281,11 +288,12 @@
             }));
 
             var episodes = ((eps || [])).map(function (ep) {
+                var episodeNumber = integerOrUndefined(ep && ep.ep_num);
                 return new Episode({
-                    name: stringOrEmpty(ep.name || ("Episode " + ep.ep_num)),
-                    url: MAIN_URL + "/watch/" + animeId + "?ep=" + encodeURIComponent(stringOrEmpty(ep.ep_num)) + "&server=default&source_type=sub",
+                    name: stringOrEmpty(ep.name || ("Episode " + stringOrEmpty(episodeNumber || ep.ep_num))),
+                    url: MAIN_URL + "/watch/" + animeId + "?ep=" + encodeURIComponent(stringOrEmpty(episodeNumber || ep.ep_num)) + "&server=default&source_type=sub",
                     season: 1,
-                    episode: ep.ep_num,
+                    episode: episodeNumber || 1,
                     description: cleanText(ep.desc || ""),
                     posterUrl: proxiedUrl(ep.img || "") || coverUrl(info),
                     headers: HEADERS,
@@ -304,7 +312,7 @@
                 type: animeTypeFromFormat(info.format || info.type),
                 year: numericYear(info),
                 score: typeof info.average_score === "number" ? info.average_score / 10 : undefined,
-                duration: typeof info.duration === "number" ? info.duration : undefined,
+                duration: integerOrUndefined(info.duration),
                 status: mapStatus(info.status),
                 contentRating: info.is_adult ? "R18+" : undefined,
                 isAdult: !!info.is_adult,
