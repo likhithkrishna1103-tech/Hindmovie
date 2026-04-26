@@ -94,40 +94,6 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.cinestream.sky"
   },
   {
-    "packageName": "com.igris.repo.darktv",
-    "name": "Dark TV",
-    "version": 2,
-    "baseUrl": "https://example.com",
-    "description": "Live channels with quick stream access.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "en"
-    ],
-    "categories": [
-      "Livestream"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.darktv.sky"
-  },
-  {
-    "packageName": "com.igris.repo.freetv",
-    "name": "Free TV",
-    "version": 3,
-    "baseUrl": "https://playlist-storage.pages.dev/PLAYLIST/freetv.m3u",
-    "description": "Free live TV with ready-to-play channels.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "en"
-    ],
-    "categories": [
-      "livestream"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.freetv.sky"
-  },
-  {
     "packageName": "com.igris.repo.hdmovie2",
     "name": "HDMovie2",
     "version": 4,
@@ -256,7 +222,7 @@
   {
     "packageName": "com.igris.repo.netmirror",
     "name": "NetMirror",
-    "version": 2,
+    "version": 4,
     "baseUrl": "https://net22.cc",
     "providers": [
       {
@@ -331,7 +297,7 @@
   {
     "packageName": "com.igris.repo.playztv",
     "name": "PlayZTV",
-    "version": 1,
+    "version": 2,
     "baseUrl": "https://adsflw.xyz",
     "providers": [
       {
@@ -365,9 +331,17 @@
       {
         "id": "piratestv",
         "name": "Pirates TV"
+      },
+      {
+        "id": "darktv",
+        "name": "Dark TV"
+      },
+      {
+        "id": "freetv",
+        "name": "Free TV"
       }
     ],
-    "description": "Bundled PlayZTV live TV providers. Live events remain in the separate PlayEZTV Live Events plugin.",
+    "description": "Bundled live TV plugin with PlayZTV providers, Dark TV, and Free TV. Live events remain in the separate PlayEZTV Live Events plugin.",
     "authors": [
       "IGRIS"
     ],

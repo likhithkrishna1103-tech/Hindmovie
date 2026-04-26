@@ -114,7 +114,7 @@
             "refererPath": "/home"
         }
     };
-    var DEFAULT_PROVIDER_KEY = "primevideo";
+    var DEFAULT_PROVIDER_KEY = "netflix";
 
     function normalizeProviderToken(value) {
         return trim(value).toLowerCase().replace(/[^a-z0-9]/g, "");

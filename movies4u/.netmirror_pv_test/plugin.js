@@ -27,13 +27,13 @@
                 "https://net52.cc",
                 "https://net22.cc",
             ],
-            "homeMode": "netflix_public_search",
+            "homeMode": "netflix_html",
             "homePath": "/home",
             "searchPath": "/search.php",
             "detailPath": "/post.php",
             "episodesPath": "/episodes.php",
             "playlistPath": "/playlist.php",
-            "needsCookie": false,
+            "needsCookie": true,
             "needsVideoToken": true,
             "needsUserTokenOnHome": true,
             "posterUrl": "https://imgcdn.kim/poster/v/{id}.jpg",
@@ -479,23 +479,13 @@
     }
 
     async function fetchVideoToken(baseUrl, id, cookieValue) {
-        var cookieMap = buildCookieMap(cookieValue, {
-            user_token: USER_TOKEN,
-            ott: CONFIG.ott,
-            hd: "on"
-        });
-        var host = "";
-        try {
-            host = new URL(baseUrl).host;
-        } catch (_) {
-            host = "net22.cc";
-        }
+        var cookieMap = buildCookieMap(cookieValue, { user_token: USER_TOKEN });
         var headers = {
             "Accept": "*/*",
             "Accept-Language": "en-US,en;q=0.5",
             "Connection": "keep-alive",
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "Host": host,
+            "Host": "net22.cc",
             "Origin": baseUrl + "/",
             "Priority": "u=0",
             "Referer": baseUrl + "/home",
@@ -637,30 +627,6 @@
         cb({ success: true, data: data });
     }
 
-    async function parseNetflixPublicHome(baseUrl, cb) {
-        var response = await request(baseUrl + CONFIG.searchPath + "?" + encodeQuery({ s: "a", t: unixTime() }), {
-            headers: buildHeaders(baseUrl, "/", {}, {
-                "X-Requested-With": "XMLHttpRequest"
-            })
-        });
-        var searchData = parseJsonSafe(response.body, null);
-        var rows = searchData && Array.isArray(searchData.searchResult) ? searchData.searchResult : [];
-        var items = [];
-        for (var i = 0; i < rows.length; i++) {
-            var row = rows[i] || {};
-            if (!row.id) continue;
-            var rowTitle = trim(row.t) || ("Netflix " + String(row.id));
-            items.push(buildSearchItem(String(row.id), rowTitle, row));
-            if (items.length >= 40) break;
-        }
-        cb({
-            success: true,
-            data: {
-                "Trending on Netflix": items
-            }
-        });
-    }
-
     async function parsePrimeHome(baseUrl, cb) {
         var response = await request(baseUrl + CONFIG.homePath, {
             headers: buildHeaders(baseUrl, "/", {}, { "X-Requested-With": "XMLHttpRequest" })
@@ -708,12 +674,11 @@
     }
 
     async function getHome(cb) {
-        var bases = (CONFIG.homeMode === "netflix_html" || CONFIG.homeMode === "netflix_public_search") ? getHomeBases() : getContentBases();
+        var bases = CONFIG.homeMode === "netflix_html" ? getHomeBases() : getContentBases();
         var lastError = null;
         for (var i = 0; i < bases.length; i++) {
             try {
                 if (CONFIG.homeMode === "netflix_html") return await parseNetflixHome(bases[i], cb);
-                if (CONFIG.homeMode === "netflix_public_search") return await parseNetflixPublicHome(bases[i], cb);
                 if (CONFIG.homeMode === "prime_json") return await parsePrimeHome(bases[i], cb);
                 if (CONFIG.homeMode === "jio_html") return await parseJioHome(bases[i], cb);
             } catch (error) {
@@ -850,31 +815,6 @@
             }
         }
 
-        if (CONFIG.key === "netflix") {
-            var fallbackTitle = payload.title || ("Netflix " + id);
-            return cb({
-                success: true,
-                data: new MultimediaItem({
-                    title: fallbackTitle,
-                    url: payloadString({ id: id, title: fallbackTitle }),
-                    posterUrl: buildPoster(CONFIG.posterUrl, id),
-                    backgroundPosterUrl: buildPoster(CONFIG.backgroundPosterUrl, id),
-                    description: "Netflix stream fallback",
-                    type: "movie",
-                    episodes: [
-                        new Episode({
-                            name: fallbackTitle,
-                            url: payloadString({ id: id, title: fallbackTitle }),
-                            season: 1,
-                            episode: 1,
-                            posterUrl: buildPoster(CONFIG.posterUrl, id),
-                            description: "Netflix stream fallback"
-                        })
-                    ]
-                })
-            });
-        }
-
         cb({
             success: false,
             errorCode: "LOAD_ERROR",
@@ -900,11 +840,7 @@
         var playlistBases = getStreamBases();
         var tokenBases = CONFIG.needsVideoToken ? getTokenBases() : [];
         var cookieValue = CONFIG.needsCookie ? await getCookieForBases(getCookieBases()) : "";
-        var cookieMap = buildCookieMap(cookieValue, CONFIG.key === "netflix" ? {
-            user_token: USER_TOKEN,
-            ott: CONFIG.ott,
-            hd: "on"
-        } : {});
+        var cookieMap = buildCookieMap(cookieValue, {});
         var lastError = null;
 
         try {
@@ -924,7 +860,7 @@
                             lastError = error;
                         }
                     }
-                    if (!tokenResolved && CONFIG.key !== "netflix") continue;
+                    if (!tokenResolved) continue;
                 }
 
                 var playlistQuery = {
@@ -932,7 +868,7 @@
                     t: title || id,
                     tm: unixTime()
                 };
-                if (CONFIG.needsVideoToken && token) playlistQuery.h = token;
+                if (CONFIG.needsVideoToken) playlistQuery.h = token;
 
                 var response = await request(playlistBase + CONFIG.playlistPath + "?" + encodeQuery(playlistQuery), {
                     headers: buildHeaders(

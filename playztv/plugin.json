@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.playztv",
   "name": "PlayZTV",
-  "version": 1,
+  "version": 2,
   "baseUrl": "https://adsflw.xyz",
   "providers": [
     {
@@ -35,9 +35,17 @@
     {
       "id": "piratestv",
       "name": "Pirates TV"
+    },
+    {
+      "id": "darktv",
+      "name": "Dark TV"
+    },
+    {
+      "id": "freetv",
+      "name": "Free TV"
     }
   ],
-  "description": "Bundled PlayZTV live TV providers. Live events remain in the separate PlayEZTV Live Events plugin.",
+  "description": "Bundled live TV plugin with PlayZTV providers, Dark TV, and Free TV. Live events remain in the separate PlayEZTV Live Events plugin.",
   "authors": [
     "IGRIS"
   ],

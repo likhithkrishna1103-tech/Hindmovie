@@ -170,12 +170,39 @@
         piratestv: "com.igris.repo.playztvpiratestv"
     };
     const DEFAULT_PROVIDER_ID = "jio";
+    const SPECIAL_BUNDLED_PROVIDERS = {
+        darktv: {
+            id: "darktv",
+            label: "Dark TV",
+            candidateUrls: [
+                "https://ranapk.short.gy/Darktv/playlist.php",
+                "https://ranapkbd.site/tvd/2/TVDin.php"
+            ],
+            decrypt: false
+        },
+        freetv: {
+            id: "freetv",
+            label: "Free TV",
+            candidateUrls: [
+                "https://playlist-storage.pages.dev/PLAYLIST/freetv.m3u"
+            ],
+            decrypt: true
+        }
+    };
+
+    function getSelectedProviderId() {
+        return trimToString(manifest && manifest.providerId).toLowerCase();
+    }
 
     function getPluginConfig() {
-        const providerId = trimToString(manifest && manifest.providerId).toLowerCase();
+        const providerId = getSelectedProviderId();
         const packageName = trimToString(manifest && manifest.packageName);
         const resolvedPackageName = PROVIDER_PACKAGE_MAP[providerId] || packageName;
         return PLUGIN_CONFIGS[resolvedPackageName] || PLUGIN_CONFIGS[PROVIDER_PACKAGE_MAP[DEFAULT_PROVIDER_ID]] || null;
+    }
+
+    function getSpecialBundledProvider() {
+        return SPECIAL_BUNDLED_PROVIDERS[getSelectedProviderId()] || null;
     }
 
     async function postJson(url, payload, headers) {
@@ -813,6 +840,103 @@
         });
     }
 
+    function extractEmbeddedPlaylistText(body) {
+        const text = trimToString(body);
+        if (!text) return "";
+        if (isPlaylistResponse(text)) return text;
+
+        const indexes = [
+            text.indexOf("#EXTM3U"),
+            text.indexOf("#EXTINF"),
+            text.indexOf("#KODIPROP")
+        ].filter((index) => index >= 0);
+
+        if (!indexes.length) return "";
+        return text.slice(Math.min.apply(null, indexes)).trim();
+    }
+
+    function looksLikeEncryptedPlaylist(text) {
+        const compact = trimToString(text).replace(/\s+/g, "");
+        return compact.length >= 79 && /^[A-Za-z0-9+/=]+$/.test(compact);
+    }
+
+    async function decryptBundledPlaylistContent(content) {
+        const text = trimToString(content);
+        if (!text || isPlaylistResponse(text) || !crypto || typeof crypto.decryptAES !== "function") {
+            return text;
+        }
+        if (!looksLikeEncryptedPlaylist(text)) return text;
+
+        try {
+            const compact = text.replace(/\s+/g, "");
+            const encryptedData = compact.slice(0, 10) + compact.slice(34, compact.length - 54) + compact.slice(compact.length - 10);
+            const ivBase64 = compact.slice(10, 34);
+            const keyBase64 = compact.slice(compact.length - 54, compact.length - 10);
+            const decrypted = await crypto.decryptAES(encryptedData, keyBase64, ivBase64);
+            return trimToString(decrypted) || text;
+        } catch (_) {
+            return text;
+        }
+    }
+
+    async function resolveSpecialProviderChannels(providerDefinition) {
+        const failures = [];
+        const candidates = Array.isArray(providerDefinition && providerDefinition.candidateUrls)
+            ? providerDefinition.candidateUrls
+            : [];
+
+        for (let index = 0; index < candidates.length; index++) {
+            const candidateUrl = trimToString(candidates[index]);
+            if (!candidateUrl) continue;
+
+            try {
+                const response = await fetchText(candidateUrl, DEFAULT_PLAYLIST_HEADERS);
+                const status = extractResponseStatus(response);
+                const rawBody = extractResponseBody(response);
+                const directPlaylist = extractEmbeddedPlaylistText(rawBody);
+                const directChannels = directPlaylist
+                    ? parseM3UChannels(directPlaylist, providerDefinition.label, "")
+                    : [];
+
+                if (status >= 200 && status < 300 && directChannels.length) {
+                    return {
+                        label: providerDefinition.label,
+                        channels: directChannels,
+                        candidate: { name: candidateUrl, type: "m3u", url: candidateUrl }
+                    };
+                }
+
+                if (providerDefinition.decrypt) {
+                    const decryptedBody = await decryptBundledPlaylistContent(rawBody);
+                    const decryptedPlaylist = extractEmbeddedPlaylistText(decryptedBody);
+                    const decryptedChannels = decryptedPlaylist
+                        ? parseM3UChannels(decryptedPlaylist, providerDefinition.label, "")
+                        : [];
+
+                    if (status >= 200 && status < 300 && decryptedChannels.length) {
+                        return {
+                            label: providerDefinition.label,
+                            channels: decryptedChannels,
+                            candidate: { name: candidateUrl, type: "m3u", url: candidateUrl }
+                        };
+                    }
+                }
+
+                const preview = trimToString(rawBody).slice(0, 120).replace(/\s+/g, " ") || "empty response body";
+                failures.push(`${candidateUrl}: ${status || "no response"} (${preview})`);
+            } catch (error) {
+                failures.push(`${candidateUrl}: ${error && error.message ? error.message : String(error)}`);
+            }
+        }
+
+        return {
+            label: providerDefinition.label,
+            channels: [],
+            candidate: null,
+            error: failures.join(" | ")
+        };
+    }
+
     function buildSectionsFromChannels(channels) {
         const sections = {};
         channels.forEach((channel) => {
@@ -1368,6 +1492,19 @@
 
     async function getHome(cb) {
         try {
+            const specialProvider = getSpecialBundledProvider();
+            if (specialProvider) {
+                const providerResult = await resolveSpecialProviderChannels(specialProvider);
+                if (!providerResult.channels.length) {
+                    return cb({
+                        success: false,
+                        errorCode: "SITE_OFFLINE",
+                        message: providerResult.error || `No playable channels are currently available for ${specialProvider.label}`
+                    });
+                }
+                return cb({ success: true, data: buildSectionsFromChannels(providerResult.channels) });
+            }
+
             const config = getPluginConfig();
             if (!config) {
                 return cb({ success: false, errorCode: "PARSE_ERROR", message: "Unsupported PlayZTV manifest configuration" });
@@ -1413,6 +1550,26 @@
 
     async function search(query, cb) {
         try {
+            const specialProvider = getSpecialBundledProvider();
+            if (specialProvider) {
+                const loweredQuery = trimToString(query).toLowerCase();
+                if (!loweredQuery) return cb({ success: true, data: [] });
+
+                const providerResult = await resolveSpecialProviderChannels(specialProvider);
+                const results = providerResult.channels
+                    .filter((channel) => {
+                        const haystack = [
+                            channel.title,
+                            channel.group,
+                            channel.providerLabel
+                        ].filter(Boolean).join(" ").toLowerCase();
+                        return haystack.includes(loweredQuery);
+                    })
+                    .map((channel) => createChannelItem(channel, false));
+
+                return cb({ success: true, data: results });
+            }
+
             const config = getPluginConfig();
             if (!config) return cb({ success: true, data: [] });
 
