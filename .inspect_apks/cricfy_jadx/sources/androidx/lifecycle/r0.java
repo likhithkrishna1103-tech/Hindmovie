@@ -1,9 +1,0 @@
-package androidx.lifecycle;
-
-/* JADX INFO: compiled from: r8-map-id-c4f9814488669853ae93fbc55db361a9ba0734c3936998bc53cdd659ea79ae23 */
-/* JADX INFO: loaded from: classes.dex */
-public interface r0 {
-    o0 a(Class cls);
-
-    o0 b(Class cls, t1.c cVar);
-}
