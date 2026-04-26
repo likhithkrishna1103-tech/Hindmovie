@@ -1,11 +1,11 @@
 {
   "packageName": "com.igris.repo.animekai",
   "name": "AnimeKai",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://anikai.to",
   "description": "AnimeKai anime streaming plugin",
   "authors": [
-    "OpenAI"
+    "IGRIS"
   ],
   "languages": [
     "en",
