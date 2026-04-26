@@ -341,7 +341,7 @@
   {
     "packageName": "com.igris.repo.netmirror",
     "name": "NetMirror",
-    "version": 1,
+    "version": 2,
     "baseUrl": "https://net52.cc",
     "providers": [
       {
@@ -357,7 +357,7 @@
         "name": "JioHotstar"
       }
     ],
-    "description": "Bundled port of the NetflixMirror Netflix, PrimeVideo, and JioHotstar providers.",
+    "description": "Netflix, PrimeVideo(Lionsgate),JioHotstar(Hotstar, Disney, Paramount, HBO, Peacock) Content in Multiple Languages",
     "authors": [
       "IGRIS"
     ],
