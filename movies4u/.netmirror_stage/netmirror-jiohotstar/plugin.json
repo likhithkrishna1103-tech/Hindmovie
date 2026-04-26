@@ -1,0 +1,33 @@
+{
+  "packageName": "com.igris.repo.netmirrorjiohotstar",
+  "name": "NetMirror JioHotstar",
+  "version": 1,
+  "baseUrl": "https://net22.cc",
+  "domains": [
+    {
+      "name": "net22.cc",
+      "url": "https://net22.cc"
+    },
+    {
+      "name": "net52.cc",
+      "url": "https://net52.cc"
+    }
+  ],
+  "description": "Port of the NetflixMirror JioHotstar provider with mirror switching.",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "hi",
+    "ta",
+    "te",
+    "ml",
+    "kn"
+  ],
+  "categories": [
+    "Movies",
+    "Series",
+    "Anime"
+  ]
+}

@@ -339,6 +339,44 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.movies4u.sky"
   },
   {
+    "packageName": "com.igris.repo.netmirror",
+    "name": "NetMirror",
+    "version": 1,
+    "baseUrl": "https://net52.cc",
+    "providers": [
+      {
+        "id": "netflix",
+        "name": "Netflix"
+      },
+      {
+        "id": "primevideo",
+        "name": "PrimeVideo"
+      },
+      {
+        "id": "jiohotstar",
+        "name": "JioHotstar"
+      }
+    ],
+    "description": "Bundled port of the NetflixMirror Netflix, PrimeVideo, and JioHotstar providers.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "hi",
+      "ta",
+      "te",
+      "ml",
+      "kn"
+    ],
+    "categories": [
+      "Movies",
+      "Series",
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.netmirror.sky"
+  },
+  {
     "packageName": "com.igris.repo.playztvpiratestv",
     "name": "Pirates TV - PlayZTV",
     "version": 3,
