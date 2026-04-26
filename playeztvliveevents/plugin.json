@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.playeztvliveevents",
   "name": "PlayEZTV Live Events",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://adsflw.xyz",
   "description": "Live sports from the PlayEZTV feed.",
   "authors": [
@@ -11,6 +11,6 @@
     "en"
   ],
   "categories": [
-    "Sports"
+    "LiveTv"
   ]
 }

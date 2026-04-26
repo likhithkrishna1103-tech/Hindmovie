@@ -291,25 +291,7 @@
         return normalized;
     }
 
-    function parseHeaderString(headerString) {
-        const headers = {};
-        trimToString(headerString).split("&").forEach((pair) => {
-            const equalsIndex = pair.indexOf("=");
-            if (equalsIndex === -1) return;
 
-            const key = normalizeHeaderName(pair.slice(0, equalsIndex));
-            if (!key) return;
-
-            let value = trimToString(pair.slice(equalsIndex + 1));
-            try {
-                value = decodeURIComponent(value);
-            } catch (_) {
-                // Keep raw value.
-            }
-            headers[key] = value;
-        });
-        return headers;
-    }
 
     function splitUrlAndHeaders(rawUrl) {
         const value = trimToString(rawUrl);
@@ -489,7 +471,6 @@
         const playbackVarMatch = /var\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*""\s*,\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*\[\s*\]/.exec(html);
         if (!playbackVarMatch) return "";
 
-        const playbackVar = playbackVarMatch[1];
         const arrayVar = playbackVarMatch[2];
         const arrayMatch = new RegExp(`${arrayVar}\\s*=\\s*(\\[[\\s\\S]*?\\]);`).exec(html);
         if (!arrayMatch || !arrayMatch[1]) return "";
@@ -924,63 +905,13 @@
         return info;
     }
 
-    function encodeInlineManifest(text) {
-        return `data:application/vnd.apple.mpegurl;charset=utf-8,${encodeURIComponent(String(text || ""))}`;
-    }
-
-    function serializeHlsAttributeValue(value) {
-        const text = trimToString(value);
-        if (!text) return "\"\"";
-        if (/^-?\d+(?:\.\d+)?$/i.test(text)) return text;
-        if (/^(YES|NO|NONE)$/i.test(text)) return text.toUpperCase();
-        if (/^[A-Za-z0-9._:-]+(?:x[A-Za-z0-9._:-]+)?$/i.test(text)) return text;
-        return `"${text.replace(/"/g, "\\\"")}"`;
-    }
-
-    function serializeHlsAttributes(attributes) {
-        return Object.keys(attributes || {}).map((key) => `${key}=${serializeHlsAttributeValue(attributes[key])}`).join(",");
-    }
-
-    function appendMediaGroupLines(lines, manifestInfo, mediaType, groupId) {
-        const groups = manifestInfo && manifestInfo.mediaGroups ? manifestInfo.mediaGroups : {};
-        const entries = groups[mediaType] && groups[mediaType][groupId] ? groups[mediaType][groupId] : [];
-        entries.forEach((attributes) => {
-            lines.push(`#EXT-X-MEDIA:${serializeHlsAttributes(attributes)}`);
-        });
-        return entries.length > 0;
-    }
-
-    function buildVariantPlaybackUrl(manifestInfo, variant) {
-        const attributes = variant && variant.attributes ? variant.attributes : {};
-        const lines = ["#EXTM3U"];
-        if (manifestInfo && manifestInfo.version) {
-            lines.push(`#EXT-X-VERSION:${manifestInfo.version}`);
-        }
-        if (manifestInfo && manifestInfo.independentSegments) {
-            lines.push("#EXT-X-INDEPENDENT-SEGMENTS");
-        }
-
-        let includedAlternateMedia = false;
-        const audioGroupId = trimToString(attributes.AUDIO);
-        if (audioGroupId) {
-            includedAlternateMedia = appendMediaGroupLines(lines, manifestInfo, "AUDIO", audioGroupId) || includedAlternateMedia;
-        }
-        const subtitleGroupId = trimToString(attributes.SUBTITLES);
-        if (subtitleGroupId) {
-            includedAlternateMedia = appendMediaGroupLines(lines, manifestInfo, "SUBTITLES", subtitleGroupId) || includedAlternateMedia;
-        }
-        const captionsGroupId = trimToString(attributes["CLOSED-CAPTIONS"]);
-        if (captionsGroupId && captionsGroupId.toUpperCase() !== "NONE") {
-            includedAlternateMedia = appendMediaGroupLines(lines, manifestInfo, "CLOSED-CAPTIONS", captionsGroupId) || includedAlternateMedia;
-        }
-
-        if (!includedAlternateMedia) {
-            return trimToString(variant && variant.url);
-        }
-
-        lines.push(`#EXT-X-STREAM-INF:${serializeHlsAttributes(attributes)}`);
-        lines.push(trimToString(variant && variant.url));
-        return encodeInlineManifest(lines.join("\n"));
+    function buildVariantPlaybackUrl(variant) {
+        // Always return the direct variant URL.
+        // Inline data: manifests (previously used to embed audio groups) crash
+        // WinRT's AdaptiveMediaSource which only accepts http/https URIs, even
+        // though hasExtension() matches .m3u8 inside the encoded data: body.
+        // Audio group selection is handled by the player from the master manifest.
+        return trimToString(variant && variant.url);
     }
 
     function extractClearKeyPairFromJson(value) {
@@ -1185,7 +1116,7 @@
             const streams = [];
 
             variants.forEach((variant, index) => {
-                const playbackUrl = buildVariantPlaybackUrl(manifestInfo, variant);
+                const playbackUrl = buildVariantPlaybackUrl(variant);
                 if (!variant || !variant.url || !playbackUrl || seen[playbackUrl]) return;
                 seen[playbackUrl] = true;
                 const variantInfo = buildVariantSource(sourceLabel, variant.attributes || {}, index);
