@@ -20,14 +20,15 @@
   {
     "packageName": "com.igris.repo.animepahe",
     "name": "AnimePahe",
-    "version": 8,
+    "version": 9,
     "baseUrl": "https://example.com",
     "description": "Fast anime streaming with sub and dub.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "en",
+      "ja"
     ],
     "categories": [
       "Anime"
@@ -37,14 +38,15 @@
   {
     "packageName": "com.igris.repo.animetsu",
     "name": "Animetsu",
-    "version": 4,
+    "version": 5,
     "baseUrl": "https://example.com",
     "description": "Clean anime picks with sub and dub.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "en",
+      "ja"
     ],
     "categories": [
       "Anime"
@@ -54,13 +56,14 @@
   {
     "packageName": "com.igris.repo.playztvbdixtv",
     "name": "BDIX TV - PlayZTV",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://adsflw.xyz",
     "description": "BDIX live TV, powered by PlayZTV.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
+      "bn",
       "en"
     ],
     "categories": [
@@ -71,14 +74,15 @@
   {
     "packageName": "com.igris.repo.castletv",
     "name": "Castle TV",
-    "version": 7,
+    "version": 8,
     "baseUrl": "https://example.com",
     "description": "Sharp movies and series in one place.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "en",
+      "hi"
     ],
     "categories": [
       "Movies",
@@ -89,14 +93,16 @@
   {
     "packageName": "com.igris.repo.cinestream",
     "name": "CineStream",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://www.themoviedb.org",
     "description": "TMDB catalog with a CineStream-style non-torrent source stack.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "en",
+      "hi",
+      "ja"
     ],
     "categories": [
       "Movies",
@@ -125,14 +131,22 @@
   {
     "packageName": "com.igris.repo.playztvdishtv",
     "name": "DishTV - PlayZTV",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://adsflw.xyz",
     "description": "DishTV live channels via PlayZTV.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "hi",
+      "en",
+      "ta",
+      "te",
+      "ml",
+      "kn",
+      "bn",
+      "mr",
+      "pa"
     ],
     "categories": [
       "Livestream"
@@ -176,14 +190,19 @@
   {
     "packageName": "com.igris.repo.hdmovie2",
     "name": "HDMovie2",
-    "version": 3,
+    "version": 4,
     "baseUrl": "https://hdmovie2.restaurant",
     "description": "TMDB catalog with HDMovie2 stream resolution.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "en",
+      "hi",
+      "ta",
+      "te",
+      "ml",
+      "kn"
     ],
     "categories": [
       "Movies",
@@ -212,14 +231,19 @@
   {
     "packageName": "com.igris.repo.hindmoviez",
     "name": "HindMoviez",
-    "version": 7,
+    "version": 8,
     "baseUrl": "https://example.com",
     "description": "Trending movies and series, quickly.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "hi",
+      "en",
+      "ta",
+      "te",
+      "ml",
+      "kn"
     ],
     "categories": [
       "Movies",
@@ -230,14 +254,22 @@
   {
     "packageName": "com.igris.repo.playztvjio",
     "name": "Jio - PlayZTV",
-    "version": 3,
+    "version": 4,
     "baseUrl": "https://adsflw.xyz",
     "description": "Jio live TV lineup via PlayZTV.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "hi",
+      "en",
+      "ta",
+      "te",
+      "ml",
+      "kn",
+      "bn",
+      "mr",
+      "pa"
     ],
     "categories": [
       "livestream"
@@ -247,14 +279,15 @@
   {
     "packageName": "com.igris.repo.kaido",
     "name": "Kaido",
-    "version": 5,
+    "version": 6,
     "baseUrl": "https://example.com",
     "description": "Anime streaming with quick episode access.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "en",
+      "ja"
     ],
     "categories": [
       "Anime"
@@ -264,14 +297,19 @@
   {
     "packageName": "com.igris.repo.movierulz",
     "name": "Movierulz",
-    "version": 4,
+    "version": 5,
     "baseUrl": "https://example.com",
     "description": "Fresh movie drops with fast links.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "hi",
+      "en",
+      "ta",
+      "te",
+      "ml",
+      "kn"
     ],
     "categories": [
       "Movies"
@@ -281,14 +319,19 @@
   {
     "packageName": "com.igris.repo.movies4u",
     "name": "Movies4U",
-    "version": 9,
+    "version": 10,
     "baseUrl": "https://movies4u.rs",
     "description": "Movie picks with straightforward stream links.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "hi",
+      "en",
+      "ta",
+      "te",
+      "ml",
+      "kn"
     ],
     "categories": [
       "Movies"
@@ -315,14 +358,15 @@
   {
     "packageName": "com.igris.repo.piratexplay",
     "name": "PirateXPlay",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://example.com",
     "description": "Movies and shows with fast stream picks.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "en",
+      "hi"
     ],
     "categories": [
       "Movies",
@@ -333,14 +377,15 @@
   {
     "packageName": "com.igris.repo.playeztvliveevents",
     "name": "PlayEZTV Live Events",
-    "version": 3,
+    "version": 4,
     "baseUrl": "https://adsflw.xyz",
     "description": "Live sports from the PlayEZTV feed.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "en",
+      "hi"
     ],
     "categories": [
       "LiveTv"
@@ -350,14 +395,20 @@
   {
     "packageName": "com.igris.repo.playztvsony",
     "name": "Sony - PlayZTV",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://adsflw.xyz",
     "description": "Sony live channels via PlayZTV.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "hi",
+      "en",
+      "ta",
+      "te",
+      "ml",
+      "bn",
+      "mr"
     ],
     "categories": [
       "Livestream"
@@ -367,13 +418,17 @@
   {
     "packageName": "com.igris.repo.playztvsunnxt",
     "name": "Sun NXT - PlayZTV",
-    "version": 3,
+    "version": 4,
     "baseUrl": "https://adsflw.xyz",
     "description": "Sun NXT live channels via PlayZTV.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
+      "ta",
+      "te",
+      "ml",
+      "kn",
       "en"
     ],
     "categories": [
@@ -384,14 +439,15 @@
   {
     "packageName": "com.igris.repo.tokyoinsider",
     "name": "TokyoInsider",
-    "version": 3,
+    "version": 4,
     "baseUrl": "https://www.tokyoinsider.com",
     "description": "TMDB anime catalog with TokyoInsider links.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "en",
+      "ja"
     ],
     "categories": [
       "Anime"
@@ -401,14 +457,20 @@
   {
     "packageName": "com.igris.repo.vegamovies",
     "name": "VegaMovies",
-    "version": 78,
+    "version": 79,
     "baseUrl": "https://vegamovies.vodka",
     "description": "VegaMovies catalog with Nexdrive and V-Cloud stream resolution.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "hi"
+      "hi",
+      "en",
+      "ta",
+      "te",
+      "ml",
+      "kn",
+      "ja"
     ],
     "categories": [
       "Movies",
@@ -420,14 +482,22 @@
   {
     "packageName": "com.igris.repo.playztvzee",
     "name": "Zee - PlayZTV",
-    "version": 3,
+    "version": 4,
     "baseUrl": "https://adsflw.xyz",
     "description": "Zee live channels via PlayZTV.",
     "authors": [
       "IGRIS"
     ],
     "languages": [
-      "en"
+      "hi",
+      "en",
+      "bn",
+      "ta",
+      "te",
+      "ml",
+      "kn",
+      "mr",
+      "pa"
     ],
     "categories": [
       "livestream"
