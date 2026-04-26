@@ -229,7 +229,7 @@
   {
     "packageName": "com.igris.repo.kaido",
     "name": "Kaido",
-    "version": 4,
+    "version": 5,
     "baseUrl": "https://example.com",
     "description": "Anime streaming with quick episode access.",
     "authors": [
