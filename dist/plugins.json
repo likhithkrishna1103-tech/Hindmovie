@@ -1,5 +1,23 @@
 [
   {
+    "packageName": "com.igris.repo.animekai",
+    "name": "AnimeKai",
+    "version": 2,
+    "baseUrl": "https://anikai.to",
+    "description": "AnimeKai anime streaming plugin",
+    "authors": [
+      "OpenAI"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animekai.sky"
+  },
+  {
     "packageName": "com.igris.repo.animepahe",
     "name": "AnimePahe",
     "version": 8,
