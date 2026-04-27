@@ -718,6 +718,37 @@
         ]);
     }
 
+    var SCRAPE_CONCURRENCY = 50;
+
+    async function mapLimit(list, limit, iteratee) {
+        var items = Array.isArray(list) ? list : [];
+        var max = Math.max(1, Number(limit || 1));
+        var results = new Array(items.length);
+        var cursor = 0;
+
+        async function worker() {
+            while (cursor < items.length) {
+                var index = cursor++;
+                try {
+                    results[index] = {
+                        status: "fulfilled",
+                        value: await iteratee(items[index], index)
+                    };
+                } catch (error) {
+                    results[index] = {
+                        status: "rejected",
+                        reason: error
+                    };
+                }
+            }
+        }
+
+        var workers = [];
+        for (var i = 0; i < Math.min(max, items.length); i++) workers.push(worker());
+        await Promise.all(workers);
+        return results;
+    }
+
     var DOMAINS_JSON_URL = "https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json";
     var COMMON_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
     var domainsCache = null;
@@ -767,7 +798,7 @@
     }
 
     function isCommonInterestingUrl(url) {
-        return /(?:gofile|hubcloud|hubdrive|filepress|filebee|gdfli?x|gdtot|m4ulinks|mdrive|linksmod|nexdrive|gadgetsweb|cryptoinsights|fastdlserver|fastdl\.zip|vcloud\.zip|rubystm|streamruby|vidstreaming|pixeldrain|1fichier|clicknupload|streamtape|ok\.ru|multiup|\.m3u8|\.mp4|\.mkv|\.avi|\.mpd)/i.test(String(url || ""));
+        return /(?:gofile|hubcloud|hubdrive|filepress|filebee|gdfli?x|gdlink|gdtot|m4ulinks|mdrive|linksmod|nexdrive|gadgetsweb|cryptoinsights|fastdlserver|fastdl\.zip|vcloud\.zip|rubystm|streamruby|vidstreaming|pixeldrain|1fichier|clicknupload|streamtape|ok\.ru|multiup|\.m3u8|\.mp4|\.mkv|\.avi|\.mpd)/i.test(String(url || ""));
     }
 
     function normalizeResolvedUrl(rawValue, base) {
@@ -1060,6 +1091,73 @@
         return out;
     }
 
+    function extractDirectMediaUrls(html, base) {
+        var out = [];
+        var seen = {};
+        var regex = /https?:\/\/[^\s"'<>]+?\.(?:m3u8|mp4|mkv|webm|avi|mpd)(?:\?[^\s"'<>]*)?/gi;
+        var match;
+        while ((match = regex.exec(String(html || "")))) {
+            var value = normalizeResolvedUrl(match[0], base);
+            if (!value || seen[value]) continue;
+            seen[value] = true;
+            out.push(value);
+        }
+        return out;
+    }
+
+    async function resolveM4uLinksGlobal(url, label, depth) {
+        var html = await getText(url, commonHeaders({ "Referer": baseOrigin(url) + "/" }), true).catch(function () { return ""; });
+        if (!html) return [];
+        var base = baseOrigin(url);
+        var blocks = [];
+        var regex = /<h4\b[^>]*>([\s\S]*?)<\/h4>([\s\S]*?)(?=<h4\b|$)/gi;
+        var match;
+        while ((match = regex.exec(String(html || "")))) {
+            blocks.push({
+                qualityLabel: stripTags(match[1]),
+                anchors: parseAnchors(match[2], base)
+            });
+        }
+        if (!blocks.length) {
+            blocks.push({
+                qualityLabel: "",
+                anchors: parseAnchors(html, base)
+            });
+        }
+        var results = [];
+        for (var i = 0; i < blocks.length; i++) {
+            var block = blocks[i];
+            for (var j = 0; j < (block.anchors || []).length; j++) {
+                results = results.concat(await resolveCommonExtractorUrl(block.anchors[j].href, trim(block.qualityLabel || label || "M4ULinks"), url, depth + 1));
+            }
+        }
+        return results;
+    }
+
+    async function resolveFilesdlGlobal(url, label, depth) {
+        var html = await getText(url, commonHeaders({ "Referer": baseOrigin(url) + "/" }), true).catch(function () { return ""; });
+        if (!html) return [];
+        var qualityTitle = firstMatch(html, [/<div\b[^>]*class=["'][^"']*title[^"']*["'][^>]*>([\s\S]*?)<\/div>/i]);
+        var quality = qualityFromText(qualityTitle) || qualityFromText(html);
+        var anchors = parseAnchors(html, baseOrigin(url));
+        var results = [];
+        for (var i = 0; i < anchors.length; i++) {
+            var anchor = anchors[i];
+            var text = String(anchor.text || "").toLowerCase();
+            if (/hubcloud|gdfli?x|gofile|filepress|filebee|pixeldrain|drive/i.test(text + " " + anchor.href)) {
+                results = results.concat(await resolveCommonExtractorUrl(anchor.href, label || "FilesDL", url, depth + 1));
+            } else if (/direct download|ultra fastdl|fast cloud/i.test(text)) {
+                var directRes = await request(anchor.href, {
+                    headers: commonHeaders({ "Referer": url }),
+                    allowRedirects: false
+                }).catch(function () { return null; });
+                var location = normalizeResolvedUrl(directRes && (directRes.headers.location || directRes.headers["x-redirect-location"]) || anchor.href, baseOrigin(anchor.href));
+                if (location) results.push(buildResolvedStream(location, label || "FilesDL", quality, {}, qualityTitle || location));
+            }
+        }
+        return results;
+    }
+
     async function resolveMdriveGlobal(url, label, depth) {
         var headers = commonHeaders({ "Referer": baseOrigin(url) + "/" });
         var res = await request(url, { headers: headers, allowRedirects: false }).catch(function () { return null; });
@@ -1145,10 +1243,12 @@
             return [buildResolvedStream(normalized, label || "Source", qualityFromText(label + " " + normalized), commonHeaders(referer ? { "Referer": referer } : {}), normalized)];
         }
         if (/gofile\.io/i.test(normalized)) return resolveGofileGlobal(normalized, label || "GoFile");
+        if (/m4ulinks\.com/i.test(normalized)) return resolveM4uLinksGlobal(normalized, label || "M4ULinks", currentDepth);
+        if (/filesdl\./i.test(normalized)) return resolveFilesdlGlobal(normalized, label || "FilesDL", currentDepth);
         if (/hubcloud\.|hubcloud\.fans|hubcloud\.foo|gamerxyt\.com\/hubcloud\.php/i.test(normalized)) return resolveHubCloudGlobal(normalized, label || "HubCloud");
         if (/hubdrive\./i.test(normalized)) return resolveHubDriveGlobal(normalized, label || "HubDrive", currentDepth);
         if (/filepress\.|filebee/i.test(normalized)) return resolveFilepressGlobal(normalized, label || "Filepress", currentDepth);
-        if (/gdfli?x|gdtot/i.test(normalized)) return resolveGdflixGlobal(normalized, label || "GDFlix", currentDepth);
+        if (/(?:gdfli?x|gdlink|gdtot)/i.test(normalized)) return resolveGdflixGlobal(normalized, label || "GDFlix", currentDepth);
         if (/mdrive\./i.test(normalized)) return resolveMdriveGlobal(normalized, label || "MDrive", currentDepth);
         if (/hdm2\.ink\/play/i.test(normalized)) return resolveHdm2PlayGlobal(normalized, label || "HDMovie2");
         if (/rubystm\.com\/e\/|streamruby\.com\/e\//i.test(normalized)) return resolveRubyStreamGlobal(normalized, label || "RubyStream");
@@ -1916,12 +2016,12 @@
         }
 
         function extractDownloadLinks(html, base) {
-            var section = extractBetweenMarkers(
-                html,
-                /<div\b[^>]*class=["'][^"']*downloads-btns-div[^"']*["'][^>]*>/i,
-                /<\/div>/i
-            );
-            var links = parseAnchors(section, base).map(function (item) { return item.href; }).filter(Boolean);
+            var links = [];
+            var blockRegex = /<div\b[^>]*class=["'][^"']*downloads-btns-div[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi;
+            var match;
+            while ((match = blockRegex.exec(String(html || "")))) {
+                links = links.concat(parseAnchors(match[1], base).map(function (item) { return item.href; }).filter(Boolean));
+            }
             if (links.length) return uniqueBy(links, function (item) { return item; });
             return uniqueBy(parseAnchors(html, base).filter(function (item) {
                 var href = String(item && item.href || "");
@@ -2004,7 +2104,7 @@
         }
 
         function isInterestingExtractorUrl(url) {
-            return /hubcloud|hubdrive|filepress|filebee|gdfli?x|gofile|pixeldrain|m4ulinks|mdrive|googleusercontent|drive\.google|workers\.dev|\.m3u8|\.mp4|\.mpd/i.test(String(url || ""));
+            return /hubcloud|hubdrive|filepress|filebee|gdfli?x|gdlink|gofile|pixeldrain|m4ulinks|mdrive|googleusercontent|drive\.google|workers\.dev|\.m3u8|\.mp4|\.mpd/i.test(String(url || ""));
         }
 
         function normalizeExtractedUrl(rawValue, base) {
@@ -2192,15 +2292,70 @@
             return out;
         }
 
+        async function resolveM4ulinks(url, label) {
+            var html = await getText(url, defaultHeaders({ "Referer": baseOrigin(url) + "/" }), true).catch(function () { return ""; });
+            if (!html) return [];
+            var base = baseOrigin(url);
+            var blocks = [];
+            var regex = /<h4\b[^>]*>([\s\S]*?)<\/h4>([\s\S]*?)(?=<h4\b|$)/gi;
+            var match;
+            while ((match = regex.exec(String(html || "")))) {
+                blocks.push({
+                    qualityLabel: stripTags(match[1]),
+                    anchors: parseAnchors(match[2], base)
+                });
+            }
+            if (!blocks.length) {
+                blocks.push({
+                    qualityLabel: "",
+                    anchors: parseAnchors(html, base)
+                });
+            }
+            var out = [];
+            for (var i = 0; i < blocks.length; i++) {
+                for (var j = 0; j < (blocks[i].anchors || []).length; j++) {
+                    out = out.concat(await resolveExtractorUrl(blocks[i].anchors[j].href, trim(blocks[i].qualityLabel || label || "Movies4u [M4ULinks]")));
+                }
+            }
+            return out;
+        }
+
+        async function resolveFilesdl(url, label) {
+            var html = await getText(url, defaultHeaders({ "Referer": baseOrigin(url) + "/" }), true).catch(function () { return ""; });
+            if (!html) return [];
+            var qualityTitle = firstMatch(html, [/<div\b[^>]*class=["'][^"']*title[^"']*["'][^>]*>([\s\S]*?)<\/div>/i]);
+            var quality = qualityFromText(qualityTitle) || qualityFromText(html);
+            var anchors = parseAnchors(html, baseOrigin(url));
+            var out = [];
+            for (var i = 0; i < anchors.length; i++) {
+                var anchor = anchors[i];
+                var text = String(anchor.text || "").toLowerCase();
+                if (/hubcloud|gdfli?x|gofile|filepress|filebee|pixeldrain|drive/i.test(text + " " + anchor.href)) {
+                    out = out.concat(await resolveExtractorUrl(anchor.href, label || "Movies4u [FilesDL]"));
+                } else if (/direct download|ultra fastdl|fast cloud/i.test(text)) {
+                    var directRes = await request(anchor.href, {
+                        headers: defaultHeaders({ "Referer": url }),
+                        allowRedirects: false
+                    }).catch(function () { return null; });
+                    var location = normalizeExtractedUrl(directRes && (directRes.headers.location || directRes.headers["x-redirect-location"]) || anchor.href, baseOrigin(anchor.href));
+                    if (location) out.push(buildStream(location, label || "Movies4u [FilesDL]", quality, {}, qualityTitle || location));
+                }
+            }
+            return out;
+        }
+
         async function resolveExtractorUrl(url, label) {
             if (!url) return [];
             if (isDirectMediaUrl(url)) return [buildStream(url, label || "Movies4u", qualityFromText(url), {}, url)];
+            if (/m4ulinks\.com/i.test(url)) return resolveM4ulinks(url, label || "Movies4u [M4ULinks]");
+            if (/filesdl\./i.test(url)) return resolveFilesdl(url, label || "Movies4u [FilesDL]");
             if (/gofile\.io/i.test(url)) return resolveGofile(url);
             if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php/i.test(url)) return resolveHubCloud(url);
             if (/hubdrive\./i.test(url)) return resolveHubDrive(url);
             if (/filepress\.|filebee/i.test(url)) return resolveFilepress(url);
-            if (/gdfli?x/i.test(url)) return resolveGdflix(url);
+            if (/(?:gdfli?x|gdlink)/i.test(url)) return resolveGdflix(url);
             if (/mdrive\.ink/i.test(url)) return resolveMdrive(url);
+            if (/vcloud\.zip|fastdl\.zip/i.test(url)) return resolveCommonExtractorUrl(url, label || "Movies4u", url, 0);
 
             var html = await getText(url, defaultHeaders({ "Referer": baseOrigin(url) + "/" }), true).catch(function () { return ""; });
             var candidates = extractInterestingUrls(html, baseOrigin(url)).filter(function (candidate) { return candidate !== url; });
@@ -5100,13 +5255,20 @@
         async function resolveLinksmod(url, quality) {
             var html = await unlockLinksmod(url);
             if (!html) return [];
+            var directMedia = extractDirectMediaUrls(html, url).map(function (streamUrl) {
+                return buildResolvedStream(streamUrl, "Bollyflix [LinksMod]", qualityFromText(streamUrl) || quality, commonHeaders({ "Referer": url }), streamUrl);
+            });
             var anchors = parseAnchors(html, url).filter(function (item) {
                 return /^https?:\/\//i.test(item.href)
                     && baseOrigin(item.href) !== baseOrigin(url)
                     && !/telegram|facebook|instagram|twitter|youtube/i.test(item.href);
             });
-            var streams = [];
+            var streams = directMedia.slice();
             for (var i = 0; i < anchors.length; i++) {
+                if (isCommonDirectMediaUrl(anchors[i].href)) {
+                    streams.push(buildResolvedStream(anchors[i].href, "Bollyflix [LinksMod]", qualityFromText(anchors[i].href) || quality, commonHeaders({ "Referer": url }), anchors[i].href));
+                    continue;
+                }
                 var resolved = await resolveCommonExtractorUrl(anchors[i].href, "Bollyflix", url, 0);
                 streams = streams.concat(resolved);
             }
@@ -5175,15 +5337,26 @@
 
                 if (/DIRECT|FSL V2|CLOUD/i.test(text)) {
                     out.push(buildResolvedStream(href, "Bollyflix [" + trim(text) + "]", quality, commonHeaders(), fileName || text || href));
+                } else if (/instant/i.test(text) || /busycdn/i.test(href)) {
+                    out.push(buildResolvedStream(href, "Bollyflix [InstantDL]" + suffix, quality, commonHeaders({ "Referer": url }), fileName || href));
                 } else if (/FAST CLOUD/i.test(text)) {
                     var fastHtml = await getText(href, commonHeaders({ "Referer": url }), true).catch(function () { return ""; });
                     var directLink = normalizeResolvedUrl(firstMatch(fastHtml, [/<div[^>]*class=["'][^"']*card-body[^"']*["'][\s\S]*?<a[^>]+href=["']([^"']+)["']/i]), baseOrigin(href));
                     if (directLink) {
                         out.push(buildResolvedStream(directLink, "Bollyflix [FastCloud]" + suffix, quality, commonHeaders({ "Referer": href }), fileName || directLink));
                     }
+                } else if (/gofile|mirror/i.test(text) || /goflix\.sbs/i.test(href)) {
+                    out = out.concat(await resolveCommonExtractorUrl(href, "Bollyflix [Mirror]" + suffix, url, 0));
                 } else if (/pixeldrain/i.test(href) || /pixeldrain/i.test(text)) {
                     var fileId = href.split("/").pop();
                     if (fileId) out.push(buildResolvedStream("https://pixeldrain.com/api/file/" + fileId + "?download", "Bollyflix [Pixeldrain]" + suffix, quality, commonHeaders(), fileName || href));
+                }
+            }
+
+            if (!out.length) {
+                var directMedia = extractDirectMediaUrls(html, url);
+                for (var j = 0; j < directMedia.length; j++) {
+                    out.push(buildResolvedStream(directMedia[j], "Bollyflix [Direct]" + (fileSize ? " (" + fileSize + ")" : ""), qualityFromText(fileName || directMedia[j]), commonHeaders({ "Referer": url }), fileName || directMedia[j]));
                 }
             }
 
@@ -5420,6 +5593,106 @@
         };
     })();
 
+    var YflixSource = (function () {
+        var MAIN_URL = "https://yflix.to";
+        var MULTI_DECRYPT_API = "https://enc-dec.app/api";
+        var FLIX_FIND_API = "https://enc-dec.app/db/flix/find";
+
+        async function encryptToken(value) {
+            var json = await getJson(MULTI_DECRYPT_API + "/enc-movies-flix?text=" + encodeURIComponent(String(value || "")), commonHeaders()).catch(function () { return {}; });
+            return trim(String(json && json.result || ""));
+        }
+
+        async function decryptToken(value) {
+            var body = await postJson(MULTI_DECRYPT_API + "/dec-movies-flix", { text: String(value || "") }, commonHeaders()).catch(function () { return ""; });
+            var json = parseJsonSafe(body, {});
+            var result = json && json.result;
+            if (result && typeof result === "object") return trim(String(result.url || ""));
+            return trim(String(result || ""));
+        }
+
+        async function parseHtmlPayload(html) {
+            var body = await postJson(MULTI_DECRYPT_API + "/parse-html", { text: String(html || "") }, commonHeaders()).catch(function () { return "{}"; });
+            var json = parseJsonSafe(body, {});
+            if (json && typeof json === "object") return json;
+            return {};
+        }
+
+        function extractServers(root) {
+            var list = [];
+            var source = root && root.result && root.result.default || {};
+            for (var key in source) {
+                if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+                var item = source[key];
+                var lid = trim(String(item && item.lid || ""));
+                var name = trim(String(item && item.name || key));
+                if (lid && name) list.push({ name: name, lid: lid });
+            }
+            return list;
+        }
+
+        function getEpisodeInfo(entry, media) {
+            var seasons = entry && entry.episodes || {};
+            var seasonKey = String(media.isMovie ? 1 : (media.season || 1));
+            var episodeKey = String(media.isMovie ? 1 : (media.episode || 1));
+            var seasonData = seasons[seasonKey] || seasons[String(Number(seasonKey))] || {};
+            return seasonData[episodeKey] || seasonData[String(Number(episodeKey))] || null;
+        }
+
+        async function resolve(media) {
+            if (!media || media.anime || !media.tmdbId) return [];
+            var rows = await getJson(FLIX_FIND_API + "?tmdb_id=" + encodeURIComponent(String(media.tmdbId)), commonHeaders()).catch(function () { return []; });
+            if (!Array.isArray(rows) || !rows.length) return [];
+            var entry = rows[0] || {};
+            var episodeInfo = getEpisodeInfo(entry, media);
+            if (!episodeInfo || !episodeInfo.eid) return [];
+
+            var encEid = await encryptToken(episodeInfo.eid);
+            if (!encEid) return [];
+            var linksJson = await getJson(MAIN_URL + "/ajax/links/list?eid=" + encodeURIComponent(episodeInfo.eid) + "&_=" + encodeURIComponent(encEid), commonHeaders({
+                "Referer": MAIN_URL + "/" + trim(String(entry && entry.info && entry.info.flix_watch || "")).replace(/^\/+/, "")
+            })).catch(function () { return {}; });
+            var linksHtml = trim(String(linksJson && linksJson.result || ""));
+            if (!linksHtml) return [];
+
+            var parsedLinks = await parseHtmlPayload(linksHtml);
+            var servers = extractServers(parsedLinks);
+            if (!servers.length) return [];
+
+            var out = [];
+            for (var i = 0; i < servers.length; i++) {
+                var server = servers[i];
+                var encLid = await encryptToken(server.lid);
+                if (!encLid) continue;
+                var embedJson = await getJson(MAIN_URL + "/ajax/links/view?id=" + encodeURIComponent(server.lid) + "&_=" + encodeURIComponent(encLid), commonHeaders({
+                    "Referer": MAIN_URL + "/" + trim(String(entry && entry.info && entry.info.flix_watch || "")).replace(/^\/+/, "")
+                })).catch(function () { return {}; });
+                var encryptedEmbed = trim(String(embedJson && embedJson.result || ""));
+                if (!encryptedEmbed) continue;
+
+                var embedUrl = await decryptToken(encryptedEmbed);
+                if (!embedUrl) continue;
+                if (embedUrl.indexOf(MAIN_URL) === 0) {
+                    var iframeHtml = await getText(embedUrl, commonHeaders({ "Referer": MAIN_URL + "/" }), true).catch(function () { return ""; });
+                    embedUrl = normalizeResolvedUrl(firstMatch(iframeHtml, [/<iframe\b[^>]*src=["']([^"']+)["']/i]), baseOrigin(embedUrl)) || embedUrl;
+                }
+
+                var resolved = await resolveCommonExtractorUrl(embedUrl, "Yflix [" + server.name + "]", MAIN_URL + "/", 0);
+                if (!resolved.length && isCommonDirectMediaUrl(embedUrl)) {
+                    resolved = [buildResolvedStream(embedUrl, "Yflix [" + server.name + "]", qualityFromText(embedUrl), commonHeaders({ "Referer": MAIN_URL + "/" }), embedUrl)];
+                }
+                out = out.concat(resolved);
+            }
+            return dedupeStreams(out);
+        }
+
+        return {
+            key: "p_yflix",
+            name: "Yflix",
+            resolve: resolve
+        };
+    })();
+
     var PROVIDERS = [
         CastleSource,
         StreamvixSource,
@@ -5438,7 +5711,8 @@
         AnimePaheSource,
         AnimetsuSource,
         AnimeToshoSource,
-        TokyoInsiderSource
+        TokyoInsiderSource,
+        YflixSource
     ];
 
     async function loadStreams(url, cb) {
@@ -5465,13 +5739,14 @@
                     || provider === Movies4uSource
                     || provider === MoviesDriveExtraSource
                     || provider === BollyflixSource
+                    || provider === YflixSource
                     || provider === HindmoviezSource
                     || provider === HDMovie2Source;
             });
 
-            var settled = await Promise.allSettled(selectedProviders.map(function (provider) {
-                return withTimeout(provider.resolve(media), 15000, provider && provider.name || "Provider");
-            }));
+            var settled = await mapLimit(selectedProviders, SCRAPE_CONCURRENCY, function (provider) {
+                return withTimeout(provider.resolve(media), 30000, provider && provider.name || "Provider");
+            });
             var streams = [];
             for (var i = 0; i < settled.length; i++) {
                 if (settled[i].status !== "fulfilled") continue;
