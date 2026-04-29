@@ -47,6 +47,34 @@
         return [...new Set((arr || []).filter(Boolean))];
     }
 
+    function toBase64Url(text) {
+        const input = String(text || "");
+        const utf8 = [];
+        for (let i = 0; i < input.length; i++) {
+            const code = input.charCodeAt(i);
+            if (code < 0x80) {
+                utf8.push(code);
+            } else if (code < 0x800) {
+                utf8.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+            } else {
+                utf8.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+            }
+        }
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let out = "";
+        for (let i = 0; i < utf8.length; i += 3) {
+            const a = utf8[i];
+            const b = i + 1 < utf8.length ? utf8[i + 1] : 0;
+            const c = i + 2 < utf8.length ? utf8[i + 2] : 0;
+            const triplet = (a << 16) | (b << 8) | c;
+            out += chars[(triplet >> 18) & 63];
+            out += chars[(triplet >> 12) & 63];
+            out += i + 1 < utf8.length ? chars[(triplet >> 6) & 63] : "=";
+            out += i + 2 < utf8.length ? chars[triplet & 63] : "=";
+        }
+        return out.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+    }
+
     function isBlockedBody(body) {
         const text = String(body || "");
         return /just a moment/i.test(text)
@@ -163,7 +191,7 @@
 
     function isCandidateStreamPageUrl(url) {
         const text = String(url || "");
-        return /hshare\.|gdirect\.|hcloud\.|gdtot\.|redirect\.php|file\.php/i.test(text);
+        return /hshare\.|gdirect\.|gdshine\.|hcloud\.|gdtot\.|redirect\.php|file\.php/i.test(text);
     }
 
     async function pooledMap(items, limit, mapper) {
@@ -222,6 +250,65 @@
             }
         }
         throw lastErr;
+    }
+
+    async function postText(url, body, headers = {}) {
+        if (typeof http_post === "function") {
+            let lastErr = null;
+            for (const attempt of [
+                () => http_post(url, headers, body),
+                () => http_post(url, body, headers)
+            ]) {
+                try {
+                    const res = await attempt();
+                    return {
+                        status: res && typeof res.status !== "undefined" ? res.status : 200,
+                        body: res && typeof res.body !== "undefined" ? res.body : "",
+                        headers: res && res.headers ? res.headers : {}
+                    };
+                } catch (e) {
+                    lastErr = e;
+                }
+            }
+            throw lastErr || new Error(`POST failed: ${url}`);
+        }
+        if (typeof fetch === "function") {
+            const res = await fetch(url, { method: "POST", headers, body });
+            return {
+                status: res.status,
+                body: await res.text(),
+                headers: {}
+            };
+        }
+        throw new Error("POST not supported");
+    }
+
+    async function postJson(url, body, headers = {}) {
+        const payload = typeof body === "string" ? body : JSON.stringify(body || {});
+        return postText(url, payload, {
+            "content-type": "application/json",
+            ...headers
+        });
+    }
+
+    function parseJsonSafe(text) {
+        try {
+            return JSON.parse(text);
+        } catch (_) {
+            return null;
+        }
+    }
+
+    async function signHshareUrl(url) {
+        const match = String(url || "").match(/^https?:\/\/hshare\.ink\/\?id=([^&#]+)/i);
+        if (!match) return url;
+        const rawId = decodeURIComponent(match[1]);
+        const encodedId = toBase64Url(rawId);
+        const res = await postText("https://mvlink.site/wp-admin/admin-ajax.php", `action=hindshare_sign&d=${encodeURIComponent(encodedId)}`, {
+            "content-type": "application/x-www-form-urlencoded; charset=UTF-8"
+        });
+        const signedUrl = parseJsonSafe(res.body || "")?.data?.url;
+        return signedUrl || url;
     }
 
     async function fetchFinal(url, maxHops = 5, opts = {}) {
@@ -493,6 +580,32 @@
         if (cached && cached.expiresAt > now) return cached.value;
 
         const job = (async () => {
+            pageUrl = await signHshareUrl(pageUrl);
+
+            if (/gdshine\./i.test(pageUrl)) {
+                const id = String(pageUrl).replace(/[?#].*$/, "").split("/").filter(Boolean).pop();
+                if (id) {
+                    const fileRes = await fetchWithRetry(`https://gdshine.org/api/files/s/${id}`, {
+                        attempts: 2,
+                        ttl: HTTP_CACHE_TTL,
+                        allowBlocked: true
+                    });
+                    const fileData = parseJsonSafe(fileRes.body)?.data;
+                    if (fileData?.id) {
+                        const workerRes = await postJson(`https://gdshine.org/api/downloads/${fileData.id}/via-worker`, {});
+                        const copyUrl = parseJsonSafe(workerRes.body)?.data?.copyUrl;
+                        if (copyUrl && isGoodUrl(copyUrl)) {
+                            return [{
+                                url: copyUrl,
+                                quality: qualityOf(fileData.name),
+                                source: `[Gdshine]${specsLabel(fileData.name)}`.trim(),
+                                headers: {}
+                            }];
+                        }
+                    }
+                }
+            }
+
             const { url: resolvedPageUrl, body } = await fetchFinal(pageUrl, 3, { ttl: HTTP_CACHE_TTL, allowBlocked: true });
             const fileName = parseContainerValue(body, "Name") || stripTags(body.match(/<title>([^<]+)<\/title>/i)?.[1] || "");
             const fileSize = parseContainerValue(body, "Size");
@@ -503,10 +616,13 @@
                 .sort((a, b) => {
                     const score = (text) => {
                         const t = String(text || "").toLowerCase();
-                        if (t.includes("gdirect")) return 0;
-                        if (t.includes("hpage")) return 1;
-                        if (t.includes("gdtot")) return 2;
-                        return 3;
+                        if (t.includes("gdshine")) return 0;
+                        if (t.includes("gd shine")) return 0;
+                        if (t.includes("gdirect")) return 1;
+                        if (t.includes("hpage")) return 2;
+                        if (t.includes("hcloud")) return 2;
+                        if (t.includes("gdtot")) return 3;
+                        return 4;
                     };
                     return score(a.text) - score(b.text);
                 });
