@@ -3,7 +3,7 @@
 
     var DEFAULT_BASE_URL = "https://new1.movies4u.style";
     var DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
-    var TMDB_WORKER_API = "https://wild-surf-4a0d.phisher1.workers.dev";
+    var TMDB_WORKER_API = "https://api.themoviedb.org/3";
     var TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original";
     var TMDB_API = "https://api.themoviedb.org/3";
     var TMDB_WORKER_API_KEY = "1865f43a0549ca50d341dd9ab8b29f49";
@@ -456,13 +456,13 @@
 
     function parseSearchCard(block, base, defaultType) {
         var href = firstMatch(block, [
-            /<h2\b[^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i,
+            /<h3\b[^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i,
             /<h3\b[^>]*class=["'][^"']*entry-title[^"']*["'][^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i
         ]);
         if (!href) return null;
 
         var rawTitle = firstMatch(block, [
-            /<h2\b[^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i,
+            /<h3\b[^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i,
             /<h3\b[^>]*class=["'][^"']*entry-title[^"']*["'][^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i
         ]);
         rawTitle = stripTags(rawTitle);
@@ -572,8 +572,14 @@
     }
 
     function extractStoryline(html) {
-        var match = html.match(/<h3\b[^>]*class=["'][^"']*movie-title[^"']*["'][^>]*>\s*Storyline:\s*<\/h3>\s*<p\b[^>]*>([\s\S]*?)<\/p>/i);
-        return match ? stripTags(match[1]) : "";
+        var regex = /<h3\b[^>]*class=["'][^"']*movie-title[^"']*["'][^>]*>([\s\S]*?)<\/h3>\s*<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+        var match;
+        while ((match = regex.exec(String(html || "")))) {
+            if (stripTags(match[1]).toLowerCase().indexOf("storyline") !== -1) {
+                return stripTags(match[2]);
+            }
+        }
+        return "";
     }
 
     function extractPrimaryHeading(html) {
@@ -606,7 +612,10 @@
             if (!seasonMatch) continue;
             out.push({
                 season: Number(seasonMatch[1]),
-                links: parseAnchors(match[2], base).map(function (item) { return item.href; }).filter(Boolean)
+                links: parseAnchors(match[2], base)
+                    .filter(function (item) { return !/zip/i.test(String(item && item.text || "")); })
+                    .map(function (item) { return item.href; })
+                    .filter(Boolean)
             });
         }
 
@@ -1634,7 +1643,7 @@
                 var meta = episodeMeta[key] || {};
                 var isCompleteSeason = !(meta && meta.title);
                 return new Episode({
-                    name: meta.title || (isCompleteSeason ? ("Complete Season " + season) : ("Episode " + episode)),
+                    name: meta.title || ("Episode " + episode),
                     url: buildLoadPayload(sourceUrl, uniqueBy(episodeLinksMap[key], function (item) { return item; }), {
                         title: title,
                         type: type,
@@ -1643,7 +1652,7 @@
                     }),
                     season: season,
                     episode: episode,
-                    description: meta.overview || (isCompleteSeason ? ("Complete Season " + season) : plot),
+                    description: meta.overview || plot,
                     posterUrl: meta.thumbnail || poster,
                     airDate: meta.released || undefined,
                     score: meta.rating ? Number(Number(meta.rating).toFixed(1)) : undefined,
