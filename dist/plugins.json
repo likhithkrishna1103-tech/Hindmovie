@@ -102,7 +102,7 @@
   {
     "packageName": "com.igris.repo.cinestream",
     "name": "CineStream",
-    "version": 20,
+    "version": 22,
     "baseUrl": "https://cinemeta-catalogs.strem.io",
     "description": "CineMeta-powered catalog with an expanded CineStream source stack, including Stremio, direct OTT mirrors, and embedded stream resolvers.",
     "authors": [
@@ -353,7 +353,7 @@
   {
     "packageName": "com.igris.repo.pulp",
     "name": "Pulp",
-    "version": 1,
+    "version": 2,
     "baseUrl": "https://api.pulp.watch/v1",
     "description": "Fast TMDB-powered movie and series catalog with streams from Pulp.",
     "authors": [
