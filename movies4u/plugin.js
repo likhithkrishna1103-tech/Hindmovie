@@ -495,9 +495,11 @@
     function parseHomeResults(html, base) {
         return extractBlocks(html, "article").map(function (block) {
             var href = firstMatch(block, [
+                /<h3\b[^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i,
                 /<h2\b[^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i
             ]);
             var rawTitle = stripTags(firstMatch(block, [
+                /<h3\b[^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i,
                 /<h2\b[^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i
             ]));
             if (!href || !rawTitle) return null;
