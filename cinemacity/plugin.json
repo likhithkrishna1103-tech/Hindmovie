@@ -1,0 +1,30 @@
+{
+  "packageName": "com.igris.repo.cinemacity",
+  "name": "CinemaCity",
+  "version": 2,
+  "baseUrl": "https://cinemacity.cc",
+  "description": "CinemaCity catalog with PlayerJS stream extraction and language-aware download links.",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "hi",
+    "ta",
+    "te",
+    "ja",
+    "ko",
+    "es",
+    "fr",
+    "de",
+    "ar",
+    "pt",
+    "tr",
+    "it",
+    "pl"
+  ],
+  "categories": [
+    "Movies",
+    "Series"
+  ]
+}
