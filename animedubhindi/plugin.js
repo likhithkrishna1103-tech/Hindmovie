@@ -216,21 +216,11 @@
         if (!/^https?:\/\//.test(value) && value.indexOf("/re.php") !== 0 && value.indexOf("/redirect.php") !== 0) return false;
         if (value.indexOf("desidubanime") !== -1) return false;
         if (value.indexOf("t.me/") !== -1) return false;
-        if (value.indexOf("watch") !== -1 && value.indexOf("hubcloud") === -1) return false;
-        return value.indexOf("hubcloud") !== -1
-            || value.indexOf("hubdrive") !== -1
-            || value.indexOf("hubcdn") !== -1
-            || value.indexOf("gdflix") !== -1
+        if (value.indexOf("watch") !== -1) return false;
+        return value.indexOf("gdflix") !== -1
             || value.indexOf("gdlink") !== -1
-            || value.indexOf("gdtot") !== -1
-            || value.indexOf("fpgo.") !== -1
-            || value.indexOf("pixeldrain") !== -1
-            || value.indexOf("terabox") !== -1
-            || value.indexOf("mega.nz") !== -1
-            || value.indexOf("gofile") !== -1
             || value.indexOf("/re.php") !== -1
-            || value.indexOf("/redirect.php") !== -1
-            || value.indexOf("gadgetsweb") !== -1;
+            || value.indexOf("pixeldrain") !== -1;
     }
 
     function parseLinkGroupsFromHeadingBlocks(html, base) {
@@ -267,42 +257,89 @@
         return groups;
     }
 
-    function parseSeriesEpisodes(html) {
-        var doc = new JsoupLite(html);
-        var out = [];
-        var groups = doc.select("div.wp-block-group");
-        for (var i = 0; i < groups.length; i++) {
-            var group = groups[i];
-            var titleNode = group.find("h2");
-            var titleText = cleanText(titleNode ? titleNode.textContent() : "");
-            if (!/episode/i.test(titleText)) continue;
-            var epMatch = titleText.match(/Episode:\s*0*(\d+)/i);
-            var epNum = epMatch ? parseInt(epMatch[1], 10) : 0;
-            var qualityHint = parseQuality(group.textContent());
+    function parseMixedQualityLinks(blockHtml, base) {
+        var groups = [];
+        var block = String(blockHtml || "");
+        var sectionRe = /((?:2160|1440|1080|720|576|480|360|240)P\b[\s\S]*?)(?=(?:2160|1440|1080|720|576|480|360|240)P\b|Watch\s+online|$)/ig;
+        var match;
+        while ((match = sectionRe.exec(block))) {
+            var segment = match[1];
+            var quality = parseQuality(segment);
+            if (!quality) continue;
             var links = [];
             var seen = {};
-            var anchors = group.select("a");
-            for (var j = 0; j < anchors.length; j++) {
-                var anchor = anchors[j];
-                var url = fixUrl(anchor.attr("href"), LINKS_URL);
-                if (!isUsefulLink(url) || seen[url]) continue;
+            segment.replace(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, function(_, href, text) {
+                var url = fixUrl(href, base || LINKS_URL);
+                if (!isUsefulLink(url) || seen[url]) return _;
                 seen[url] = true;
+                var name = cleanText(stripHtml(text)) || "Link";
                 links.push({
-                    name: cleanText(anchor.textContent()) || "Link",
-                    source: cleanText(anchor.textContent()) || "Link",
+                    name: (name + " " + quality + "p").trim(),
+                    source: name,
                     url: url,
-                    quality: parseQuality(anchor.textContent() + " " + titleText) || qualityHint || undefined
+                    quality: quality
+                });
+                return _;
+            });
+            if (links.length) {
+                groups.push({
+                    name: quality + "p",
+                    quality: quality,
+                    links: links
                 });
             }
-            if (links.length) {
+        }
+        return groups;
+    }
+
+    function parseMovieLinks(html) {
+        var groups = parseLinkGroupsFromHeadingBlocks(html, LINKS_URL);
+        if (groups.length) return groups;
+        var blocks = [];
+        String(html || "").replace(/<div[^>]*class="[^"]*pro-quality-wrapper[^"]*"[^>]*>([\s\S]*?)<\/div>/gi, function(_, body) {
+            blocks = blocks.concat(parseLinkGroupsFromHeadingBlocks(body, LINKS_URL));
+            return _;
+        });
+        return blocks;
+    }
+
+    function parseSeriesEpisodes(html) {
+        var out = [];
+        String(html || "").replace(/<div[^>]*class="[^"]*wp-block-group[^"]*"[^>]*>[\s\S]*?<h2[^>]*>([\s\S]*?)<\/h2>[\s\S]*?<h4[^>]*>([\s\S]*?)<\/h4>[\s\S]*?<\/div>\s*<\/div>/gi, function(_, titleHtml, linksHtml) {
+            var titleText = cleanText(stripHtml(titleHtml));
+            if (!/episode/i.test(titleText)) return _;
+            var epMatch = titleText.match(/Episode:\s*0*(\d+)/i);
+            var epNum = epMatch ? parseInt(epMatch[1], 10) : 0;
+            var linkGroups = [];
+            linkGroups = linkGroups.concat(parseMixedQualityLinks(linksHtml, LINKS_URL));
+            if (!linkGroups.length) {
+                var qualityHint = parseQuality(linksHtml + " " + titleText);
+                var links = [];
+                var seen = {};
+                String(linksHtml || "").replace(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, function(__, href, text) {
+                    var url = fixUrl(href, LINKS_URL);
+                    if (!isUsefulLink(url) || seen[url]) return __;
+                    seen[url] = true;
+                    links.push({
+                        name: cleanText(stripHtml(text)) || "Link",
+                        source: cleanText(stripHtml(text)) || "Link",
+                        url: url,
+                        quality: parseQuality(stripHtml(text) + " " + titleText) || qualityHint || undefined
+                    });
+                    return __;
+                });
+                if (links.length) linkGroups.push({ name: titleText || "Episode", quality: qualityHint || undefined, links: links });
+            }
+            if (linkGroups.length) {
                 out.push(new Episode({
                     name: epNum ? ("Episode " + epNum) : (titleText || "Episode"),
                     season: 1,
                     episode: epNum || undefined,
-                    url: JSON.stringify([{ name: titleText || "Episode", quality: qualityHint || undefined, links: links }])
+                    url: JSON.stringify(linkGroups)
                 }));
             }
-        }
+            return _;
+        });
         return out;
     }
 
@@ -388,7 +425,7 @@
             var linkHtml = String(linkRes && linkRes.body || "");
 
             if (!isSeries) {
-                var groups = parseLinkGroupsFromHeadingBlocks(linkHtml, LINKS_URL);
+                var groups = parseMovieLinks(linkHtml);
                 if (!groups.length) return cb({ success: false, errorCode: "LOAD_ERROR", message: "No movie links found" });
                 return cb({
                     success: true,
@@ -523,52 +560,6 @@
         }
     }
 
-    async function extractHubCloud(url, source, quality) {
-        var results = [];
-        try {
-            var headers = {
-                "User-Agent": UA,
-                "Accept": "*/*",
-                "Cookie": "xla=s4t"
-            };
-            var res = await http_get(url, headers);
-            var html = String(res && res.body || "");
-            if (!html) return results;
-            var next = extractAttr(html.match(/<a[^>]+id="download"[\s\S]*?<\/a>/i)?.[0] || "", "href");
-            if (next) {
-                res = await http_get(fixUrl(next, url), Object.assign({}, headers, { "Referer": url }));
-                html = String(res && res.body || "");
-            }
-            var headerText = stripHtml((html.match(/<div[^>]*class="[^"]*card-header[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] || "");
-            var mergedQuality = quality || parseQuality(headerText) || parseQuality(html);
-            html.replace(/<a[^>]+class="[^"]*\bbtn\b[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, function(_, href, text) {
-                var finalUrl = fixUrl(href, url);
-                var label = cleanText(stripHtml(text)).toLowerCase();
-                if (!finalUrl) return _;
-                var src = source || "HubCloud";
-                if (label.indexOf("buzzserver") !== -1) src += " BuzzServer";
-                else if (label.indexOf("pixel") !== -1) src += " Pixeldrain";
-                else if (label.indexOf("mega") !== -1) src += " Mega";
-                else if (label.indexOf("s3") !== -1) src += " S3";
-                else if (label.indexOf("fslv2") !== -1) src += " FSLv2";
-                else if (label.indexOf("fsl server") !== -1) src += " FSL";
-                else if (label.indexOf("pdl") !== -1) src += " PDL";
-                else if (label.indexOf("download") === -1) src += " " + cleanText(stripHtml(text));
-                if (label.indexOf("buzzserver") !== -1) {
-                    results.push(toStreamResult(finalUrl + "/download", src, mergedQuality, { "User-Agent": UA, "Referer": finalUrl }));
-                } else if (label.indexOf("pixel") !== -1 && /\/u\//.test(finalUrl)) {
-                    results.push(toStreamResult("https://pixeldrain.dev/api/file/" + finalUrl.split("/").pop() + "?download", src, mergedQuality));
-                } else {
-                    results.push(toStreamResult(finalUrl, src, mergedQuality, headers));
-                }
-                return _;
-            });
-            return dedupeStreams(results);
-        } catch (_) {
-            return results;
-        }
-    }
-
     async function extractGdflix(url, source, quality) {
         var results = [];
         try {
@@ -588,10 +579,6 @@
                     results.push(toStreamResult(finalUrl, source + " Instant", mergedQuality));
                 } else if (lower.indexOf("pixel") !== -1 && /\/u\//.test(finalUrl)) {
                     results.push(toStreamResult("https://pixeldrain.dev/api/file/" + finalUrl.split("/").pop() + "?download", source + " Pixeldrain", mergedQuality));
-                } else if (lower.indexOf("gofile") !== -1 || lower.indexOf("multiup") !== -1) {
-                    results.push(toStreamResult(finalUrl, source + " Gofile", mergedQuality));
-                } else if (lower.indexOf("zfile") !== -1 || lower.indexOf("direct") !== -1 || lower.indexOf("cloud") !== -1) {
-                    results.push(toStreamResult(finalUrl, source, mergedQuality));
                 }
                 return _;
             });
@@ -622,33 +609,50 @@
         var source = cleanText(link && link.source || "AnimeDubHindi");
         var quality = parseInt(link && link.quality, 10) || 0;
         if (!url) return [];
-        if (url.indexOf("hubcloud") !== -1 || url.indexOf("hubdrive") !== -1 || url.indexOf("hubcdn") !== -1 || url.indexOf("hubrouting.site") !== -1) {
-            return extractHubCloud(url, source, quality);
-        }
         if (url.indexOf("gdflix") !== -1 || url.indexOf("gdlink") !== -1) {
             return extractGdflix(url, source, quality);
         }
         if (url.indexOf("pixeldrain") !== -1 && /\/u\//.test(url)) {
             return [toStreamResult("https://pixeldrain.dev/api/file/" + url.split("/").pop() + "?download", source, quality)];
         }
-        return [toStreamResult(url, source, quality)];
+        if (url.indexOf("gdmirrorbot.nl") !== -1) {
+            return [toStreamResult(url, source, quality)];
+        }
+        return [];
+    }
+
+    async function mapConcurrent(items, limit, worker) {
+        limit = Math.max(1, parseInt(limit, 10) || 1);
+        var out = new Array(items.length);
+        var index = 0;
+        async function run() {
+            while (index < items.length) {
+                var current = index++;
+                out[current] = await worker(items[current], current);
+            }
+        }
+        var jobs = [];
+        for (var i = 0; i < Math.min(limit, items.length); i++) jobs.push(run());
+        await Promise.all(jobs);
+        return out;
     }
 
     async function loadStreams(data, cb) {
         try {
             var groups = normalizeStreamData(data);
             var queue = buildStreamQueue(groups);
-            var results = [];
-            for (var i = 0; i < queue.length; i++) {
-                var link = queue[i];
+            var batchResults = await mapConcurrent(queue, 4, async function(link) {
                 var resolved = await resolveRedirectUrl(link.url);
-                var streams = await resolveStreamLink({
+                return resolveStreamLink({
                     url: resolved || link.url,
                     source: link.source,
                     quality: link.quality
                 });
-                results = results.concat(streams);
-            }
+            });
+            var results = [];
+            batchResults.forEach(function(streams) {
+                results = results.concat(Array.isArray(streams) ? streams : []);
+            });
             results = dedupeStreams(results).sort(function(a, b) {
                 return (parseInt(b.quality, 10) || 0) - (parseInt(a.quality, 10) || 0);
             });
