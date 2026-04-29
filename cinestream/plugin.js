@@ -796,6 +796,7 @@
     function providerTimeoutMs(provider) {
         var key = provider && provider.key || "";
         if (key === "p_streamvix" || key === "p_notorrent" || key === "p_vidrock" || key === "p_vidsrccc") return 9000;
+        if (key === "p_pulp") return 12000;
         if (key === "p_yflix" || key === "p_flixindia" || key === "p_bollyflix" || key === "p_movies4u" || key === "p_moviesdrive_extra" || key === "p_vegamovies") return 15000;
         return PROVIDER_TIMEOUT_MS;
     }
@@ -5791,6 +5792,71 @@
         };
     })();
 
+    var PulpSource = (function () {
+        var PULP_API = "https://api.pulp.watch/v1";
+        var PULP_REFERER = "https://tv.pulp.watch/";
+        var PULP_PROVIDER = "02moviedownloader";
+
+        function pulpSubtitles(items) {
+            return uniqueBy((items || []).map(function (item) {
+                var url = trim(String(item && item.url || ""));
+                if (!url) return null;
+                var label = trim(String(item && (item.label || item.language) || "Unknown")) || "Unknown";
+                return {
+                    url: url,
+                    name: label
+                };
+            }).filter(Boolean), function (item) {
+                return item.url;
+            });
+        }
+
+        async function resolve(media) {
+            if (!media || !media.tmdbId || media.anime) return [];
+            var apiUrl = media.isMovie
+                ? PULP_API + "/movies/" + encodeURIComponent(String(media.tmdbId)) + "?provider=" + encodeURIComponent(PULP_PROVIDER)
+                : PULP_API + "/tv/" + encodeURIComponent(String(media.tmdbId))
+                    + "/seasons/" + encodeURIComponent(String(media.season || 1))
+                    + "/episodes/" + encodeURIComponent(String(media.episode || 1))
+                    + "?provider=" + encodeURIComponent(PULP_PROVIDER);
+
+            var json = await getJson(apiUrl, commonHeaders({
+                "Accept": "application/json",
+                "Referer": PULP_REFERER,
+                "Origin": "https://tv.pulp.watch"
+            })).catch(function () { return null; });
+            if (!json || !Array.isArray(json.sources) || !json.sources.length) return [];
+
+            var subtitles = pulpSubtitles(json.subtitles || []);
+            return dedupeStreams(json.sources.map(function (source) {
+                var sourceUrl = trim(String(source && source.url || ""));
+                if (!sourceUrl) return null;
+                var provider = source && source.provider || {};
+                var providerName = trim(String(provider.name || provider.id || "Pulp")) || "Pulp";
+                var headers = {};
+                var sourceHeaders = source && source.headers || {};
+                Object.keys(sourceHeaders).forEach(function (key) {
+                    var value = trim(String(sourceHeaders[key] || ""));
+                    if (value) headers[key] = value;
+                });
+                var stream = {
+                    url: sourceUrl,
+                    source: withSimplifiedSource("Pulp [" + providerName + "]", source && source.quality || sourceUrl),
+                    quality: qualityFromText(source && source.quality || sourceUrl) || 0,
+                    headers: headers
+                };
+                if (subtitles.length) stream.subtitles = subtitles;
+                return stream;
+            }).filter(Boolean));
+        }
+
+        return {
+            key: "p_pulp",
+            name: "Pulp",
+            resolve: resolve
+        };
+    })();
+
     var PROVIDERS = [
         CastleSource,
         StreamvixSource,
@@ -5810,7 +5876,8 @@
         AnimetsuSource,
         AnimeToshoSource,
         TokyoInsiderSource,
-        YflixSource
+        YflixSource,
+        PulpSource
     ];
 
     async function loadStreams(url, cb) {
@@ -5819,7 +5886,7 @@
             var anime = !!media.anime;
             var defaultProviders = anime
                 ? [KaidoSource, AnimePaheSource, AnimetsuSource, AnimeToshoSource, TokyoInsiderSource]
-                : [CastleSource, StreamvixSource, NoTorrentSource, FourKhdhubSource, VegaMoviesSource];
+                : [CastleSource, StreamvixSource, NoTorrentSource, FourKhdhubSource, VegaMoviesSource, MoviesDriveExtraSource, PulpSource];
             var providerKeys = [];
             if (Array.isArray(media.providerKeys)) providerKeys = media.providerKeys.slice();
             else if (Array.isArray(media.providers)) providerKeys = media.providers.slice();
