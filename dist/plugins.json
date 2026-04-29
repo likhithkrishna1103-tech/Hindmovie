@@ -164,7 +164,7 @@
   {
     "packageName": "com.igris.repo.hindmoviez",
     "name": "HindMoviez",
-    "version": 8,
+    "version": 9,
     "baseUrl": "https://example.com",
     "description": "Trending movies and series, quickly.",
     "authors": [
@@ -349,6 +349,25 @@
       "Livestream"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztv.sky"
+  },
+  {
+    "packageName": "com.igris.repo.pulp",
+    "name": "Pulp",
+    "version": 1,
+    "baseUrl": "https://api.pulp.watch/v1",
+    "description": "Fast TMDB-powered movie and series catalog with streams from Pulp.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "hi"
+    ],
+    "categories": [
+      "Movies",
+      "Series"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.pulp.sky"
   },
   {
     "packageName": "com.igris.repo.tokyoinsider",
