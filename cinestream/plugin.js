@@ -1,6 +1,15 @@
 (function () {
     "use strict";
 
+    try {
+        if (typeof require === "function") {
+            var eventsModule = require("events");
+            if (eventsModule && typeof eventsModule.defaultMaxListeners === "number" && eventsModule.defaultMaxListeners < 100) {
+                eventsModule.defaultMaxListeners = 100;
+            }
+        }
+    } catch (_) {}
+
     var TMDB_API = "https://api.themoviedb.org/3";
     var TMDB_WORKER_API = "https://wild-surf-4a0d.phisher1.workers.dev";
     var TMDB_API_KEY = "1865f43a0549ca50d341dd9ab8b29f49";
@@ -693,9 +702,41 @@
         return ranked.length ? ranked[0].item : null;
     }
 
+    function rankedMatches(list, queries, year, typeHint, limit) {
+        var ranked = [];
+        for (var i = 0; i < (list || []).length; i++) {
+            var item = list[i];
+            var score = titleScore(item && item.title, queries);
+            if (score <= 0) continue;
+            if (year && item && item.year) {
+                if (String(item.year) === String(year)) score += 18;
+                else if (Math.abs(Number(item.year) - Number(year)) <= 1) score += 8;
+            }
+            if (typeHint && item && item.type && String(item.type) === String(typeHint)) score += 5;
+            ranked.push({ item: item, score: score });
+        }
+        ranked.sort(function (a, b) { return b.score - a.score; });
+        return ranked.slice(0, Math.max(1, Number(limit) || 1)).map(function (entry) {
+            return entry.item;
+        });
+    }
+
+    function isJunkStreamUrl(url) {
+        var value = trim(String(url || ""));
+        if (!value) return true;
+        if (/t\.me\/|telegram|tinyurl\.com|winexch\.com|facebook|instagram|youtube/i.test(value)) return true;
+        if (/hubcloud\.[^/]+\/?(?:$|[?#])/i.test(value)) return true;
+        if (/hubcloud\.foo\/(?:video|drive)\/admin\/?$/i.test(value)) return true;
+        if (/hubrouting\.site\/hubcloud\.php/i.test(value)) return true;
+        if (/filebee\.xyz\/file\//i.test(value)) return true;
+        if (/(?:^|\/\/)[^.]+\.gdtot\.[^/]+\/file\//i.test(value)) return true;
+        if (/vcloud\.zip\/re\.php\?/i.test(value)) return true;
+        return false;
+    }
+
     function dedupeStreams(list) {
         return uniqueBy((list || []).filter(function (item) {
-            return !!(item && item.url);
+            return !!(item && item.url) && !isJunkStreamUrl(item.url);
         }), function (item) {
             return String(item.url) + "|" + JSON.stringify(item.headers || {}) + "|" + String(item.drmKey || "") + "|" + String(item.drmKid || "");
         });
@@ -718,7 +759,10 @@
         ]);
     }
 
-    var SCRAPE_CONCURRENCY = 50;
+    var SCRAPE_CONCURRENCY = 8;
+    var PROVIDER_LINK_CONCURRENCY = 4;
+    var PROVIDER_CANDIDATE_LIMIT = 3;
+    var PROVIDER_TIMEOUT_MS = 15000;
 
     async function mapLimit(list, limit, iteratee) {
         var items = Array.isArray(list) ? list : [];
@@ -747,6 +791,13 @@
         for (var i = 0; i < Math.min(max, items.length); i++) workers.push(worker());
         await Promise.all(workers);
         return results;
+    }
+
+    function providerTimeoutMs(provider) {
+        var key = provider && provider.key || "";
+        if (key === "p_streamvix" || key === "p_notorrent" || key === "p_vidrock" || key === "p_vidsrccc") return 9000;
+        if (key === "p_yflix" || key === "p_flixindia" || key === "p_bollyflix" || key === "p_movies4u" || key === "p_moviesdrive_extra" || key === "p_vegamovies") return 15000;
+        return PROVIDER_TIMEOUT_MS;
     }
 
     var DOMAINS_JSON_URL = "https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json";
@@ -2231,11 +2282,10 @@
                 return candidate !== url && !/hubdrive\./i.test(candidate);
             });
             if (!candidates.length) return [];
-            var resolved = [];
-            for (var i = 0; i < candidates.length; i++) {
-                resolved = resolved.concat(await resolveExtractorUrl(candidates[i], "Movies4u [HubDrive]"));
-            }
-            return resolved;
+            var settled = await mapLimit(candidates.slice(0, 8), PROVIDER_LINK_CONCURRENCY, function (candidate) {
+                return resolveExtractorUrl(candidate, "Movies4u [HubDrive]");
+            });
+            return flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; }));
         }
 
         async function resolveFilepress(url) {
@@ -2249,11 +2299,10 @@
             var html = await getText(url, headers, true).catch(function () { return ""; });
             var candidates = extractInterestingUrls(html, baseOrigin(url));
             if (!candidates.length) return [];
-            var out = [];
-            for (var i = 0; i < candidates.length; i++) {
-                out = out.concat(await resolveExtractorUrl(candidates[i], "Movies4u [Filepress]"));
-            }
-            return out;
+            var settled = await mapLimit(candidates.slice(0, 8), PROVIDER_LINK_CONCURRENCY, function (candidate) {
+                return resolveExtractorUrl(candidate, "Movies4u [Filepress]");
+            });
+            return flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; }));
         }
 
         async function resolveGdflix(url) {
@@ -2265,14 +2314,12 @@
                 if (/download|instant|gofile|pixeldrain|drivebot|index/i.test(String(anchors[i].text || ""))) candidates.push(anchors[i].href);
             }
             if (!candidates.length) candidates = extractInterestingUrls(html, baseOrigin(url));
-            var out = [];
-            for (var j = 0; j < candidates.length; j++) {
-                var candidate = candidates[j];
-                if (/gofile/i.test(candidate)) out = out.concat(await resolveGofile(candidate));
-                else if (/pixeldrain/i.test(candidate)) out.push(buildStream(candidate, "Movies4u [GDFlix]", qualityFromText(candidate), {}, candidate));
-                else out = out.concat(await resolveExtractorUrl(candidate, "Movies4u [GDFlix]"));
-            }
-            return out;
+            var settled = await mapLimit(candidates.slice(0, 10), PROVIDER_LINK_CONCURRENCY, async function (candidate) {
+                if (/gofile/i.test(candidate)) return resolveGofile(candidate);
+                if (/pixeldrain/i.test(candidate)) return [buildStream(candidate, "Movies4u [GDFlix]", qualityFromText(candidate), {}, candidate)];
+                return resolveExtractorUrl(candidate, "Movies4u [GDFlix]");
+            });
+            return flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; }));
         }
 
         async function resolveMdrive(url) {
@@ -2285,11 +2332,10 @@
                 return candidate !== url;
             });
             if (!candidates.length) return [];
-            var out = [];
-            for (var i = 0; i < candidates.length; i++) {
-                out = out.concat(await resolveExtractorUrl(candidates[i], "Movies4u [MDrive]"));
-            }
-            return out;
+            var settled = await mapLimit(candidates.slice(0, 8), PROVIDER_LINK_CONCURRENCY, function (candidate) {
+                return resolveExtractorUrl(candidate, "Movies4u [MDrive]");
+            });
+            return flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; }));
         }
 
         async function resolveM4ulinks(url, label) {
@@ -2311,13 +2357,19 @@
                     anchors: parseAnchors(html, base)
                 });
             }
-            var out = [];
+            var tasks = [];
             for (var i = 0; i < blocks.length; i++) {
                 for (var j = 0; j < (blocks[i].anchors || []).length; j++) {
-                    out = out.concat(await resolveExtractorUrl(blocks[i].anchors[j].href, trim(blocks[i].qualityLabel || label || "Movies4u [M4ULinks]")));
+                    tasks.push({
+                        href: blocks[i].anchors[j].href,
+                        label: trim(blocks[i].qualityLabel || label || "Movies4u [M4ULinks]")
+                    });
                 }
             }
-            return out;
+            var settled = await mapLimit(tasks.slice(0, 12), PROVIDER_LINK_CONCURRENCY, function (task) {
+                return resolveExtractorUrl(task.href, task.label);
+            });
+            return flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; }));
         }
 
         async function resolveFilesdl(url, label) {
@@ -2326,22 +2378,22 @@
             var qualityTitle = firstMatch(html, [/<div\b[^>]*class=["'][^"']*title[^"']*["'][^>]*>([\s\S]*?)<\/div>/i]);
             var quality = qualityFromText(qualityTitle) || qualityFromText(html);
             var anchors = parseAnchors(html, baseOrigin(url));
-            var out = [];
-            for (var i = 0; i < anchors.length; i++) {
-                var anchor = anchors[i];
+            var settled = await mapLimit(anchors.slice(0, 10), PROVIDER_LINK_CONCURRENCY, async function (anchor) {
                 var text = String(anchor.text || "").toLowerCase();
                 if (/hubcloud|gdfli?x|gofile|filepress|filebee|pixeldrain|drive/i.test(text + " " + anchor.href)) {
-                    out = out.concat(await resolveExtractorUrl(anchor.href, label || "Movies4u [FilesDL]"));
-                } else if (/direct download|ultra fastdl|fast cloud/i.test(text)) {
+                    return resolveExtractorUrl(anchor.href, label || "Movies4u [FilesDL]");
+                }
+                if (/direct download|ultra fastdl|fast cloud/i.test(text)) {
                     var directRes = await request(anchor.href, {
                         headers: defaultHeaders({ "Referer": url }),
                         allowRedirects: false
                     }).catch(function () { return null; });
                     var location = normalizeExtractedUrl(directRes && (directRes.headers.location || directRes.headers["x-redirect-location"]) || anchor.href, baseOrigin(anchor.href));
-                    if (location) out.push(buildStream(location, label || "Movies4u [FilesDL]", quality, {}, qualityTitle || location));
+                    return location ? [buildStream(location, label || "Movies4u [FilesDL]", quality, {}, qualityTitle || location)] : [];
                 }
-            }
-            return out;
+                return [];
+            });
+            return flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; }));
         }
 
         async function resolveExtractorUrl(url, label) {
@@ -2360,83 +2412,91 @@
             var html = await getText(url, defaultHeaders({ "Referer": baseOrigin(url) + "/" }), true).catch(function () { return ""; });
             var candidates = extractInterestingUrls(html, baseOrigin(url)).filter(function (candidate) { return candidate !== url; });
             if (!candidates.length) return [];
-            var out = [];
-            for (var i = 0; i < candidates.length; i++) {
-                out = out.concat(await resolveExtractorUrl(candidates[i], label || "Movies4u"));
-            }
-            return out;
+            var settled = await mapLimit(candidates.slice(0, 8), PROVIDER_LINK_CONCURRENCY, function (candidate) {
+                return resolveExtractorUrl(candidate, label || "Movies4u");
+            });
+            return flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; }));
         }
 
         async function searchTitles(queries) {
             var mainUrl = await getMainUrl();
-            var out = [];
-            for (var i = 0; i < queries.length; i++) {
-                var query = trim(queries[i]);
-                if (!query) continue;
+            var settled = await mapLimit((queries || []).filter(Boolean), 3, async function (query) {
                 try {
-                    var html = await getText(mainUrl + "/?s=" + encodeURIComponent(query), defaultHeaders({ "Referer": mainUrl + "/" }));
-                    out = parseSearchResults(html, mainUrl);
+                    var html = await getText(mainUrl + "/?s=" + encodeURIComponent(trim(query)), defaultHeaders({ "Referer": mainUrl + "/" }));
+                    return parseSearchResults(html, mainUrl);
                 } catch (_) {
-                    out = [];
+                    return [];
                 }
-                if (out.length) break;
+            });
+            var out = [];
+            for (var i = 0; i < settled.length; i++) {
+                if (settled[i] && settled[i].status === "fulfilled" && settled[i].value && settled[i].value.length) {
+                    out = out.concat(settled[i].value);
+                }
             }
-            return out;
+            return uniqueBy(out, function (item) { return item && item.url; });
         }
 
         async function resolve(media) {
             var queries = uniqueBy([media.title, media.originalTitle], function (item) { return normalizeTitle(item); }).filter(Boolean);
             var results = await searchTitles(queries);
-            var match = bestMatch(results, queries, media.year, media.isMovie ? "movie" : null);
+            var candidates = rankedMatches(results, queries, media.year, media.isMovie ? "movie" : null, PROVIDER_CANDIDATE_LIMIT);
             if (!media.isMovie && Number(media.season)) {
                 for (var r = 0; r < results.length; r++) {
                     var text = String((results[r] && results[r].title) || "");
                     if (new RegExp("Season\\s*" + media.season + "\\b", "i").test(text) || new RegExp("\\bS0*" + media.season + "\\b", "i").test(text)) {
-                        match = results[r];
+                        candidates.unshift(results[r]);
                         break;
                     }
                 }
             }
-            if (!match) return [];
-            var html = await getText(match.url, defaultHeaders({ "Referer": (await getMainUrl()) + "/" }), true).catch(function () { return ""; });
-            if (!html) return [];
+            candidates = uniqueBy(candidates.filter(Boolean), function (item) { return item && item.url; });
+            if (!candidates.length) return [];
 
-            var links = [];
-            if (media.isMovie) {
-                links = extractDownloadLinks(html, baseOrigin(match.url));
-            } else {
-                var seasons = getSeasonSections(html, baseOrigin(match.url));
-                for (var i = 0; i < seasons.length; i++) {
-                    if (Number(seasons[i].season) !== Number(media.season)) continue;
-                    for (var j = 0; j < seasons[i].links.length; j++) {
-                        var seasonUrl = seasons[i].links[j];
-                        var seasonHtml = await getText(seasonUrl, defaultHeaders({ "Referer": match.url }), true).catch(function () { return ""; });
-                        var blocks = getEpisodeBlocks(seasonHtml, baseOrigin(seasonUrl));
-                        for (var k = 0; k < blocks.length; k++) {
-                            if (Number(blocks[k].episode) === Number(media.episode)) {
-                                links = links.concat(blocks[k].links);
+            var settled = await mapLimit(candidates, 2, async function (match) {
+                var html = await getText(match.url, defaultHeaders({ "Referer": (await getMainUrl()) + "/" }), true).catch(function () { return ""; });
+                if (!html) return [];
+
+                var links = [];
+                if (media.isMovie) {
+                    links = extractDownloadLinks(html, baseOrigin(match.url));
+                } else {
+                    var seasons = getSeasonSections(html, baseOrigin(match.url)).filter(function (row) {
+                        return Number(row && row.season) === Number(media.season);
+                    });
+                    var seasonSettled = await mapLimit(seasons, 2, async function (seasonRow) {
+                        var pages = await mapLimit((seasonRow.links || []).slice(0, 4), 2, async function (seasonUrl) {
+                            var seasonHtml = await getText(seasonUrl, defaultHeaders({ "Referer": match.url }), true).catch(function () { return ""; });
+                            if (!seasonHtml) return [];
+                            var seasonLinks = [];
+                            var blocks = getEpisodeBlocks(seasonHtml, baseOrigin(seasonUrl));
+                            for (var k = 0; k < blocks.length; k++) {
+                                if (Number(blocks[k].episode) === Number(media.episode)) seasonLinks = seasonLinks.concat(blocks[k].links || []);
                             }
-                        }
-                        if (!blocks.length) {
-                            var fallbackAnchors = parseAnchors(seasonHtml, baseOrigin(seasonUrl)).filter(function (item) {
-                                var text = String(item && item.text || "");
-                                return !!(item && item.href) && /episode|ep\.?|e\d+/i.test(text);
-                            });
-                            for (var m = 0; m < fallbackAnchors.length; m++) {
-                                var epMatch = firstMatch(fallbackAnchors[m].text, [/\bEpisode\s*(\d+)/i, /\bEp\.?\s*(\d+)/i, /\bE(\d+)\b/i]);
-                                if (Number(epMatch) === Number(media.episode)) links.push(fallbackAnchors[m].href);
+                            if (!blocks.length) {
+                                var fallbackAnchors = parseAnchors(seasonHtml, baseOrigin(seasonUrl)).filter(function (item) {
+                                    var text = String(item && item.text || "");
+                                    return !!(item && item.href) && /episode|ep\.?|e\d+/i.test(text);
+                                });
+                                for (var m = 0; m < fallbackAnchors.length; m++) {
+                                    var epMatch = firstMatch(fallbackAnchors[m].text, [/\bEpisode\s*(\d+)/i, /\bEp\.?\s*(\d+)/i, /\bE(\d+)\b/i]);
+                                    if (Number(epMatch) === Number(media.episode)) seasonLinks.push(fallbackAnchors[m].href);
+                                }
                             }
-                        }
-                    }
+                            return seasonLinks;
+                        });
+                        return flatten(pages.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; }));
+                    });
+                    links = flatten(seasonSettled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; }));
                 }
-            }
 
-            links = uniqueBy(links, function (item) { return item; });
-            var out = [];
-            for (var x = 0; x < links.length; x++) {
-                out = out.concat(await resolveExtractorUrl(links[x], "Movies4u"));
-            }
-            return dedupeStreams(out);
+                links = uniqueBy(links, function (item) { return item; }).slice(0, 12);
+                var linkSettled = await mapLimit(links, PROVIDER_LINK_CONCURRENCY, function (link) {
+                    return resolveExtractorUrl(link, "Movies4u");
+                });
+                return dedupeStreams(flatten(linkSettled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; })));
+            });
+            return dedupeStreams(flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; })));
         }
 
         return {
@@ -4144,10 +4204,10 @@
                 trim(String(media.originalTitle || ""))
             ], function (item) { return normalizeTitle(item); }).filter(Boolean);
 
-            for (var i = 0; i < titles.length; i++) {
+            var settled = await mapLimit(titles, 3, async function (title) {
                 var form = "action=search"
                     + "&csrf_token=" + encodeURIComponent(ctx.csrfToken)
-                    + "&q=" + encodeURIComponent(titles[i]);
+                    + "&q=" + encodeURIComponent(title);
                 var res = await request(ctx.mainUrl + "/", {
                     method: "POST",
                     body: form,
@@ -4157,7 +4217,7 @@
                     allowRedirects: true
                 }).catch(function () { return null; });
                 var json = res ? parseJsonSafe(res.body, null) : null;
-                var rows = parseJsonResultsRows(json).map(function (item) {
+                return parseJsonResultsRows(json).map(function (item) {
                     var href = trim(String(item && (item.url || item.link || item.href) || ""));
                     var title = trim(String(item && (item.title || item.name || item.label) || ""));
                     return href ? {
@@ -4167,8 +4227,10 @@
                         type: /series|season|episode|tv/i.test(title + " " + href) ? "series" : "movie"
                     } : null;
                 }).filter(Boolean);
-                if (rows.length) return { rows: rows, ctx: ctx };
-            }
+            });
+            var rows = flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; }));
+            rows = uniqueBy(rows, function (item) { return item && item.url; });
+            if (rows.length) return { rows: rows, ctx: ctx };
             return { rows: [], ctx: ctx };
         }
 
@@ -4185,10 +4247,10 @@
             var html = await getText(url, commonHeaders({ "Referer": referer || (baseOrigin(url) + "/") }), true).catch(function () { return ""; });
             if (!html) return [];
             var links = extractExternalSourceLinks(html, url);
-            var out = [];
-            for (var i = 0; i < links.length; i++) {
-                out = out.concat(await resolveCommonExtractorUrl(links[i].url, "FlixIndia", url, 0));
-            }
+            var settled = await mapLimit(links.slice(0, 8), PROVIDER_LINK_CONCURRENCY, function (link) {
+                return resolveCommonExtractorUrl(link.url, "FlixIndia", url, 0);
+            });
+            var out = flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; }));
             for (var j = 0; j < out.length; j++) {
                 out[j].source = withSimplifiedSource(out[j].source || "FlixIndia", links[0] && (links[0].label || links[0].url) || url);
             }
@@ -4202,9 +4264,12 @@
             var ctx = search.ctx || {};
             if (!rows.length) return [];
             var queries = uniqueBy([media.title, media.originalTitle], function (item) { return normalizeTitle(item); }).filter(Boolean);
-            var match = bestMatch(rows, queries, media.year, media.isMovie ? "movie" : null) || rows[0];
-            if (!match || !match.url) return [];
-            return resolveResultPage(match.url, (ctx.mainUrl || "") + "/");
+            var matches = rankedMatches(rows, queries, media.year, media.isMovie ? "movie" : null, PROVIDER_CANDIDATE_LIMIT);
+            if (!matches.length) matches = rows.slice(0, PROVIDER_CANDIDATE_LIMIT);
+            var settled = await mapLimit(matches, 2, function (match) {
+                return resolveResultPage(match.url, (ctx.mainUrl || "") + "/");
+            });
+            return dedupeStreams(flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; })));
         }
 
         return {
@@ -4395,21 +4460,24 @@
                 return normalizeTitle(item);
             }).filter(Boolean);
             var rows = await searchTitles(queries);
-            var match = bestMatch(rows, queries, media.year, media.isMovie ? "movie" : "series");
-            if (!match || !match.url) return [];
-            var pageHtml = await getText(match.url, headers({ "Referer": (await getMainUrl()) + "/" }), true).catch(function () { return ""; });
-            if (!pageHtml) return [];
+            var matches = rankedMatches(rows, queries, media.year, media.isMovie ? "movie" : "series", PROVIDER_CANDIDATE_LIMIT);
+            if (!matches.length) return [];
+            var settled = await mapLimit(matches, 2, async function (match) {
+                if (!match || !match.url) return [];
+                var pageHtml = await getText(match.url, headers({ "Referer": (await getMainUrl()) + "/" }), true).catch(function () { return ""; });
+                if (!pageHtml) return [];
 
-            var links = media.isMovie
-                ? parseMovieLinks(pageHtml, match.url)
-                : parseEpisodeLinks(pageHtml, match.url, media.season, media.episode);
-            if (!links.length) return [];
+                var links = media.isMovie
+                    ? parseMovieLinks(pageHtml, match.url)
+                    : parseEpisodeLinks(pageHtml, match.url, media.season, media.episode);
+                if (!links.length) return [];
 
-            var streams = [];
-            for (var i = 0; i < links.length; i++) {
-                streams = streams.concat(await resolveLinkRow(links[i], match.url));
-            }
-            return dedupeStreams(streams);
+                var resolved = await mapLimit(links.slice(0, 10), PROVIDER_LINK_CONCURRENCY, function (link) {
+                    return resolveLinkRow(link, match.url);
+                });
+                return dedupeStreams(flatten(resolved.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; })));
+            });
+            return dedupeStreams(flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; })));
         }
 
         return {
@@ -4877,6 +4945,7 @@
 
         async function searchTitles(queries) {
             var mainUrl = await getMainUrl();
+            var out = [];
             for (var i = 0; i < queries.length; i++) {
                 var query = trim(queries[i]);
                 if (!query) continue;
@@ -4886,10 +4955,10 @@
                         "Referer": mainUrl + "/search.html?q=" + encodeURIComponent(query)
                     }));
                     var results = parseSearchRows(json, mainUrl);
-                    if (results.length) return results;
+                    if (results.length) out = out.concat(results);
                 } catch (_) {}
             }
-            return [];
+            return uniqueBy(out, function (item) { return item && item.url; });
         }
 
         function isSeriesTitle(title) {
@@ -4945,10 +5014,10 @@
                 var text = stripTags(match[4] || "");
                 if (!/\bbtn\b/i.test(className)) continue;
                 if (/fsl server|fslv2|download file|s3 server|mega server|10gbps/i.test(text)) {
-                    out.push(buildResolvedStream(href, "MoviesDrive", quality, commonHeaders(), button.text || href));
+                    out.push(buildResolvedStream(href, "MoviesDrive", quality, commonHeaders(), text || href));
                 } else if (/pixeldrain|pixel server/i.test(text)) {
                     var pixelId = firstMatch(href, [/\/u\/([A-Za-z0-9]+)/i]);
-                    if (pixelId) out.push(buildResolvedStream("https://pixeldrain.com/api/file/" + pixelId + "?download", "MoviesDrive", quality, commonHeaders(), button.text || href));
+                    if (pixelId) out.push(buildResolvedStream("https://pixeldrain.com/api/file/" + pixelId + "?download", "MoviesDrive", quality, commonHeaders(), text || href));
                 }
             }
             return dedupeStreams(out);
@@ -4985,17 +5054,15 @@
         async function collectLinkRows(media, match, html) {
             var buttons = parseButtonRows(html, match.url);
             var isSeries = !media.isMovie || isSeriesTitle(match.title);
-            var collected = [];
-
-            for (var i = 0; i < buttons.length; i++) {
-                var button = buttons[i];
+            var settled = await mapLimit(buttons.slice(0, 8), 3, async function (button) {
                 var season = seasonFromText(button.text, media.season || 1);
-                if (isSeries && media.season && season !== Number(media.season)) continue;
+                if (isSeries && media.season && season !== Number(media.season)) return [];
 
                 var pageHtml = await getText(button.url, commonHeaders({ "Referer": match.url }), true).catch(function () { return ""; });
-                if (!pageHtml) continue;
+                if (!pageHtml) return [];
                 var links = parseLinkRowsWithContext(pageHtml, button.url);
-                if (!links.length) continue;
+                if (!links.length) return [];
+                var collected = [];
 
                 if (!isSeries) {
                     for (var j = 0; j < links.length; j++) {
@@ -5008,7 +5075,7 @@
                             label: button.text || match.title
                         });
                     }
-                    continue;
+                    return collected;
                 }
 
                 for (var k = 0; k < links.length; k++) {
@@ -5023,7 +5090,9 @@
                         label: button.text || row.text || match.title
                     });
                 }
-            }
+                return collected;
+            });
+            var collected = flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; }));
 
             if (!collected.length) {
                 var fallbackRows = extractExternalSourceLinks(html, match.url);
@@ -5088,33 +5157,30 @@
 
         async function resolve(media) {
             if (media.anime) return [];
-            var queries = uniqueBy([media.imdbId, media.title, media.originalTitle], function (item) {
+            var queries = uniqueBy([media.title, media.originalTitle, media.imdbId], function (item) {
                 return trim(String(item || "").toLowerCase());
             }).filter(Boolean);
             var rows = await searchTitles(queries);
-            var match = null;
+            var matches = [];
             if (media.imdbId) {
-                for (var i = 0; i < rows.length; i++) {
-                    if (trim(rows[i].imdbId) === trim(media.imdbId)) {
-                        match = rows[i];
-                        break;
-                    }
-                }
+                matches = rows.filter(function (row) {
+                    return trim(row && row.imdbId) === trim(media.imdbId);
+                });
             }
-            if (!match) match = bestMatch(rows, queries, media.year, media.isMovie ? "movie" : null);
-            if (!match || !match.url) return [];
-            var html = await getText(match.url, commonHeaders({ "Referer": (await getMainUrl()) + "/" }), true).catch(function () { return ""; });
-            if (!html) return [];
+            if (!matches.length) matches = rankedMatches(rows, queries, media.year, media.isMovie ? "movie" : null, PROVIDER_CANDIDATE_LIMIT);
+            matches = uniqueBy(matches.filter(Boolean), function (item) { return item && item.url; });
+            if (!matches.length) return [];
 
-            var links = await collectLinkRows(media, match, html);
-            var streams = [];
-            for (var j = 0; j < links.length; j++) {
-                var resolved = await resolveCollectedLink(links[j], match.url);
-                for (var k = 0; k < resolved.length; k++) {
-                    streams.push(resolved[k]);
-                }
-            }
-            return dedupeStreams(streams);
+            var settled = await mapLimit(matches, 2, async function (match) {
+                var html = await getText(match.url, commonHeaders({ "Referer": (await getMainUrl()) + "/" }), true).catch(function () { return ""; });
+                if (!html) return [];
+                var links = await collectLinkRows(media, match, html);
+                var resolvedRows = await mapLimit(links.slice(0, 10), PROVIDER_LINK_CONCURRENCY, function (link) {
+                    return resolveCollectedLink(link, match.url);
+                });
+                return dedupeStreams(flatten(resolvedRows.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; })));
+            });
+            return dedupeStreams(flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; })));
         }
 
         return {
@@ -5134,6 +5200,7 @@
         }
 
         async function bypassSidexfee(url) {
+            if (!/sidexfee\.com/i.test(String(url || ""))) return trim(String(url || ""));
             var id = firstMatch(String(url || ""), [/[?&]id=([^&#]+)/i]);
             if (!id) return trim(String(url || ""));
             var res = await getText("https://web.sidexfee.com/?id=" + encodeURIComponent(id), commonHeaders()).catch(function () { return ""; });
@@ -5159,6 +5226,7 @@
 
         async function searchTitles(queries) {
             var mainUrl = await getMainUrl();
+            var out = [];
             for (var i = 0; i < queries.length; i++) {
                 var query = trim(queries[i]);
                 if (!query) continue;
@@ -5170,11 +5238,11 @@
                     try {
                         var html = await getText(urls[j], commonHeaders({ "Referer": mainUrl + "/" }), true);
                         var results = parseWpArticleResults(html, mainUrl);
-                        if (results.length) return results;
+                        if (results.length) out = out.concat(results);
                     } catch (_) {}
                 }
             }
-            return [];
+            return uniqueBy(out, function (item) { return item && item.url; });
         }
 
         function parseClassAnchors(html, base, classPattern) {
@@ -5264,20 +5332,18 @@
                     && !/telegram|facebook|instagram|twitter|youtube/i.test(item.href);
             });
             var streams = directMedia.slice();
-            for (var i = 0; i < anchors.length; i++) {
-                if (isCommonDirectMediaUrl(anchors[i].href)) {
-                    streams.push(buildResolvedStream(anchors[i].href, "Bollyflix [LinksMod]", qualityFromText(anchors[i].href) || quality, commonHeaders({ "Referer": url }), anchors[i].href));
-                    continue;
+            var settled = await mapLimit(anchors.slice(0, 10), PROVIDER_LINK_CONCURRENCY, async function (anchor) {
+                if (isCommonDirectMediaUrl(anchor.href)) {
+                    return [buildResolvedStream(anchor.href, "Bollyflix [LinksMod]", qualityFromText(anchor.href) || quality, commonHeaders({ "Referer": url }), anchor.href)];
                 }
-                var resolved = await resolveCommonExtractorUrl(anchors[i].href, "Bollyflix", url, 0);
-                streams = streams.concat(resolved);
-            }
+                return resolveCommonExtractorUrl(anchor.href, "Bollyflix", url, 0);
+            });
+            streams = streams.concat(flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; })));
             if (!streams.length) {
-                for (var j = 0; j < anchors.length; j++) {
-                    if (/gofile/i.test(anchors[j].href)) {
-                        streams = streams.concat(await resolveGofileGlobal(anchors[j].href, "Bollyflix"));
-                    }
-                }
+                var gofileSettled = await mapLimit(anchors.filter(function (anchor) { return /gofile/i.test(anchor.href); }).slice(0, 6), 3, function (anchor) {
+                    return resolveGofileGlobal(anchor.href, "Bollyflix");
+                });
+                streams = streams.concat(flatten(gofileSettled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; })));
             }
             for (var k = 0; k < streams.length; k++) {
                 if (!streams[k].quality) streams[k].quality = quality;
@@ -5290,22 +5356,20 @@
             var buttons = parseClassAnchors(html, baseUrl, /(maxbutton|dl|btnn)/i).filter(function (item) {
                 return /(download|links|view|click)/i.test(String(item.text || ""));
             });
-            var out = [];
-
-            for (var i = 0; i < buttons.length; i++) {
-                var button = buttons[i];
+            var settled = await mapLimit(buttons.slice(0, 8), 3, async function (button) {
                 var season = extractEpisodeNumber(button.text, extractLastSeason(String(html || "").slice(Math.max(0, button.index - 800), button.index)));
-                if (media.season && season !== Number(media.season)) continue;
+                if (media.season && season !== Number(media.season)) return [];
 
                 var resolvedButtonUrl = await bypassSidexfee(button.href);
-                if (!resolvedButtonUrl || !/^https?:\/\//i.test(resolvedButtonUrl)) continue;
+                if (!resolvedButtonUrl || !/^https?:\/\//i.test(resolvedButtonUrl)) return [];
                 var pageHtml = await getText(resolvedButtonUrl, commonHeaders({ "Referer": baseUrl }), true).catch(function () { return ""; });
-                if (!pageHtml) continue;
+                if (!pageHtml) return [];
                 var anchors = parseAnchors(pageHtml, resolvedButtonUrl).filter(function (item) {
                     var text = String(item.text || "").toLowerCase();
                     return /^https?:\/\//i.test(item.href) && text.indexOf("zip") === -1 && text.indexOf("elinks") === -1;
                 });
 
+                var out = [];
                 for (var j = 0; j < anchors.length; j++) {
                     var epNum = extractEpisodeNumber(anchors[j].text, j + 1);
                     if (media.episode && epNum !== Number(media.episode)) continue;
@@ -5315,9 +5379,10 @@
                         label: button.text || anchors[j].text
                     });
                 }
-            }
+                return out;
+            });
 
-            return uniqueBy(out, function (item) { return item.url + "|" + item.quality; });
+            return uniqueBy(flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; })), function (item) { return item.url + "|" + item.quality; });
         }
 
         async function resolveBollyflixGdflix(url) {
@@ -5328,30 +5393,32 @@
             var anchors = parseAnchors(html, baseOrigin(url));
             var out = [];
 
-            for (var i = 0; i < anchors.length; i++) {
-                var text = String(anchors[i].text || "");
-                var href = trim(anchors[i].href || "");
-                if (!href) continue;
+            var settled = await mapLimit(anchors.slice(0, 10), PROVIDER_LINK_CONCURRENCY, async function (anchor) {
+                var text = String(anchor.text || "");
+                var href = trim(anchor.href || "");
+                if (!href) return [];
                 var quality = qualityFromText(fileName || text || href);
                 var suffix = fileSize ? " (" + fileSize + ")" : "";
 
                 if (/DIRECT|FSL V2|CLOUD/i.test(text)) {
-                    out.push(buildResolvedStream(href, "Bollyflix [" + trim(text) + "]", quality, commonHeaders(), fileName || text || href));
+                    return [buildResolvedStream(href, "Bollyflix [" + trim(text) + "]", quality, commonHeaders(), fileName || text || href)];
                 } else if (/instant/i.test(text) || /busycdn/i.test(href)) {
-                    out.push(buildResolvedStream(href, "Bollyflix [InstantDL]" + suffix, quality, commonHeaders({ "Referer": url }), fileName || href));
+                    return [buildResolvedStream(href, "Bollyflix [InstantDL]" + suffix, quality, commonHeaders({ "Referer": url }), fileName || href)];
                 } else if (/FAST CLOUD/i.test(text)) {
                     var fastHtml = await getText(href, commonHeaders({ "Referer": url }), true).catch(function () { return ""; });
                     var directLink = normalizeResolvedUrl(firstMatch(fastHtml, [/<div[^>]*class=["'][^"']*card-body[^"']*["'][\s\S]*?<a[^>]+href=["']([^"']+)["']/i]), baseOrigin(href));
                     if (directLink) {
-                        out.push(buildResolvedStream(directLink, "Bollyflix [FastCloud]" + suffix, quality, commonHeaders({ "Referer": href }), fileName || directLink));
+                        return [buildResolvedStream(directLink, "Bollyflix [FastCloud]" + suffix, quality, commonHeaders({ "Referer": href }), fileName || directLink)];
                     }
                 } else if (/gofile|mirror/i.test(text) || /goflix\.sbs/i.test(href)) {
-                    out = out.concat(await resolveCommonExtractorUrl(href, "Bollyflix [Mirror]" + suffix, url, 0));
+                    return resolveCommonExtractorUrl(href, "Bollyflix [Mirror]" + suffix, url, 0);
                 } else if (/pixeldrain/i.test(href) || /pixeldrain/i.test(text)) {
                     var fileId = href.split("/").pop();
-                    if (fileId) out.push(buildResolvedStream("https://pixeldrain.com/api/file/" + fileId + "?download", "Bollyflix [Pixeldrain]" + suffix, quality, commonHeaders(), fileName || href));
+                    if (fileId) return [buildResolvedStream("https://pixeldrain.com/api/file/" + fileId + "?download", "Bollyflix [Pixeldrain]" + suffix, quality, commonHeaders(), fileName || href)];
                 }
-            }
+                return [];
+            });
+            out = flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; }));
 
             if (!out.length) {
                 var directMedia = extractDirectMediaUrls(html, url);
@@ -5389,49 +5456,49 @@
 
         async function resolve(media) {
             if (media.anime) return [];
-            var queries = uniqueBy([media.imdbId, media.title, media.originalTitle], function (item) {
+            var queries = uniqueBy([media.title, media.originalTitle, media.imdbId], function (item) {
                 return trim(String(item || "").toLowerCase());
             }).filter(Boolean);
             var rows = await searchTitles(queries);
-            var match = bestMatch(rows, queries, media.year, media.isMovie ? "movie" : null);
-            if (!match || !match.url) return [];
-            var html = await getText(match.url, commonHeaders({ "Referer": (await getMainUrl()) + "/" }), true).catch(function () { return ""; });
-            if (!html) return [];
+            var matches = rankedMatches(rows, queries, media.year, media.isMovie ? "movie" : null, PROVIDER_CANDIDATE_LIMIT);
+            if (!matches.length) return [];
+            var settled = await mapLimit(matches, 2, async function (match) {
+                if (!match || !match.url) return [];
+                var html = await getText(match.url, commonHeaders({ "Referer": (await getMainUrl()) + "/" }), true).catch(function () { return ""; });
+                if (!html) return [];
 
-            var isSeries = checkIsSeries(match.title || media.title, match.url) || !media.isMovie;
-            var links = [];
-            if (isSeries) {
-                links = await collectSeriesLinks(html, match.url, media);
-            } else {
-                var buttons = parseMovieButtons(html, match.url);
-                for (var i = 0; i < buttons.length; i++) {
-                    links.push({
-                        url: buttons[i].href,
-                        quality: qualityFromText(buttons[i].text || match.title),
-                        label: buttons[i].text || match.title
-                    });
+                var isSeries = checkIsSeries(match.title || media.title, match.url) || !media.isMovie;
+                var links = [];
+                if (isSeries) {
+                    links = await collectSeriesLinks(html, match.url, media);
+                } else {
+                    var buttons = parseMovieButtons(html, match.url);
+                    for (var i = 0; i < buttons.length; i++) {
+                        links.push({
+                            url: buttons[i].href,
+                            quality: qualityFromText(buttons[i].text || match.title),
+                            label: buttons[i].text || match.title
+                        });
+                    }
                 }
-            }
 
-            if (!links.length) {
-                var fallbackRows = extractExternalSourceLinks(html, match.url);
-                for (var j = 0; j < fallbackRows.length; j++) {
-                    links.push({
-                        url: fallbackRows[j].url,
-                        quality: qualityFromText(fallbackRows[j].label || match.title),
-                        label: fallbackRows[j].label || match.title
-                    });
+                if (!links.length) {
+                    var fallbackRows = extractExternalSourceLinks(html, match.url);
+                    for (var j = 0; j < fallbackRows.length; j++) {
+                        links.push({
+                            url: fallbackRows[j].url,
+                            quality: qualityFromText(fallbackRows[j].label || match.title),
+                            label: fallbackRows[j].label || match.title
+                        });
+                    }
                 }
-            }
 
-            var streams = [];
-            for (var k = 0; k < links.length; k++) {
-                var resolved = await resolveLinkRow(links[k], match.url);
-                for (var m = 0; m < resolved.length; m++) {
-                    streams.push(resolved[m]);
-                }
-            }
-            return dedupeStreams(streams);
+                var resolvedRows = await mapLimit(links.slice(0, 12), PROVIDER_LINK_CONCURRENCY, function (link) {
+                    return resolveLinkRow(link, match.url);
+                });
+                return dedupeStreams(flatten(resolvedRows.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; })));
+            });
+            return dedupeStreams(flatten(settled.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; })));
         }
 
         return {
@@ -5595,40 +5662,78 @@
 
     var YflixSource = (function () {
         var MAIN_URL = "https://yflix.to";
-        var MULTI_DECRYPT_API = "https://enc-dec.app/api";
+        var YFX_ENC = "https://enc-dec.app/api/enc-movies-flix";
+        var YFX_DEC = "https://enc-dec.app/api/dec-movies-flix";
         var FLIX_FIND_API = "https://enc-dec.app/db/flix/find";
+        var YFLIX_HEADERS = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": MAIN_URL + "/"
+        };
 
-        async function encryptToken(value) {
-            var json = await getJson(MULTI_DECRYPT_API + "/enc-movies-flix?text=" + encodeURIComponent(String(value || "")), commonHeaders()).catch(function () { return {}; });
+        async function decodeToken(text) {
+            var res = await request(YFX_ENC + "?text=" + encodeURIComponent(String(text || "")), {
+                headers: YFLIX_HEADERS,
+                allowRedirects: true
+            }).catch(function () { return null; });
+            var json = res ? parseJsonSafe(res.body, {}) : {};
             return trim(String(json && json.result || ""));
         }
 
-        async function decryptToken(value) {
-            var body = await postJson(MULTI_DECRYPT_API + "/dec-movies-flix", { text: String(value || "") }, commonHeaders()).catch(function () { return ""; });
-            var json = parseJsonSafe(body, {});
-            var result = json && json.result;
-            if (result && typeof result === "object") return trim(String(result.url || ""));
-            return trim(String(result || ""));
+        async function decodeReversePayload(text) {
+            var res = await request(YFX_DEC, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ text: String(text || "") })
+            }).catch(function () { return null; });
+            var json = res ? parseJsonSafe(res.body, {}) : {};
+            return json && json.result || "";
         }
 
-        async function parseHtmlPayload(html) {
-            var body = await postJson(MULTI_DECRYPT_API + "/parse-html", { text: String(html || "") }, commonHeaders()).catch(function () { return "{}"; });
-            var json = parseJsonSafe(body, {});
-            if (json && typeof json === "object") return json;
-            return {};
-        }
-
-        function extractServers(root) {
-            var list = [];
-            var source = root && root.result && root.result.default || {};
-            for (var key in source) {
-                if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
-                var item = source[key];
-                var lid = trim(String(item && item.lid || ""));
-                var name = trim(String(item && item.name || key));
-                if (lid && name) list.push({ name: name, lid: lid });
+        function extractVideoUrlFromDecodedPayload(payload) {
+            if (!payload) return "";
+            if (typeof payload === "object") return trim(String(payload.url || payload.file || payload.src || payload.link || ""));
+            var text = decodeHtml(String(payload || "").trim());
+            if (/^https?:\/\//i.test(text)) return text;
+            var json = parseJsonSafe(text, null);
+            if (json) {
+                if (typeof json === "string") return extractVideoUrlFromDecodedPayload(json);
+                return trim(String(json.url || json.file || json.src || json.link || ""));
             }
-            return list;
+            return trim(firstMatch(text, [
+                /<iframe[^>]+src=["']([^"']+)["']/i,
+                /(?:src|url|file|link)\s*[:=]\s*["'](https?:\/\/[^"']+)["']/i,
+                /(https?:\/\/[^\s"'<>\\]+)/i
+            ]));
+        }
+
+        function getServerNodes(html) {
+            return parseAnchors(String(html || ""), MAIN_URL).filter(function (item) {
+                return /class=["'][^"']*\bserver\b/i.test(item.html || "");
+            }).map(function (item) {
+                return {
+                    lid: trim(firstMatch(item.html || "", [/data-lid=["']([^"']+)["']/i])),
+                    name: stripTags(firstMatch(item.html || "", [/<span[^>]*>([\s\S]*?)<\/span>/i])) || item.text || "Server"
+                };
+            }).filter(function (item) {
+                return !!item.lid;
+            });
+        }
+
+        async function resolveYflixVideoUrl(videoUrl, displayName) {
+            if (!videoUrl) return [];
+            if (/\.m3u8(?:$|[?#])/i.test(videoUrl)) {
+                return parseM3u8Qualities(videoUrl, { "Referer": MAIN_URL + "/" }, displayName || "Yflix");
+            }
+            var resolved = await resolveCommonExtractorUrl(videoUrl, displayName || "Yflix", MAIN_URL + "/", 0);
+            if (resolved.length) return resolved;
+            if (isCommonDirectMediaUrl(videoUrl)) {
+                return [buildResolvedStream(videoUrl, displayName || "Yflix", qualityFromText(videoUrl), { "Referer": MAIN_URL + "/" }, videoUrl)];
+            }
+            return [];
         }
 
         function getEpisodeInfo(entry, media) {
@@ -5643,47 +5748,40 @@
             if (!media || media.anime || !media.tmdbId) return [];
             var rows = await getJson(FLIX_FIND_API + "?tmdb_id=" + encodeURIComponent(String(media.tmdbId)), commonHeaders()).catch(function () { return []; });
             if (!Array.isArray(rows) || !rows.length) return [];
-            var entry = rows[0] || {};
-            var episodeInfo = getEpisodeInfo(entry, media);
-            if (!episodeInfo || !episodeInfo.eid) return [];
+            var settledEntries = await mapLimit(rows.slice(0, PROVIDER_CANDIDATE_LIMIT), 2, async function (entry) {
+                var episodeInfo = getEpisodeInfo(entry, media);
+                if (!episodeInfo || !episodeInfo.eid) return [];
 
-            var encEid = await encryptToken(episodeInfo.eid);
-            if (!encEid) return [];
-            var linksJson = await getJson(MAIN_URL + "/ajax/links/list?eid=" + encodeURIComponent(episodeInfo.eid) + "&_=" + encodeURIComponent(encEid), commonHeaders({
-                "Referer": MAIN_URL + "/" + trim(String(entry && entry.info && entry.info.flix_watch || "")).replace(/^\/+/, "")
-            })).catch(function () { return {}; });
-            var linksHtml = trim(String(linksJson && linksJson.result || ""));
-            if (!linksHtml) return [];
+                var decodedEid = await decodeToken(episodeInfo.eid);
+                if (!decodedEid) return [];
+                var listRes = await request(MAIN_URL + "/ajax/links/list?eid=" + encodeURIComponent(episodeInfo.eid) + "&_=" + encodeURIComponent(decodedEid), {
+                    headers: YFLIX_HEADERS,
+                    allowRedirects: true
+                }).catch(function () { return null; });
+                var listJson = listRes ? parseJsonSafe(listRes.body, {}) : {};
+                var linksHtml = decodeHtml(String(listJson && listJson.result || ""));
+                if (!linksHtml) return [];
+                var servers = getServerNodes(linksHtml);
+                if (!servers.length) return [];
 
-            var parsedLinks = await parseHtmlPayload(linksHtml);
-            var servers = extractServers(parsedLinks);
-            if (!servers.length) return [];
-
-            var out = [];
-            for (var i = 0; i < servers.length; i++) {
-                var server = servers[i];
-                var encLid = await encryptToken(server.lid);
-                if (!encLid) continue;
-                var embedJson = await getJson(MAIN_URL + "/ajax/links/view?id=" + encodeURIComponent(server.lid) + "&_=" + encodeURIComponent(encLid), commonHeaders({
-                    "Referer": MAIN_URL + "/" + trim(String(entry && entry.info && entry.info.flix_watch || "")).replace(/^\/+/, "")
-                })).catch(function () { return {}; });
-                var encryptedEmbed = trim(String(embedJson && embedJson.result || ""));
-                if (!encryptedEmbed) continue;
-
-                var embedUrl = await decryptToken(encryptedEmbed);
-                if (!embedUrl) continue;
-                if (embedUrl.indexOf(MAIN_URL) === 0) {
-                    var iframeHtml = await getText(embedUrl, commonHeaders({ "Referer": MAIN_URL + "/" }), true).catch(function () { return ""; });
-                    embedUrl = normalizeResolvedUrl(firstMatch(iframeHtml, [/<iframe\b[^>]*src=["']([^"']+)["']/i]), baseOrigin(embedUrl)) || embedUrl;
-                }
-
-                var resolved = await resolveCommonExtractorUrl(embedUrl, "Yflix [" + server.name + "]", MAIN_URL + "/", 0);
-                if (!resolved.length && isCommonDirectMediaUrl(embedUrl)) {
-                    resolved = [buildResolvedStream(embedUrl, "Yflix [" + server.name + "]", qualityFromText(embedUrl), commonHeaders({ "Referer": MAIN_URL + "/" }), embedUrl)];
-                }
-                out = out.concat(resolved);
-            }
-            return dedupeStreams(out);
+                var settledServers = await mapLimit(servers.slice(0, 8), 4, async function (server) {
+                    var decodedLid = await decodeToken(server.lid);
+                    if (!decodedLid) return [];
+                    var viewRes = await request(MAIN_URL + "/ajax/links/view?id=" + encodeURIComponent(server.lid) + "&_=" + encodeURIComponent(decodedLid), {
+                        headers: YFLIX_HEADERS,
+                        allowRedirects: true
+                    }).catch(function () { return null; });
+                    var viewJson = viewRes ? parseJsonSafe(viewRes.body, {}) : {};
+                    var encodedPayload = trim(String(viewJson && viewJson.result || ""));
+                    if (!encodedPayload) return [];
+                    var decodedPayload = await decodeReversePayload(encodedPayload);
+                    var videoUrl = extractVideoUrlFromDecodedPayload(decodedPayload);
+                    if (!videoUrl) return [];
+                    return resolveYflixVideoUrl(videoUrl, "Yflix [" + server.name + "]");
+                });
+                return dedupeStreams(flatten(settledServers.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; })));
+            });
+            return dedupeStreams(flatten(settledEntries.filter(function (row) { return row && row.status === "fulfilled"; }).map(function (row) { return row.value || []; })));
         }
 
         return {
@@ -5719,33 +5817,28 @@
         try {
             var media = parsePayload(url);
             var anime = !!media.anime;
-            var selectedProviders = PROVIDERS.filter(function (provider) {
-                if (anime) {
-                    return provider === KaidoSource
-                        || provider === AnimePaheSource
-                        || provider === AnimetsuSource
-                        || provider === AnimeToshoSource
-                        || provider === Movies4uSource
-                        || provider === TokyoInsiderSource;
-                }
-                return provider === CastleSource
-                    || provider === StreamvixSource
-                    || provider === NoTorrentSource
-                    || provider === VidSrcSource
-                    || provider === VidRockSource
-                    || provider === FlixIndiaSource
-                    || provider === FourKhdhubSource
-                    || provider === VegaMoviesSource
-                    || provider === Movies4uSource
-                    || provider === MoviesDriveExtraSource
-                    || provider === BollyflixSource
-                    || provider === YflixSource
-                    || provider === HindmoviezSource
-                    || provider === HDMovie2Source;
-            });
+            var defaultProviders = anime
+                ? [KaidoSource, AnimePaheSource, AnimetsuSource, AnimeToshoSource, TokyoInsiderSource]
+                : [CastleSource, StreamvixSource, NoTorrentSource, FourKhdhubSource, VegaMoviesSource];
+            var providerKeys = [];
+            if (Array.isArray(media.providerKeys)) providerKeys = media.providerKeys.slice();
+            else if (Array.isArray(media.providers)) providerKeys = media.providers.slice();
+            else if (media.providerKey) providerKeys = [media.providerKey];
+            else if (media.provider) providerKeys = [media.provider];
+            providerKeys = uniqueBy(providerKeys.map(function (item) {
+                return trim(String(item || "").toLowerCase());
+            }).filter(Boolean), function (item) { return item; });
+            var selectedProviders = providerKeys.length ? PROVIDERS.slice() : defaultProviders.slice();
+            if (providerKeys.length) {
+                selectedProviders = selectedProviders.filter(function (provider) {
+                    var key = trim(String(provider && provider.key || "").toLowerCase());
+                    var name = trim(String(provider && provider.name || "").toLowerCase());
+                    return providerKeys.indexOf(key) !== -1 || providerKeys.indexOf(name) !== -1;
+                });
+            }
 
             var settled = await mapLimit(selectedProviders, SCRAPE_CONCURRENCY, function (provider) {
-                return withTimeout(provider.resolve(media), 30000, provider && provider.name || "Provider");
+                return withTimeout(provider.resolve(media), providerTimeoutMs(provider), provider && provider.name || "Provider");
             });
             var streams = [];
             for (var i = 0; i < settled.length; i++) {
