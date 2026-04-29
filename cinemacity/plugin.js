@@ -10,6 +10,9 @@
     var TMDB_API_KEY = "1865f43a0549ca50d341dd9ab8b29f49";
     var TMDB_IMAGE = "https://image.tmdb.org/t/p/original";
     var CINEMETA_API = "https://v3-cinemeta.strem.io/meta";
+    var HOME_CACHE_TTL = 2 * 60 * 1000;
+    var SEARCH_CACHE_TTL = 60 * 1000;
+    var REQUEST_CACHE_TTL = 90 * 1000;
     var HOME_SECTIONS = [
         { title: "Movies", path: "movies" },
         { title: "TV Series", path: "tv-series" },
@@ -18,6 +21,8 @@
         { title: "Animation", path: "xfsearch/genre/animation" },
         { title: "Documentary", path: "xfsearch/genre/documentary" }
     ];
+    var valueCache = Object.create(null);
+    var inflightCache = Object.create(null);
 
     function defaultHeaders(extra) {
         return Object.assign({
@@ -36,13 +41,52 @@
         }
     }
 
-    async function request(url, headers) {
-        if (typeof http_get === "function") return http_get(url, headers || defaultHeaders());
-        if (typeof fetch === "function") {
-            var res = await fetch(url, { headers: headers || defaultHeaders() });
-            return { body: await res.text(), headers: {}, status: res.status, finalUrl: res.url || url };
+    function now() {
+        return Date.now ? Date.now() : new Date().getTime();
+    }
+
+    function readCache(key) {
+        var entry = valueCache[key];
+        if (!entry) return null;
+        if (entry.expiresAt <= now()) {
+            delete valueCache[key];
+            return null;
         }
-        throw new Error("No HTTP client available");
+        return entry.value;
+    }
+
+    function writeCache(key, value, ttl) {
+        valueCache[key] = {
+            value: value,
+            expiresAt: now() + Math.max(0, ttl || 0)
+        };
+        return value;
+    }
+
+    function cachedAsync(key, ttl, producer) {
+        var cached = readCache(key);
+        if (cached !== null) return Promise.resolve(cached);
+        if (inflightCache[key]) return inflightCache[key];
+        inflightCache[key] = Promise.resolve().then(producer).then(function (value) {
+            delete inflightCache[key];
+            return writeCache(key, value, ttl);
+        }, function (error) {
+            delete inflightCache[key];
+            throw error;
+        });
+        return inflightCache[key];
+    }
+
+    async function request(url, headers) {
+        var key = "GET|" + url;
+        return cachedAsync(key, REQUEST_CACHE_TTL, async function () {
+            if (typeof http_get === "function") return http_get(url, headers || defaultHeaders());
+            if (typeof fetch === "function") {
+                var res = await fetch(url, { headers: headers || defaultHeaders() });
+                return { body: await res.text(), headers: {}, status: res.status, finalUrl: res.url || url };
+            }
+            throw new Error("No HTTP client available");
+        });
     }
 
     async function getText(url, headers) {
@@ -65,30 +109,34 @@
         var requestHeaders = Object.assign({
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
         }, headers || defaultHeaders());
-        if (typeof http_post === "function") {
-            var attempts = [
-                function () { return http_post(url, requestHeaders, payload); },
-                function () { return http_post(url, payload, requestHeaders); }
-            ];
-            for (var i = 0; i < attempts.length; i++) {
-                try {
-                    var res = await attempts[i]();
-                    var text = String(res && res.body || "");
-                    if (/(Found\s+\d+\s+responses|dar-short_item|Zootopia)/i.test(text)) return text;
-                    if (text && i === attempts.length - 1) return text;
-                } catch (_) {}
+        var keyCache = "POST|" + url + "|" + payload;
+        return cachedAsync(keyCache, SEARCH_CACHE_TTL, async function () {
+            if (typeof http_post === "function") {
+                var attempts = [
+                    function () { return http_post(url, requestHeaders, payload); },
+                    function () { return http_post(url, payload, requestHeaders); }
+                ];
+                for (var i = 0; i < attempts.length; i++) {
+                    try {
+                        var res = await attempts[i]();
+                        var text = String(res && res.body || "");
+                        if (/Found\s+\d+\s+responses/i.test(text)) return text;
+                        if (/<div\b[^>]*class=["'][^"']*dar-short_item[^"']*["'][^>]*>/i.test(text)) return text;
+                        if (text && i === attempts.length - 1) return text;
+                    } catch (_) {}
+                }
+                return "";
             }
-            return "";
-        }
-        if (typeof fetch === "function") {
-            var response = await fetch(url, {
-                method: "POST",
-                headers: requestHeaders,
-                body: payload
-            });
-            return await response.text();
-        }
-        throw new Error("No HTTP POST client available");
+            if (typeof fetch === "function") {
+                var response = await fetch(url, {
+                    method: "POST",
+                    headers: requestHeaders,
+                    body: payload
+                });
+                return await response.text();
+            }
+            throw new Error("No HTTP POST client available");
+        });
     }
 
     function decodeHtml(value) {
@@ -174,13 +222,28 @@
 
     function qualityFromText(text) {
         var value = String(text || "").toLowerCase();
-        if (/\b2160p\b|\b4k\b|\buhd\b/.test(value)) return 2160;
-        if (/\b1440p\b|\b2k\b/.test(value)) return 1440;
-        if (/\b1080p\b|\bfhd\b/.test(value)) return 1080;
-        if (/\b720p\b|\bhd\b/.test(value)) return 720;
-        if (/\b480p\b|\bsd\b/.test(value)) return 480;
-        if (/\b360p\b/.test(value)) return 360;
+        if (/(^|[^0-9])2160p([^0-9]|$)|(^|[^a-z0-9])4k([^a-z0-9]|$)|(^|[^a-z0-9])uhd([^a-z0-9]|$)/.test(value)) return 2160;
+        if (/(^|[^0-9])1440p([^0-9]|$)|(^|[^a-z0-9])2k([^a-z0-9]|$)/.test(value)) return 1440;
+        if (/(^|[^0-9])1080p([^0-9]|$)|(^|[^a-z0-9])fhd([^a-z0-9]|$)/.test(value)) return 1080;
+        if (/(^|[^0-9])720p([^0-9]|$)|(^|[^a-z0-9])hd([^a-z0-9]|$)/.test(value)) return 720;
+        if (/(^|[^0-9])480p([^0-9]|$)|(^|[^a-z0-9])sd([^a-z0-9]|$)/.test(value)) return 480;
+        if (/(^|[^0-9])360p([^0-9]|$)/.test(value)) return 360;
         return 0;
+    }
+
+    function qualityLabelFromValue(value) {
+        var num = Number(value || 0);
+        return num > 0 ? (String(num) + "p") : "Auto";
+    }
+
+    function extractBestQuality(bundle) {
+        var parts = String(bundle || "").split(",").map(trim);
+        var best = 0;
+        for (var i = 0; i < parts.length; i++) {
+            var quality = extractQuality(parts[i]);
+            if (quality > best) best = quality;
+        }
+        return best;
     }
 
     function inferTypeFromHref(href) {
@@ -469,16 +532,20 @@
 
     async function getHome(cb) {
         try {
-            var sections = await Promise.all(HOME_SECTIONS.map(async function (section) {
-                try {
-                    var html = await getText(MAIN_URL + "/" + section.path, defaultHeaders({ "Referer": MAIN_URL + "/" }));
-                    return { title: section.title, items: parseCards(html, MAIN_URL) };
-                } catch (_) {
-                    return { title: section.title, items: [] };
-                }
-            }));
-            var data = {};
-            sections.forEach(function (section) { data[section.title] = section.items; });
+            var cacheKey = "home:index";
+            var data = await cachedAsync(cacheKey, HOME_CACHE_TTL, async function () {
+                var sections = await Promise.all(HOME_SECTIONS.map(async function (section) {
+                    try {
+                        var html = await getText(MAIN_URL + "/" + section.path, defaultHeaders({ "Referer": MAIN_URL + "/" }));
+                        return { title: section.title, items: parseCards(html, MAIN_URL) };
+                    } catch (_) {
+                        return { title: section.title, items: [] };
+                    }
+                }));
+                var mapped = {};
+                sections.forEach(function (section) { mapped[section.title] = section.items; });
+                return mapped;
+            });
             cb({ success: true, data: data });
         } catch (error) {
             cb({ success: false, errorCode: "HOME_ERROR", message: String(error && error.message || error) });
@@ -487,16 +554,19 @@
 
     async function search(query, cb) {
         try {
-            var html = await postForm(MAIN_URL + "/", {
-                do: "search",
-                subaction: "search",
-                search_start: "0",
-                full_search: "0",
-                story: String(query || "")
-            }, defaultHeaders({ "Referer": MAIN_URL + "/" }));
-            var items = rankSearchResults(parseSearchCards(html, MAIN_URL), query);
+            var q = String(query || "");
+            var items = await cachedAsync("search:" + normalizeTitle(q), SEARCH_CACHE_TTL, async function () {
+                var html = await postForm(MAIN_URL + "/", {
+                    do: "search",
+                    subaction: "search",
+                    search_start: "0",
+                    full_search: "0",
+                    story: q
+                }, defaultHeaders({ "Referer": MAIN_URL + "/" }));
+                return rankSearchResults(parseSearchCards(html, MAIN_URL), q);
+            });
             if (!items.length) {
-                cb({ success: false, errorCode: "SEARCH_EMPTY", message: "No results parsed. Snippet: " + snippet(html, 260) });
+                cb({ success: false, errorCode: "SEARCH_EMPTY", message: "No results parsed." });
                 return;
             }
             cb({ success: true, data: items });
@@ -751,13 +821,14 @@
             for (var i = 0; i < streamUrls.length; i++) {
                 var streamUrl = String(streamUrls[i] || "").trim();
                 if (!streamUrl) continue;
+                var hlsQuality = qualityLabelFromValue(extractBestQuality(streamUrl));
                 var languages = payload.audioLanguages ? String(payload.audioLanguages).split(/\s*,\s*/) : extractAudioLanguagesFromStream(streamUrl);
                 languages = uniqueBy(languages.filter(Boolean), function (item) { return item.toLowerCase(); });
                 var label = languages.length === 1 ? languages[0] : (languages.length ? "Multi Audio" : "Unknown");
                 results.push(attachSubtitles(new StreamResult({
                     url: streamUrl,
-                    source: NAME + " [" + label + "] [HLS]",
-                    quality: extractQuality(streamUrl) || undefined,
+                    source: NAME + " [" + label + "] [" + hlsQuality + "] [HLS]",
+                    quality: extractBestQuality(streamUrl) || undefined,
                     headers: defaultHeaders({ "Referer": MAIN_URL + "/" })
                 }), subtitles));
 
@@ -769,7 +840,7 @@
                     for (var k = 0; k < downloads.length; k++) {
                         results.push(attachSubtitles(new StreamResult({
                             url: downloads[k].url,
-                            source: NAME + " [" + downloads[k].lang + "] [Download]",
+                            source: NAME + " [" + downloads[k].lang + "] [" + qualityLabelFromValue(downloads[k].quality) + "] [Download]",
                             quality: downloads[k].quality,
                             headers: defaultHeaders({ "Referer": MAIN_URL + "/" })
                         }), subtitles));
