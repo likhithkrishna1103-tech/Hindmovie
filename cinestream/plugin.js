@@ -526,12 +526,13 @@
         var value = String(text || "").toLowerCase();
         if (/\b4320p\b|\b8k\b/.test(value)) return 4320;
         if (/\b2160p\b|\b4k\b|\buhd\b/.test(value)) return 2160;
-        if (/\b1440p\b|\b2k\b/.test(value)) return 1440;
-        if (/\b1080p\b/.test(value)) return 1080;
-        if (/\b720p\b/.test(value)) return 720;
+        if (/\b1440p\b|\b2k\b|\bqhd\b/.test(value)) return 1440;
+        if (/\b1080p\b|\bfhd\b|\bfull\s*hd\b/.test(value)) return 1080;
+        if (/\b720p\b|\bhd\b/.test(value)) return 720;
         if (/\b576p\b/.test(value)) return 576;
-        if (/\b480p\b/.test(value)) return 480;
+        if (/\b480p\b|\bsd\b/.test(value)) return 480;
         if (/\b360p\b/.test(value)) return 360;
+        if (/\b240p\b/.test(value)) return 240;
         return 0;
     }
 
@@ -1378,20 +1379,40 @@
         return String(path || "").replace(/^\/+/, "");
     }
 
+    var TMDB_CACHE_TTL = 5 * 60 * 1000;
+    var tmdbJsonCache = Object.create(null);
+    var tmdbJsonInflight = Object.create(null);
+
     async function getTmdbJson(path, preferWorker) {
         var normalized = normalizeTmdbPath(path);
+        var cacheKey = normalized;
+        var now = Date.now();
+        var cached = tmdbJsonCache[cacheKey];
+        if (cached && (now - cached.at) < TMDB_CACHE_TTL) return cached.data;
+        if (tmdbJsonInflight[cacheKey]) return tmdbJsonInflight[cacheKey];
+
         var urls = preferWorker
             ? [TMDB_WORKER_API + "/" + normalized, TMDB_API + "/" + normalized]
             : [TMDB_API + "/" + normalized, TMDB_WORKER_API + "/" + normalized];
-        var lastError = null;
-        for (var i = 0; i < urls.length; i++) {
-            try {
-                return await getJson(urls[i]);
-            } catch (error) {
-                lastError = error;
+        tmdbJsonInflight[cacheKey] = (async function () {
+            var lastError = null;
+            for (var i = 0; i < urls.length; i++) {
+                try {
+                    var data = await getJson(urls[i]);
+                    tmdbJsonCache[cacheKey] = { at: Date.now(), data: data };
+                    return data;
+                } catch (error) {
+                    lastError = error;
+                }
             }
+            throw lastError || new Error("TMDB request failed: " + normalized);
+        })();
+
+        try {
+            return await tmdbJsonInflight[cacheKey];
+        } finally {
+            delete tmdbJsonInflight[cacheKey];
         }
-        throw lastError || new Error("TMDB request failed: " + normalized);
     }
 
     function isoDate(offsetDays) {
@@ -1485,10 +1506,14 @@
     }
 
     async function tmdbDetail(mediaType, tmdbId) {
-        var detail = await getTmdbJson(mediaType + "/" + tmdbId + "?api_key=" + TMDB_API_KEY + "&append_to_response=credits,external_ids,recommendations", true);
-        var keywords = await getTmdbJson(mediaType + "/" + tmdbId + "/keywords?api_key=" + TMDB_API_KEY, true).catch(function () {
-            return {};
-        });
+        var detailUrl = mediaType + "/" + tmdbId + "?api_key=" + TMDB_API_KEY + "&append_to_response=credits,external_ids,recommendations";
+        var keywordsUrl = mediaType + "/" + tmdbId + "/keywords?api_key=" + TMDB_API_KEY;
+        var results = await Promise.all([
+            getTmdbJson(detailUrl, true).catch(function () { return {}; }),
+            getTmdbJson(keywordsUrl, true).catch(function () { return {}; })
+        ]);
+        var detail = results[0];
+        var keywords = results[1];
         return {
             detail: detail || {},
             keywords: keywords || {}
@@ -1497,18 +1522,25 @@
 
     async function getHome(cb) {
         try {
+            var sections = await Promise.all(HOME_SECTIONS.map(function (section) {
+                return getTmdbJson(section.path, true).then(function (json) {
+                    return {
+                        title: section.title,
+                        items: uniqueBy(((json && json.results) || []).map(buildTmdbItem).filter(Boolean), function (item) {
+                            return item && item.url;
+                        })
+                    };
+                }).catch(function () {
+                    return {
+                        title: section.title,
+                        items: []
+                    };
+                });
+            }));
             var data = {};
-            for (var i = 0; i < HOME_SECTIONS.length; i++) {
-                var section = HOME_SECTIONS[i];
-                try {
-                    var json = await getTmdbJson(section.path, true);
-                    data[section.title] = uniqueBy(((json && json.results) || []).map(buildTmdbItem).filter(Boolean), function (item) {
-                        return item && item.url;
-                    });
-                } catch (_) {
-                    data[section.title] = [];
-                }
-            }
+            sections.forEach(function (section) {
+                data[section.title] = section.items;
+            });
             cb({ success: true, data: data });
         } catch (error) {
             cb({ success: false, errorCode: "HOME_ERROR", message: String(error && error.message || error) });
@@ -1629,40 +1661,47 @@
             var seasons = (detail.seasons || []).filter(function (season) {
                 return season && season.season_number > 0;
             });
+            var seasonResults = await Promise.all(seasons.map(function (seasonInfo) {
+                return getTmdbJson("tv/" + tmdbId + "/season/" + seasonInfo.season_number + "?api_key=" + TMDB_API_KEY, true)
+                    .then(function (seasonJson) {
+                        return { seasonInfo: seasonInfo, seasonJson: seasonJson || {} };
+                    })
+                    .catch(function () {
+                        return { seasonInfo: seasonInfo, seasonJson: {} };
+                    });
+            }));
             var episodes = [];
 
-            for (var i = 0; i < seasons.length; i++) {
-                var seasonInfo = seasons[i];
-                try {
-                    var seasonJson = await getTmdbJson("tv/" + tmdbId + "/season/" + seasonInfo.season_number + "?api_key=" + TMDB_API_KEY, true);
-                    var seasonEpisodes = seasonJson && seasonJson.episodes || [];
-                    for (var j = 0; j < seasonEpisodes.length; j++) {
-                        var ep = seasonEpisodes[j];
-                        episodes.push(new Episode({
-                            name: trim(ep && ep.name) || ("Episode " + String(ep && ep.episode_number || (j + 1))),
-                            url: buildPayload({
-                                mode: "stream",
-                                tmdbId: tmdbId,
-                                mediaType: mediaType,
-                                title: title,
-                                originalTitle: originalTitle,
-                                year: year,
-                                imdbId: detail.external_ids && detail.external_ids.imdb_id || "",
-                                season: seasonInfo.season_number,
-                                episode: ep && ep.episode_number || (j + 1),
-                                anime: anime,
-                                isMovie: false
-                            }),
+            seasonResults.forEach(function (entry) {
+                var seasonInfo = entry.seasonInfo;
+                var seasonJson = entry.seasonJson || {};
+                var seasonEpisodes = seasonJson.episodes || [];
+                for (var j = 0; j < seasonEpisodes.length; j++) {
+                    var ep = seasonEpisodes[j];
+                    episodes.push(new Episode({
+                        name: trim(ep && ep.name) || ("Episode " + String(ep && ep.episode_number || (j + 1))),
+                        url: buildPayload({
+                            mode: "stream",
+                            tmdbId: tmdbId,
+                            mediaType: mediaType,
+                            title: title,
+                            originalTitle: originalTitle,
+                            year: year,
+                            imdbId: detail.external_ids && detail.external_ids.imdb_id || "",
                             season: seasonInfo.season_number,
                             episode: ep && ep.episode_number || (j + 1),
-                            posterUrl: tmdbImage(ep && ep.still_path || seasonInfo.poster_path || detail.poster_path),
-                            description: trim(ep && ep.overview || detail.overview || ""),
-                            airDate: ep && ep.air_date || undefined,
-                            headers: { "Referer": "https://www.themoviedb.org/" }
-                        }));
-                    }
-                } catch (_) {}
-            }
+                            anime: anime,
+                            isMovie: false
+                        }),
+                        season: seasonInfo.season_number,
+                        episode: ep && ep.episode_number || (j + 1),
+                        posterUrl: tmdbImage(ep && ep.still_path || seasonInfo.poster_path || detail.poster_path),
+                        description: trim(ep && ep.overview || detail.overview || ""),
+                        airDate: ep && ep.air_date || undefined,
+                        headers: { "Referer": "https://www.themoviedb.org/" }
+                    }));
+                }
+            });
 
             item.episodes = episodes;
             cb({ success: true, data: item });
@@ -5839,10 +5878,11 @@
                     var value = trim(String(sourceHeaders[key] || ""));
                     if (value) headers[key] = value;
                 });
+                var qualityHint = [source && source.quality, source && source.type, sourceUrl].filter(Boolean).join(" ");
                 var stream = {
                     url: sourceUrl,
                     source: withSimplifiedSource("Pulp [" + providerName + "]", source && source.quality || sourceUrl),
-                    quality: qualityFromText(source && source.quality || sourceUrl) || 0,
+                    quality: qualityFromText(qualityHint) || 0,
                     headers: headers
                 };
                 if (subtitles.length) stream.subtitles = subtitles;

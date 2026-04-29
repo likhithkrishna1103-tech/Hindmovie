@@ -88,12 +88,15 @@
 
     function qualityFromText(value) {
         var text = String(value || "").toLowerCase();
-        if (text.indexOf("2160") !== -1 || /\b4k\b/.test(text)) return 2160;
-        if (text.indexOf("1440") !== -1) return 1440;
-        if (text.indexOf("1080") !== -1) return 1080;
-        if (text.indexOf("720") !== -1) return 720;
-        if (text.indexOf("480") !== -1) return 480;
-        if (text.indexOf("360") !== -1) return 360;
+        if (/\b4320p\b|\b8k\b/.test(text)) return 4320;
+        if (/\b2160p\b|\b4k\b|\buhd\b/.test(text)) return 2160;
+        if (/\b1440p\b|\b2k\b|\bqhd\b/.test(text)) return 1440;
+        if (/\b1080p\b|\bfhd\b|\bfull\s*hd\b/.test(text)) return 1080;
+        if (/\b720p\b|\bhd\b/.test(text)) return 720;
+        if (/\b576p\b/.test(text)) return 576;
+        if (/\b480p\b|\bsd\b/.test(text)) return 480;
+        if (/\b360p\b/.test(text)) return 360;
+        if (/\b240p\b/.test(text)) return 240;
         return 0;
     }
 
@@ -306,10 +309,11 @@
                     var value = String(source.headers[key] || "").trim();
                     if (value) headers[key] = value;
                 });
+                var qualityHint = [source && source.quality, source && source.type, sourceUrl].filter(Boolean).join(" ");
                 var stream = new StreamResult({
                     url: sourceUrl,
                     source: "Pulp [" + providerName + "]",
-                    quality: qualityFromText(source && source.quality) || undefined,
+                    quality: qualityFromText(qualityHint) || undefined,
                     headers: headers
                 });
                 if (subtitles.length) stream.subtitles = subtitles;
