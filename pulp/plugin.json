@@ -1,0 +1,18 @@
+{
+  "packageName": "com.igris.repo.pulp",
+  "name": "Pulp",
+  "version": 1,
+  "baseUrl": "https://api.pulp.watch/v1",
+  "description": "Fast TMDB-powered movie and series catalog with streams from Pulp.",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "hi"
+  ],
+  "categories": [
+    "Movies",
+    "Series"
+  ]
+}
