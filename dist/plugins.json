@@ -1,5 +1,29 @@
 [
   {
+    "packageName": "com.igris.repo.animedubhindi",
+    "name": "AnimeDubHindi",
+    "version": 1,
+    "baseUrl": "https://www.animedubhindi.me",
+    "description": "Hindi and multi-audio anime movies and series from AnimeDubHindi.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "hi",
+      "en",
+      "ja",
+      "ta",
+      "te",
+      "ml",
+      "bn",
+      "kn"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animedubhindi.sky"
+  },
+  {
     "packageName": "com.igris.repo.animekai",
     "name": "AnimeKai",
     "version": 4,
@@ -214,24 +238,6 @@
       "Series"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.hindmoviez.sky"
-  },
-  {
-    "packageName": "com.igris.repo.kaido",
-    "name": "Kaido",
-    "version": 6,
-    "baseUrl": "https://example.com",
-    "description": "Anime streaming with quick episode access.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "en",
-      "ja"
-    ],
-    "categories": [
-      "Anime"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.kaido.sky"
   },
   {
     "packageName": "com.igris.repo.movierulz",
