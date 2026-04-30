@@ -300,7 +300,39 @@
             blocks = blocks.concat(parseLinkGroupsFromHeadingBlocks(body, LINKS_URL));
             return _;
         });
-        return blocks;
+        if (blocks.length) return blocks;
+
+        var grouped = {};
+        var order = [];
+        String(html || "").replace(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, function(_, href, text, offset) {
+            var url = fixUrl(href, LINKS_URL);
+            if (!isUsefulLink(url)) return _;
+            var contextStart = Math.max(0, offset - 500);
+            var context = String(html || "").slice(contextStart, offset + _.length);
+            var labelText = cleanText(stripHtml(text));
+            var quality = parseQuality(labelText + " " + context);
+            var key = qualityLabel(quality) || "Links";
+            if (!grouped[key]) {
+                grouped[key] = {
+                    name: key,
+                    quality: quality || undefined,
+                    links: []
+                };
+                order.push(key);
+            }
+            var seen = grouped[key].links.some(function(item) { return item.url === url; });
+            if (seen) return _;
+            grouped[key].links.push({
+                name: (labelText + (quality ? " " + quality + "p" : "")).trim() || "Link",
+                source: labelText || "Link",
+                url: url,
+                quality: quality || undefined
+            });
+            return _;
+        });
+        return order.map(function(key) { return grouped[key]; }).filter(function(group) {
+            return group.links && group.links.length;
+        });
     }
 
     function parseSeriesEpisodes(html) {
