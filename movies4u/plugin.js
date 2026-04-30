@@ -932,6 +932,7 @@
         if (!/^https?:\/\//i.test(value)) return false;
         if (/gpdl\.hubcdn\.fans|tinyurl\.com\/Unblock-Ban-Site|one\.one\.one\.one|\/cdn-cgi\/challenge-platform\/|\/drive\/admin(?:[/?#]|$)|\/login(?:[/?#]|$)|t\.me\/|telegram|winexch\.com/i.test(value)) return false;
         if (isDirectMediaUrl(value)) return true;
+        if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php/i.test(value)) return true;
         if (/hub\.hailmary\.lat\/[a-f0-9]+\?token=/i.test(value)) return true;
         if (/pixeldrain\.(dev|com)\/api\/file\//i.test(value)) return true;
         if (/video-downloads\.googleusercontent\.com|instant\.busycdn\.xyz|fastcdn-dl\.pages\.dev|rest\.awscdn\.rest|cdn\.[a-z0-9.-]*buzz\/|hub\.diskcdn\.buzz/i.test(value)) return true;
@@ -946,6 +947,7 @@
         var value = String(url || "");
         if (!/^https?:\/\//i.test(value)) return false;
         if (/(\.zip(?:[?#]|$)|Complete(?:\s+Zip)?\s+File)/i.test(value)) return false;
+        if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php/i.test(value)) return true;
         return isDirectMediaUrl(value)
             || /pixeldrain\.(dev|com)\/api\/file\//i.test(value)
             || /video-downloads\.googleusercontent\.com|instant\.busycdn\.xyz|fastcdn-dl\.pages\.dev|rest\.awscdn\.rest|diskcdn\.buzz|hub\.diskcdn\.buzz|hub\.hailmary\.lat/i.test(value)
@@ -1752,7 +1754,14 @@
         if (looksLikeGoogleDriveUrl(url)) return resolveGoogleDrive(url);
         if (/m4ulinks\.com/i.test(url)) return withTimeout(resolveM4ulinks(url), 20000, "M4ULinks");
         if (/filesdl\./i.test(url)) return withTimeout(resolveFilesdl(url), 20000, "FilesDL");
-        if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php/i.test(url)) return withTimeout(resolveHubCloudWithFallback(url, refererLabel || "HubCloud"), 25000, "HubCloud");
+        if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php/i.test(url)) {
+            return Promise.resolve([buildStreamResult(
+                url,
+                refererLabel || "HubCloud",
+                defaultHeaders({ "Referer": baseOrigin(url) + "/" }),
+                getQualityFromText(url)
+            )]);
+        }
         if (/hubdrive\./i.test(url)) return withTimeout(resolveHubDrive(url), 20000, "HubDrive");
         if (/filepress\.|filebee/i.test(url)) return withTimeout(resolveFilepress(url), 25000, "Filepress");
         if (/gdfli?x/i.test(url)) return withTimeout(resolveGdflix(url), 25000, "GDFlix");
