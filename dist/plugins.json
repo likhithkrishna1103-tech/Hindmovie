@@ -264,7 +264,7 @@
   {
     "packageName": "com.igris.repo.movies4u",
     "name": "Movies4U",
-    "version": 16,
+    "version": 19,
     "baseUrl": "https://movies4u.rs",
     "description": "Movie picks with straightforward stream links.",
     "authors": [
