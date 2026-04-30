@@ -839,11 +839,11 @@
     function isUsableStreamUrl(url) {
         var value = String(url || "");
         if (!/^https?:\/\//i.test(value)) return false;
-        if (/gpdl\.hubcdn\.fans|tinyurl\.com\/Unblock-Ban-Site|one\.one\.one\.one|\/cdn-cgi\/challenge-platform\//i.test(value)) return false;
+        if (/gpdl\.hubcdn\.fans|tinyurl\.com\/Unblock-Ban-Site|one\.one\.one\.one|\/cdn-cgi\/challenge-platform\/|\/drive\/admin(?:[/?#]|$)|\/login(?:[/?#]|$)|t\.me\/|telegram|winexch\.com/i.test(value)) return false;
         if (isDirectMediaUrl(value)) return true;
         if (/hub\.hailmary\.lat\/[a-f0-9]+\?token=/i.test(value)) return true;
         if (/pixeldrain\.(dev|com)\/api\/file\//i.test(value)) return true;
-        if (/hubcloud\.|hubdrive\./i.test(value)) return true;
+        if (/video-downloads\.googleusercontent\.com|instant\.busycdn\.xyz|fastcdn-dl\.pages\.dev|rest\.awscdn\.rest|cdn\.[a-z0-9.-]*buzz\/|hub\.diskcdn\.buzz/i.test(value)) return true;
         if (/filepress\.|filebee/i.test(value)) return true;
         if (looksLikeGoogleDriveUrl(value)) return true;
         if (/mdrive\.ink\//i.test(value)) return true;
@@ -854,10 +854,30 @@
     function isInterestingExtractorUrl(url) {
         var value = String(url || "");
         if (!value) return false;
-        if (/\/cdn-cgi\/challenge-platform\//i.test(value)) return false;
+        if (/\/cdn-cgi\/challenge-platform\/|\/drive\/admin(?:[/?#]|$)|\/login(?:[/?#]|$)|t\.me\/|telegram|tinyurl\.com\/|winexch\.com/i.test(value)) return false;
         if (isDirectMediaUrl(value)) return true;
         if (looksLikeGoogleDriveUrl(value)) return true;
-        return /hubcloud\.|hubdrive\.|gamerxyt\.com\/hubcloud\.php|gdfli?x|gdlink|gofile\.io|m4ulinks\.com|filesdl\.|filepress\.|filebee|pixeldrain|buzzserver|streamtape|mediafire\.com|1fichier\.com|mdrive\.ink\/|vcloud\.zip|fastdl\.zip/i.test(value);
+        return /hubcloud\.|hubdrive\.|gamerxyt\.com\/hubcloud\.php|gdfli?x|gdlink|gofile\.io|m4ulinks\.com|filesdl\.|filepress\.|filebee|pixeldrain|buzzserver|streamtape|mediafire\.com|1fichier\.com|megaup\.net|multiup|validate\.multiup2\.workers\.dev|mdrive\.ink\/|vcloud\.zip|fastdl\.zip|instant\.busycdn\.xyz|rest\.awscdn\.rest|diskcdn/i.test(value);
+    }
+
+    function isIgnoredAnchorLink(url) {
+        return /\/drive\/admin(?:[/?#]|$)|\/login(?:[/?#]|$)|t\.me\/|telegram|tinyurl\.com\/|winexch\.com|how-to-download/i.test(String(url || ""));
+    }
+
+    function isRelevantGdflixAnchor(anchor) {
+        var href = String(anchor && anchor.href || "");
+        var text = String(anchor && anchor.text || "");
+        if (!href || isIgnoredAnchorLink(href)) return false;
+        return /instant\.busycdn\.xyz|rest\.awscdn\.rest|\/zfile\/|validate\.multiup2\.workers\.dev|gofile\.io|download-fast\/|filesgram\.xyz/i.test(href)
+            || /instant dl|direct dl|fast cloud|zipdisk|gofile|mirror|drivebot|cloud resume/i.test(text);
+    }
+
+    function isRelevantHubCloudAnchor(anchor) {
+        var href = String(anchor && anchor.href || "");
+        var text = String(anchor && anchor.text || "");
+        if (!href || isIgnoredAnchorLink(href)) return false;
+        return /pixeldrain|diskcdn|awscdn|buzzserver|video-downloads\.googleusercontent\.com|instant\.busycdn\.xyz/i.test(href)
+            || /download file|pixel|pixeldrain|fsl|s3 server|mega server|buzzserver/i.test(text);
     }
 
     function normalizeExtractedUrl(rawValue, base) {
@@ -1080,10 +1100,13 @@
                 if (clean) extras.push("[" + clean + "]");
                 if (size) extras.push("[" + size + "]");
                 var suffix = extras.join(" ");
-                var anchors = parseAnchors(html, baseOrigin(innerUrl));
+                var anchors = parseAnchors(html, baseOrigin(innerUrl)).filter(isRelevantHubCloudAnchor);
 
                 return Promise.all(anchors.map(function (anchor) {
                     var label = String(anchor.text || "").toLowerCase();
+                    if (/video-downloads\.googleusercontent\.com|instant\.busycdn\.xyz|fastcdn-dl\.pages\.dev|rest\.awscdn\.rest|hub\.diskcdn\.buzz|cdn\.[a-z0-9.-]*buzz/i.test(anchor.href)) {
+                        return Promise.resolve([buildStreamResult(anchor.href, ref + " " + suffix, {}, quality)]);
+                    }
                     if (/fsl server/.test(label)) return Promise.resolve([buildStreamResult(anchor.href, ref + " [FSL Server] " + suffix, {}, quality)]);
                     if (/download file/.test(label)) return Promise.resolve([buildStreamResult(anchor.href, ref + " " + suffix, {}, quality)]);
                     if (/buzzserver/.test(label)) {
@@ -1317,18 +1340,82 @@
         })).then(flattenResults);
     }
 
+    function resolveMultiupMirror(url, fileName, fileSize, quality) {
+        return getText(url, defaultHeaders({ "Referer": baseOrigin(url) + "/" })).then(function (html) {
+            var anchors = parseAnchors(html, baseOrigin(url)).filter(function (anchor) {
+                return anchor && anchor.href && !isIgnoredAnchorLink(anchor.href);
+            });
+            return Promise.all(anchors.map(function (anchor) {
+                var href = anchor.href;
+                var label = String(anchor.text || "").toLowerCase();
+                if (/gofile\.io/i.test(href) || /gofile/i.test(label)) return resolveGofile(href);
+                if (/megaup\.net/i.test(href)) return Promise.resolve([buildStreamResult(href, "GDFlix[Mirror Megaup] " + fileName + "[" + fileSize + "]", {}, quality)]);
+                if (/1fichier\.com/i.test(href)) return Promise.resolve([buildStreamResult(href, "GDFlix[Mirror 1fichier] " + fileName + "[" + fileSize + "]", {}, quality)]);
+                if (/download-fast\//i.test(href)) return Promise.resolve([buildStreamResult(absoluteUrl(baseOrigin(url), href), "GDFlix[Mirror Direct] " + fileName + "[" + fileSize + "]", {}, quality)]);
+                return Promise.resolve([]);
+            })).then(flattenResults);
+        }).catch(function () {
+            return [];
+        });
+    }
+
+    function resolveGdflixZfile(url, fileName, fileSize, quality) {
+        return getText(url, defaultHeaders({ "Referer": baseOrigin(url) + "/" })).then(function (html) {
+            var anchors = parseAnchors(html, baseOrigin(url)).filter(function (anchor) {
+                return anchor && anchor.href && !isIgnoredAnchorLink(anchor.href);
+            });
+            return Promise.all(anchors.map(function (anchor) {
+                var label = String(anchor.text || "").toLowerCase();
+                var href = anchor.href;
+                if (/rest\.awscdn\.rest|hub\.diskcdn\.buzz|video-downloads\.googleusercontent\.com|instant\.busycdn\.xyz|fastcdn-dl\.pages\.dev/i.test(href)) {
+                    return Promise.resolve([buildStreamResult(href, "GDFlix[ZFile] " + fileName + "[" + fileSize + "]", {}, quality)]);
+                }
+                if (/cloud resume|download|instant/i.test(label)) {
+                    return Promise.resolve([buildStreamResult(href, "GDFlix[ZFile] " + fileName + "[" + fileSize + "]", {}, quality)]);
+                }
+                return resolveExtractorUrl(href, "GDFlix");
+            })).then(flattenResults);
+        }).catch(function () {
+            return [];
+        });
+    }
+
     function resolveGdflix(url) {
-        return getLatestGdflixUrl().then(function (latestUrl) {
-            var finalUrl = String(url || "").replace("https://*.gdflix.*", latestUrl);
+        var inputUrl = String(url || "");
+        var latestUrlPromise = /https:\/\/\*\.gdflix\.\*/i.test(inputUrl)
+            ? getLatestGdflixUrl()
+            : Promise.resolve(baseOrigin(inputUrl));
+
+        return latestUrlPromise.then(function (latestUrl) {
+            var finalUrl = /https:\/\/\*\.gdflix\.\*/i.test(inputUrl)
+                ? inputUrl.replace("https://*.gdflix.*", latestUrl)
+                : inputUrl;
             return getText(finalUrl, defaultHeaders()).then(function (html) {
                 var fileName = stripTags(firstMatch(html, [/<li\b[^>]*class=["'][^"']*list-group-item[^"']*["'][^>]*>[\s\S]*?Name\s*:\s*([\s\S]*?)<\/li>/i]));
                 var fileSize = stripTags(firstMatch(html, [/<li\b[^>]*class=["'][^"']*list-group-item[^"']*["'][^>]*>[\s\S]*?Size\s*:\s*([\s\S]*?)<\/li>/i]));
                 var quality = getQualityFromText(fileName);
-                var section = firstMatch(html, [/<div\b[^>]*class=["'][^"']*text-center[^"']*["'][^>]*>([\s\S]*?)<\/div>/i]) || html;
-                var anchors = parseAnchors(section, baseOrigin(finalUrl));
+                var anchors = parseAnchors(html, baseOrigin(finalUrl)).filter(isRelevantGdflixAnchor);
+                var fastDirectResults = anchors.filter(function (anchor) {
+                    return /instant\.busycdn\.xyz|video-downloads\.googleusercontent\.com|rest\.awscdn\.rest|hub\.diskcdn\.buzz/i.test(anchor.href || "");
+                }).map(function (anchor) {
+                    return buildStreamResult(anchor.href, "GDFlix[Direct] " + fileName + "[" + fileSize + "]", {}, quality);
+                });
+
+                if (fastDirectResults.length) return fastDirectResults;
 
                 return Promise.all(anchors.map(function (anchor) {
                     var text = String(anchor.text || "");
+                    if (/video-downloads\.googleusercontent\.com|rest\.awscdn\.rest|hub\.diskcdn\.buzz/i.test(anchor.href)) {
+                        return Promise.resolve([buildStreamResult(anchor.href, "GDFlix[Direct] " + fileName + "[" + fileSize + "]", {}, quality)]);
+                    }
+                    if (/instant\.busycdn\.xyz/i.test(anchor.href) || /Instant DL/i.test(text)) {
+                        return request(anchor.href, { headers: defaultHeaders(), allowRedirects: false }).then(function (res) {
+                            var instantUrl = decodeQueryParam(res.headers.location || "", "url") || decodeQueryParam(anchor.href, "url") || res.headers.location || anchor.href;
+                            return [buildStreamResult(instantUrl, "GDFlix[Instant Download] " + fileName + "[" + fileSize + "]", {}, quality)];
+                        }).catch(function () {
+                            return [buildStreamResult(anchor.href, "GDFlix[Instant Download] " + fileName + "[" + fileSize + "]", {}, quality)];
+                        });
+                    }
                     if (/DIRECT DL/.test(text)) {
                         return Promise.resolve([buildStreamResult(anchor.href, "GDFlix[Direct] " + fileName + "[" + fileSize + "]", {}, quality)]);
                     }
@@ -1359,16 +1446,11 @@
                             return [];
                         });
                     }
+                    if (/FAST CLOUD|ZIPDISK/i.test(text) || /\/zfile\//i.test(anchor.href)) {
+                        return resolveGdflixZfile(absoluteUrl(latestUrl, anchor.href), fileName, fileSize, quality);
+                    }
                     if (/DRIVEBOT/i.test(text)) {
                         return resolveDrivebot(anchor.href, fileName, fileSize, quality);
-                    }
-                    if (/Instant DL/i.test(text)) {
-                        return request(anchor.href, { headers: defaultHeaders(), allowRedirects: false }).then(function (res) {
-                            var instantUrl = decodeQueryParam(res.headers.location || "", "url") || decodeQueryParam(anchor.href, "url") || anchor.href;
-                            return [buildStreamResult(instantUrl, "GDFlix[Instant Download] " + fileName + "[" + fileSize + "]", {}, quality)];
-                        }).catch(function () {
-                            return [];
-                        });
                     }
                     if (/GoFile/i.test(text)) {
                         return getText(anchor.href, defaultHeaders()).then(function (gofileHtml) {
@@ -1381,6 +1463,9 @@
                         }).catch(function () {
                             return [];
                         });
+                    }
+                    if (/validate\.multiup2\.workers\.dev|multiup/i.test(anchor.href) || /mirrors?/i.test(text)) {
+                        return resolveMultiupMirror(anchor.href, fileName, fileSize, quality);
                     }
                     return Promise.resolve([]);
                 })).then(flattenResults);
@@ -1539,6 +1624,7 @@
         if (/hubdrive\./i.test(url)) return withTimeout(resolveHubDrive(url), 20000, "HubDrive");
         if (/filepress\.|filebee/i.test(url)) return withTimeout(resolveFilepress(url), 25000, "Filepress");
         if (/gdfli?x/i.test(url)) return withTimeout(resolveGdflix(url), 25000, "GDFlix");
+        if (/validate\.multiup2\.workers\.dev|multiup/i.test(url)) return withTimeout(resolveMultiupMirror(url, "", "", getQualityFromText(url)), 25000, "MultiUp");
         if (/gofile\.io/i.test(url)) return withTimeout(resolveGofile(url), 20000, "Gofile");
         if (/mdrive\.ink\//i.test(url)) return withTimeout(resolveMdrive(url), 30000, "MDrive");
         if (/vcloud\.zip/i.test(url)) return withTimeout(resolveVcloud(url), 20000, "VCloud");
