@@ -4,6 +4,7 @@
     var DEFAULT_BASE_URL = "https://new1.movies4u.style";
     var DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
     var TMDB_WORKER_API = "https://api.themoviedb.org/3";
+    var TMDB_FALLBACK_API = "https://wild-surf-4a0d.phisher1.workers.dev";
     var TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original";
     var TMDB_API = "https://api.themoviedb.org/3";
     var TMDB_WORKER_API_KEY = "1865f43a0549ca50d341dd9ab8b29f49";
@@ -684,6 +685,15 @@
         });
     }
 
+    function getTmdbFallbackPath(path) {
+        var value = String(path || "");
+        if (!value) return "";
+        if (value.indexOf(TMDB_FALLBACK_API) === 0) return value;
+        if (value.indexOf(TMDB_API) === 0) return TMDB_FALLBACK_API + value.slice(TMDB_API.length);
+        if (value.indexOf(TMDB_WORKER_API) === 0) return TMDB_FALLBACK_API + value.slice(TMDB_WORKER_API.length);
+        return "";
+    }
+
     function fetchTmdbJson(path) {
         var key = String(path || "");
         var now = Date.now();
@@ -691,7 +701,12 @@
             return Promise.resolve(tmdbJsonCache[key].data);
         }
         if (tmdbInflight[key]) return tmdbInflight[key];
-        tmdbInflight[key] = fetchJsonWithRetry(key, defaultHeaders(), 3).then(function (json) {
+        tmdbInflight[key] = fetchJsonWithRetry(key, defaultHeaders(), 2).then(function (json) {
+            if (hasMeaningfulJsonData(json)) return json;
+            var fallbackPath = getTmdbFallbackPath(key);
+            if (!fallbackPath || fallbackPath === key) return json || {};
+            return fetchJsonWithRetry(fallbackPath, defaultHeaders(), 2);
+        }).then(function (json) {
             if (hasMeaningfulJsonData(json)) {
                 tmdbJsonCache[key] = { data: json || {}, time: Date.now() };
             }
@@ -970,6 +985,10 @@
         var value = String(url || "");
         if (!/^https?:\/\//i.test(value) || isIgnoredAnchorLink(value)) return false;
         return /m4ulinks\.com|filesdl\.|hubcloud\.|gamerxyt\.com\/hubcloud\.php|hubdrive\.|gdfli?x|gdlink|filepress\.|filebee|gofile\.io|mdrive\.ink\/|vcloud\.zip|fastdl\.zip|multiup|validate\.multiup2\.workers\.dev/i.test(value);
+    }
+
+    function isWrapperOnlyExtractor(url) {
+        return /m4ulinks\.com/i.test(String(url || ""));
     }
 
     function isRelevantGdflixAnchor(anchor) {
@@ -1253,8 +1272,14 @@
 
     function resolveGofile(url) {
         var idMatch = String(url || "").match(/(?:\?c=|\/d\/)([\da-zA-Z-]+)/i);
-        if (!idMatch) return Promise.resolve([]);
+        if (!idMatch) {
+            if (/gofile\.io/i.test(String(url || ""))) {
+                return Promise.resolve([buildStreamResult(url, "Gofile", defaultHeaders({ "Referer": "https://gofile.io/" }), getQualityFromText(url))]);
+            }
+            return Promise.resolve([]);
+        }
         var folderId = idMatch[1];
+        var fallbackHeaders = defaultHeaders({ "Referer": "https://gofile.io/" });
 
         return request("https://api.gofile.io/accounts", {
             method: "POST",
@@ -1263,31 +1288,32 @@
         }).then(function (accountRes) {
             var accountJson = parseJsonSafe(accountRes.body, {});
             var token = accountJson && accountJson.data && accountJson.data.token;
-            if (!token) return [];
+            if (!token) {
+                return [buildStreamResult(url, "Gofile", fallbackHeaders, getQualityFromText(url))];
+            }
 
-            return getText("https://gofile.io/dist/js/global.js", defaultHeaders()).then(function (globalJs) {
-                var wt = firstMatch(globalJs, [/appdata\.wt\s*=\s*["']([^"']+)["']/i]);
-                if (!wt) return [];
-
-                return getJson("https://api.gofile.io/contents/" + folderId + "?wt=" + encodeURIComponent(wt), {
+            return request("https://api.gofile.io/contents/" + folderId + "?wt=4fd6sg89d7s6", {
+                headers: {
                     "Authorization": "Bearer " + token,
                     "User-Agent": "Mozilla/5.0"
-                }).then(function (json) {
-                    var children = json && json.data && json.data.children || {};
-                    var entries = [];
-                    for (var key in children) {
-                        if (!Object.prototype.hasOwnProperty.call(children, key)) continue;
-                        var file = children[key];
-                        if (!file || !file.link) continue;
-                        entries.push(buildStreamResult(file.link, "Gofile", {
-                            "Cookie": "accountToken=" + token
-                        }, getQualityFromText(file.name || "")));
-                    }
-                    return entries;
-                });
+                },
+                timeout: 15000
+            }).then(function (contentsRes) {
+                var json = parseJsonSafe(contentsRes.body, {});
+                var children = json && json.data && json.data.children || {};
+                var entries = [];
+                for (var key in children) {
+                    if (!Object.prototype.hasOwnProperty.call(children, key)) continue;
+                    var file = children[key];
+                    if (!file || !file.link) continue;
+                    entries.push(buildStreamResult(file.link, "Gofile", {
+                        "Cookie": "accountToken=" + token
+                    }, getQualityFromText(file.name || "")));
+                }
+                return entries.length ? entries : [buildStreamResult(url, "Gofile", fallbackHeaders, getQualityFromText(url))];
             });
         }).catch(function () {
-            return [];
+            return [buildStreamResult(url, "Gofile", fallbackHeaders, getQualityFromText(url))];
         });
     }
 
@@ -1568,16 +1594,7 @@
                         return resolveDrivebot(anchor.href, fileName, fileSize, quality);
                     }
                     if (/GoFile/i.test(text)) {
-                        return getText(anchor.href, defaultHeaders()).then(function (gofileHtml) {
-                            var goAnchors = parseAnchors(gofileHtml, baseOrigin(anchor.href)).filter(function (item) {
-                                return /gofile/i.test(item.href || "");
-                            });
-                            return Promise.all(goAnchors.map(function (goAnchor) {
-                                return resolveGofile(goAnchor.href);
-                            })).then(flattenResults);
-                        }).catch(function () {
-                            return [];
-                        });
+                        return Promise.resolve([buildStreamResult(anchor.href, "GDFlix[GoFile] " + fileName + "[" + fileSize + "]", defaultHeaders({ "Referer": latestUrl }), quality)]);
                     }
                     if (/validate\.multiup2\.workers\.dev|multiup/i.test(anchor.href) || /mirrors?/i.test(text)) {
                         return resolveMultiupMirror(anchor.href, fileName, fileSize, quality);
@@ -1999,21 +2016,20 @@
                 }
             }
 
-            var rawStreams = uniqueBy((payload.links || []).filter(function (link) {
-                return isRawExtractorCandidate(link) || isDirectMediaUrl(link) || looksLikeGoogleDriveUrl(link);
-            }).map(function (link) {
+            var resolved = await Promise.all((payload.links || []).map(function (link) {
                 var quality = getQualityFromText(String(link || "") + " " + String(payload.title || ""));
-                return buildStreamResult(link, sourceLabelFromUrl(link), defaultHeaders({ "Referer": payload.sourceUrl || baseOrigin(link) + "/" }), quality);
-            }), function (item) {
-                return String(item.url || "");
-            });
-
-            var resolveTargets = rawStreams.length ? (payload.links || []).filter(function (link) {
-                return !isRawExtractorCandidate(link) && !isDirectMediaUrl(link) && !looksLikeGoogleDriveUrl(link);
-            }) : (payload.links || []);
-
-            var resolved = await Promise.all(resolveTargets.map(function (link) {
-                return resolveExtractorUrl(link, "Movies4u");
+                var rawFallback = [buildStreamResult(link, sourceLabelFromUrl(link), defaultHeaders({ "Referer": payload.sourceUrl || baseOrigin(link) + "/" }), quality)];
+                if (isDirectMediaUrl(link) || looksLikeGoogleDriveUrl(link)) {
+                    return Promise.resolve(rawFallback);
+                }
+                return resolveExtractorUrl(link, "Movies4u").then(function (results) {
+                    if (results && results.length) return results;
+                    if (isRawExtractorCandidate(link)) return rawFallback;
+                    return [];
+                }).catch(function () {
+                    if (isRawExtractorCandidate(link)) return rawFallback;
+                    return [];
+                });
             }));
 
             var streams = uniqueBy(flattenResults(resolved), function (item) {
@@ -2022,36 +2038,11 @@
                 return !!(item && item.url) && isUsableStreamUrl(item.url);
             });
 
-            if (rawStreams.length) {
-                streams = uniqueBy(rawStreams.concat(streams.filter(function (item) {
-                    return !isEphemeralResolvedUrl(item.url);
-                })), function (item) {
-                    return String(item.url || "") + "|" + String(item.source || "");
-                });
-            }
-
             var preferredStreams = streams.filter(function (item) {
-                return isPreferredStreamUrl(item.url) && !isZipLikeResult(item);
+                return isPreferredStreamUrl(item.url);
             });
             if (preferredStreams.length) {
                 streams = preferredStreams;
-            } else {
-                var nonZipStreams = streams.filter(function (item) { return !isZipLikeResult(item); });
-                if (nonZipStreams.length) streams = nonZipStreams;
-            }
-
-            var stableExtractorStreams = streams.filter(function (item) {
-                return isRawExtractorCandidate(item.url) || looksLikeGoogleDriveUrl(item.url) || isDirectMediaUrl(item.url);
-            });
-            if (stableExtractorStreams.length) {
-                streams = uniqueBy(stableExtractorStreams.concat(streams.filter(function (item) {
-                    return !isEphemeralResolvedUrl(item.url)
-                        && !isRawExtractorCandidate(item.url)
-                        && !looksLikeGoogleDriveUrl(item.url)
-                        && !isDirectMediaUrl(item.url);
-                })), function (item) {
-                    return String(item.url || "") + "|" + String(item.source || "");
-                });
             }
 
             streams = streams.filter(function (item, _, list) {
