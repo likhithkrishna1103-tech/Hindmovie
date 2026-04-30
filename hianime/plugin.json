@@ -1,0 +1,10 @@
+{
+  "packageName": "com.igris.repo.hianime",
+  "name": "HIANIME",
+  "version": 2,
+  "baseUrl": "https://megaplay.buzz",
+  "description": "Anime plugin using HiAnime sources through MegaPlay, Vidwish, and MegaCloud.",
+  "authors": ["IGRIS"],
+  "languages": ["ja", "en"],
+  "categories": ["Anime"]
+}
