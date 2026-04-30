@@ -388,25 +388,6 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztv.sky"
   },
   {
-    "packageName": "com.igris.repo.pulp",
-    "name": "Pulp",
-    "version": 2,
-    "baseUrl": "https://api.pulp.watch/v1",
-    "description": "Fast TMDB-powered movie and series catalog with streams from Pulp.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "en",
-      "hi"
-    ],
-    "categories": [
-      "Movies",
-      "Series"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.pulp.sky"
-  },
-  {
     "packageName": "com.igris.repo.tokyoinsider",
     "name": "TokyoInsider",
     "version": 4,
@@ -427,7 +408,7 @@
   {
     "packageName": "com.igris.repo.vegamovies",
     "name": "VegaMovies",
-    "version": 82,
+    "version": 83,
     "baseUrl": "https://vegamovies.vodka",
     "description": "VegaMovies catalog with Nexdrive, G-Direct, FileBee, and V-Cloud stream resolution.",
     "authors": [
