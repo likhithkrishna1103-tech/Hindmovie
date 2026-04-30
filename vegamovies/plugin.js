@@ -604,7 +604,7 @@
     function isDirectMediaUrl(url) {
         return /\.(?:m3u8|mp4|mkv|avi|mov|webm)(?:[?#]|$)/i.test(String(url || ""))
             || /\/api\/file\/.+\?download/i.test(String(url || ""))
-            || /hub\.shipcdn\.|hubcdn\.fans|r2\.dev/i.test(String(url || ""));
+            || /hub\.shipcdn\.|hubcdn\.fans|r2\.dev|googleusercontent\.com|vglist\.cv/i.test(String(url || ""));
     }
 
     async function resolveFinalUrl(startUrl, referer) {
@@ -655,11 +655,17 @@
     }
 
     function extractFastdlDirectUrl(html, pageUrl) {
-        return absoluteUrl(pageUrl, firstMatch(html, [
+        var link = absoluteUrl(pageUrl, firstMatch(html, [
             /var\s+reurl\s*=\s*"([^"]+)"/i,
             /var\s+reurl\s*=\s*'([^']+)'/i,
-            /window\.location\s*=\s*reurl/i
+            /window\.location\s*=\s*reurl/i,
+            /<a\b[^>]*id=["']vd["'][^>]*href=["']([^"']+)["']/i
         ]));
+        if (link.indexOf("dl.php?link=") !== -1) {
+            var parts = link.split("dl.php?link=");
+            if (parts[1]) return decodeURIComponent(parts[1]);
+        }
+        return link;
     }
 
     function extractHiddenContentLinks(html, pageUrl) {
