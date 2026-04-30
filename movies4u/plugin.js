@@ -872,6 +872,22 @@
         });
     }
 
+    function sourceLabelFromUrl(url) {
+        var value = String(url || "").toLowerCase();
+        if (/m4ulinks\.com/.test(value)) return "Movies4u [M4ULinks]";
+        if (/filesdl\./.test(value)) return "Movies4u [FilesDL]";
+        if (/gdfli?x|gdlink/.test(value)) return "Movies4u [GDFlix]";
+        if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php/.test(value)) return "Movies4u [HubCloud]";
+        if (/hubdrive\./.test(value)) return "Movies4u [HubDrive]";
+        if (/filepress\.|filebee/.test(value)) return "Movies4u [Filepress]";
+        if (/gofile\.io/.test(value)) return "Movies4u [Gofile]";
+        if (/mdrive\.ink\//.test(value)) return "Movies4u [MDrive]";
+        if (/vcloud\.zip/.test(value)) return "Movies4u [VCloud]";
+        if (/fastdl\.zip/.test(value)) return "Movies4u [FastDL]";
+        if (/multiup|validate\.multiup2\.workers\.dev/.test(value)) return "Movies4u [MultiUp]";
+        return "Movies4u";
+    }
+
     function buildActorList(castArray) {
         var cast = [];
         for (var i = 0; i < (castArray || []).length; i++) {
@@ -933,6 +949,10 @@
         return /pixeldrain\.(dev|com)\/api\/file\//i.test(String(item && item.url || ""));
     }
 
+    function isEphemeralResolvedUrl(url) {
+        return /instant\.busycdn\.xyz|hub\.diskcdn\.buzz|rest\.awscdn\.rest|video-downloads\.googleusercontent\.com|\/cdn-cgi\/content\?id=/i.test(String(url || ""));
+    }
+
     function isInterestingExtractorUrl(url) {
         var value = String(url || "");
         if (!value) return false;
@@ -944,6 +964,12 @@
 
     function isIgnoredAnchorLink(url) {
         return /\/drive\/admin(?:[/?#]|$)|\/login(?:[/?#]|$)|t\.me\/|telegram|tinyurl\.com\/|winexch\.com|how-to-download/i.test(String(url || ""));
+    }
+
+    function isRawExtractorCandidate(url) {
+        var value = String(url || "");
+        if (!/^https?:\/\//i.test(value) || isIgnoredAnchorLink(value)) return false;
+        return /m4ulinks\.com|filesdl\.|hubcloud\.|gamerxyt\.com\/hubcloud\.php|hubdrive\.|gdfli?x|gdlink|filepress\.|filebee|gofile\.io|mdrive\.ink\/|vcloud\.zip|fastdl\.zip|multiup|validate\.multiup2\.workers\.dev/i.test(value);
     }
 
     function isRelevantGdflixAnchor(anchor) {
@@ -1973,7 +1999,20 @@
                 }
             }
 
-            var resolved = await Promise.all((payload.links || []).map(function (link) {
+            var rawStreams = uniqueBy((payload.links || []).filter(function (link) {
+                return isRawExtractorCandidate(link) || isDirectMediaUrl(link) || looksLikeGoogleDriveUrl(link);
+            }).map(function (link) {
+                var quality = getQualityFromText(String(link || "") + " " + String(payload.title || ""));
+                return buildStreamResult(link, sourceLabelFromUrl(link), defaultHeaders({ "Referer": payload.sourceUrl || baseOrigin(link) + "/" }), quality);
+            }), function (item) {
+                return String(item.url || "");
+            });
+
+            var resolveTargets = rawStreams.length ? (payload.links || []).filter(function (link) {
+                return !isRawExtractorCandidate(link) && !isDirectMediaUrl(link) && !looksLikeGoogleDriveUrl(link);
+            }) : (payload.links || []);
+
+            var resolved = await Promise.all(resolveTargets.map(function (link) {
                 return resolveExtractorUrl(link, "Movies4u");
             }));
 
@@ -1983,6 +2022,14 @@
                 return !!(item && item.url) && isUsableStreamUrl(item.url);
             });
 
+            if (rawStreams.length) {
+                streams = uniqueBy(rawStreams.concat(streams.filter(function (item) {
+                    return !isEphemeralResolvedUrl(item.url);
+                })), function (item) {
+                    return String(item.url || "") + "|" + String(item.source || "");
+                });
+            }
+
             var preferredStreams = streams.filter(function (item) {
                 return isPreferredStreamUrl(item.url) && !isZipLikeResult(item);
             });
@@ -1991,6 +2038,20 @@
             } else {
                 var nonZipStreams = streams.filter(function (item) { return !isZipLikeResult(item); });
                 if (nonZipStreams.length) streams = nonZipStreams;
+            }
+
+            var stableExtractorStreams = streams.filter(function (item) {
+                return isRawExtractorCandidate(item.url) || looksLikeGoogleDriveUrl(item.url) || isDirectMediaUrl(item.url);
+            });
+            if (stableExtractorStreams.length) {
+                streams = uniqueBy(stableExtractorStreams.concat(streams.filter(function (item) {
+                    return !isEphemeralResolvedUrl(item.url)
+                        && !isRawExtractorCandidate(item.url)
+                        && !looksLikeGoogleDriveUrl(item.url)
+                        && !isDirectMediaUrl(item.url);
+                })), function (item) {
+                    return String(item.url || "") + "|" + String(item.source || "");
+                });
             }
 
             streams = streams.filter(function (item, _, list) {
