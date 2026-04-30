@@ -217,24 +217,6 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.heartivetv.sky"
   },
   {
-    "packageName": "com.igris.repo.hianime",
-    "name": "HIANIME",
-    "version": 2,
-    "baseUrl": "https://megaplay.buzz",
-    "description": "Anime plugin using HiAnime sources through MegaPlay, Vidwish, and MegaCloud.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "ja",
-      "en"
-    ],
-    "categories": [
-      "Anime"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.hianime.sky"
-  },
-  {
     "packageName": "com.igris.repo.hindmoviez",
     "name": "HindMoviez",
     "version": 9,
