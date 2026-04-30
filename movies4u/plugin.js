@@ -668,19 +668,88 @@
         });
     }
 
-    function findTmdbId(imdbId, type, title) {
+    function normalizeTmdbTitle(value) {
+        return String(value || "")
+            .toLowerCase()
+            .replace(/&/g, "and")
+            .replace(/[^a-z0-9]+/g, " ")
+            .replace(/\bseason\s*\d+\b/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    function getTmdbResultYear(result) {
+        var date = result && (result.first_air_date || result.release_date) || "";
+        var year = Number(String(date).slice(0, 4));
+        return isNaN(year) ? 0 : year;
+    }
+
+    function scoreTmdbResult(result, expectedTitle, expectedYear) {
+        if (!result) return -Infinity;
+        var expected = normalizeTmdbTitle(expectedTitle);
+        var name = normalizeTmdbTitle(result.name || result.title || result.original_name || result.original_title);
+        var original = normalizeTmdbTitle(result.original_name || result.original_title);
+        var score = 0;
+
+        if (expected && name === expected) score += 200;
+        else if (expected && original === expected) score += 190;
+        else if (expected && name.indexOf(expected) !== -1) score += 140;
+        else if (expected && original.indexOf(expected) !== -1) score += 130;
+        else if (expected && expected.indexOf(name) !== -1 && name) score += 120;
+
+        var expectedWords = expected ? expected.split(" ") : [];
+        for (var i = 0; i < expectedWords.length; i++) {
+            var word = expectedWords[i];
+            if (word.length < 2) continue;
+            if (name.indexOf(word) !== -1 || original.indexOf(word) !== -1) score += 12;
+        }
+
+        var resultYear = getTmdbResultYear(result);
+        if (expectedYear && resultYear) {
+            if (resultYear === expectedYear) score += 80;
+            else score -= Math.min(Math.abs(resultYear - expectedYear) * 10, 60);
+        }
+
+        score += Number(result.popularity || 0) / 100;
+        return score;
+    }
+
+    function chooseBestTmdbResult(results, expectedTitle, expectedYear) {
+        var items = Array.isArray(results) ? results : [];
+        if (!items.length) return null;
+        var best = null;
+        var bestScore = -Infinity;
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            var score = scoreTmdbResult(item, expectedTitle, expectedYear);
+            if (score > bestScore) {
+                best = item;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
+    function searchTmdbId(mediaType, title, year) {
+        return fetchTmdbJson(TMDB_WORKER_API + "/search/" + mediaType + "?api_key=" + TMDB_WORKER_API_KEY + "&query=" + encodeURIComponent(title || "")).then(function (json) {
+            var best = chooseBestTmdbResult(json && json.results, title, year);
+            return best && best.id ? String(best.id) : "";
+        }).catch(function () { return ""; });
+    }
+
+    function findTmdbId(imdbId, type, title, year) {
         var mediaType = type === "movie" ? "movie" : "tv";
         if (imdbId) {
             return fetchTmdbJson(TMDB_WORKER_API + "/find/" + imdbId + "?api_key=" + TMDB_WORKER_API_KEY + "&external_source=imdb_id").then(function (json) {
                 var results = type === "movie" ? json.movie_results : json.tv_results;
                 if (results && results[0] && results[0].id) return String(results[0].id);
-                return "";
-            }).catch(function () { return ""; });
+                return searchTmdbId(mediaType, title, year);
+            }).catch(function () {
+                return searchTmdbId(mediaType, title, year);
+            });
         }
 
-        return fetchTmdbJson(TMDB_WORKER_API + "/search/" + mediaType + "?api_key=" + TMDB_WORKER_API_KEY + "&query=" + encodeURIComponent(title || "")).then(function (json) {
-            return json && json.results && json.results[0] && json.results[0].id ? String(json.results[0].id) : "";
-        }).catch(function () { return ""; });
+        return searchTmdbId(mediaType, title, year);
     }
 
     function fetchTmdbDetails(type, tmdbId) {
@@ -709,6 +778,18 @@
         }).catch(function () {
             return {};
         });
+    }
+
+    function getSeasonEpisodeNumbers(seasonMetadata, season) {
+        var numbers = [];
+        var prefix = String(season) + "_";
+        for (var key in (seasonMetadata || {})) {
+            if (!Object.prototype.hasOwnProperty.call(seasonMetadata, key)) continue;
+            if (key.indexOf(prefix) !== 0) continue;
+            var episode = Number(key.slice(prefix.length));
+            if (!isNaN(episode) && episode > 0) numbers.push(episode);
+        }
+        return numbers.sort(function (a, b) { return a - b; });
     }
 
     function buildLoadPayload(sourceUrl, links, context) {
@@ -1533,6 +1614,8 @@
 
             var rawOgTitle = extractMetaContent(html, "og:title") || "Unknown Title";
             var title = trim(rawOgTitle.split("(")[0]) || "Unknown Title";
+            var titleYearMatch = rawOgTitle.match(/\((\d{4})\)/);
+            var titleYear = titleYearMatch ? Number(titleYearMatch[1]) : 0;
             var plot = extractStoryline(html);
             var poster = extractMetaContent(html, "og:image")
                 || getImageFromBlock(firstMatch(html, [/<div\b[^>]*class=["'][^"']*post-thumbnail[^"']*["'][^>]*>([\s\S]*?)<\/div>/i]), sourceUrl);
@@ -1547,17 +1630,18 @@
                 return;
             }
 
-            var tmdbId = await findTmdbId(imdbId, isMovie ? "movie" : "tv", title);
+            var tmdbId = await findTmdbId(imdbId, isMovie ? "movie" : "tv", title, titleYear);
             var logoUrl = await fetchTmdbLogoUrl(isMovie ? "movie" : "tv", tmdbId);
 
             var episodeMeta = {};
             var episodeLinksMap = {};
 
-            if (!isMovie && tmdbId) {
+            if (!isMovie) {
                 var seasonSections = getSeasonSections(html, baseOrigin(sourceUrl));
                 for (var i = 0; i < seasonSections.length; i++) {
                     var section = seasonSections[i];
-                    var seasonMetadata = await fetchSeasonMetadata(tmdbId, section.season);
+                    var seasonMetadata = tmdbId ? await fetchSeasonMetadata(tmdbId, section.season) : {};
+                    var seasonEpisodeNumbers = getSeasonEpisodeNumbers(seasonMetadata, section.season);
                     for (var metaKey in seasonMetadata) {
                         if (Object.prototype.hasOwnProperty.call(seasonMetadata, metaKey)) {
                             episodeMeta[metaKey] = seasonMetadata[metaKey];
@@ -1577,9 +1661,13 @@
                                     episodeLinksMap[key] = episodeLinksMap[key].concat(epBlock.links);
                                 }
                             } else {
-                                var fallbackKey = String(section.season) + "_1";
-                                if (!episodeLinksMap[fallbackKey]) episodeLinksMap[fallbackKey] = [];
-                                episodeLinksMap[fallbackKey].push(qualityLink);
+                                var fallbackEpisodes = seasonEpisodeNumbers.length ? seasonEpisodeNumbers : [1];
+                                for (var epIndex = 0; epIndex < fallbackEpisodes.length; epIndex++) {
+                                    var fallbackEpisode = fallbackEpisodes[epIndex];
+                                    var fallbackKey = String(section.season) + "_" + String(fallbackEpisode);
+                                    if (!episodeLinksMap[fallbackKey]) episodeLinksMap[fallbackKey] = [];
+                                    episodeLinksMap[fallbackKey].push(qualityLink);
+                                }
                             }
                         } catch (_) {}
                     }
