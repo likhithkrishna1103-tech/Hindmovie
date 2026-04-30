@@ -1754,14 +1754,7 @@
         if (looksLikeGoogleDriveUrl(url)) return resolveGoogleDrive(url);
         if (/m4ulinks\.com/i.test(url)) return withTimeout(resolveM4ulinks(url), 20000, "M4ULinks");
         if (/filesdl\./i.test(url)) return withTimeout(resolveFilesdl(url), 20000, "FilesDL");
-        if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php/i.test(url)) {
-            return Promise.resolve([buildStreamResult(
-                url,
-                refererLabel || "HubCloud",
-                defaultHeaders({ "Referer": baseOrigin(url) + "/" }),
-                getQualityFromText(url)
-            )]);
-        }
+        if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php/i.test(url)) return withTimeout(resolveHubCloudWithFallback(url, refererLabel || "HubCloud"), 25000, "HubCloud");
         if (/hubdrive\./i.test(url)) return withTimeout(resolveHubDrive(url), 20000, "HubDrive");
         if (/filepress\.|filebee/i.test(url)) return withTimeout(resolveFilepress(url), 25000, "Filepress");
         if (/gdfli?x/i.test(url)) return withTimeout(resolveGdflix(url), 25000, "GDFlix");
