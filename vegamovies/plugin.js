@@ -769,27 +769,38 @@
         var sourceUrl = typeof source === "string" ? source : source.source;
         var name = source.sourceName || "VegaMovies";
         var quality = source.quality || getQualityFromText(source.title + " " + sourceUrl + " " + context.title);
+        var isVcloud = /vcloud|gamerxyt\.com\/hubcloud\.php|hubcloud\./i.test(sourceUrl);
+        var isFastdl = /fastdl\.zip\/embed/i.test(sourceUrl);
+        var isFilebee = /filebee\.xyz|filepress/i.test(sourceUrl);
+        var isKnownResolver = isVcloud || isFastdl || isFilebee;
+
         try {
-            if (/vcloud|gamerxyt\.com\/hubcloud\.php|hubcloud\./i.test(sourceUrl)) {
+            if (isVcloud) {
                 var vcloud = await resolveVcloud(source, context);
                 if (vcloud.length) return vcloud;
+                return [];
             }
-            if (/fastdl\.zip\/embed/i.test(sourceUrl)) {
+            if (isFastdl) {
                 var fastdl = await resolveFastdl(source, context);
                 if (fastdl.length) return fastdl;
+                return [];
             }
-            if (/filebee\.xyz|filepress/i.test(sourceUrl)) {
+            if (isFilebee) {
                 var filebee = await resolveFilebee(source, context);
                 if (filebee.length) return filebee;
+                return [];
             }
         } catch (_) {
-            if (!/vcloud/i.test(sourceUrl)) {
-                return [buildStreamResult(sourceUrl, name, { "Referer": source.referer || context.sourceUrl || DEFAULT_BASE_URL + "/" }, quality)];
-            }
+            // Resolver threw - return empty for known resolvers
+            if (isKnownResolver) return [];
         }
+
+        // Only return direct media URLs, not intermediate resolver links
         if (isDirectMediaUrl(sourceUrl)) {
             return [buildStreamResult(sourceUrl, name, { "Referer": source.referer || context.sourceUrl || DEFAULT_BASE_URL + "/" }, quality)];
         }
+
+        // Unknown URL type - return as-is with referer for manual handling
         return [buildStreamResult(sourceUrl, name, { "Referer": source.referer || context.sourceUrl || DEFAULT_BASE_URL + "/" }, quality)];
     }
 
