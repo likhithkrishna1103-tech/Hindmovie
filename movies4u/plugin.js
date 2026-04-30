@@ -12,6 +12,8 @@
     var domainCache = null;
     var gdflixDomainCache = null;
     var urlCache = {};
+    var tmdbJsonCache = {};
+    var tmdbInflight = {};
     var CACHE_TTL = 300000;
 
     var MAIN_PAGE_SECTIONS = [
@@ -90,6 +92,27 @@
                 return fallback;
             }
         }
+    }
+
+    function hasMeaningfulJsonData(value) {
+        if (!value || typeof value !== "object") return false;
+        if (Array.isArray(value)) return value.length > 0;
+        for (var key in value) {
+            if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+            var item = value[key];
+            if (Array.isArray(item)) {
+                if (item.length) return true;
+                continue;
+            }
+            if (item && typeof item === "object") {
+                for (var nestedKey in item) {
+                    if (Object.prototype.hasOwnProperty.call(item, nestedKey)) return true;
+                }
+                continue;
+            }
+            if (item !== "" && item !== null && typeof item !== "undefined") return true;
+        }
+        return false;
     }
 
     function absoluteUrl(base, path) {
@@ -548,7 +571,9 @@
             /<div\b[^>]*class=["'][^"']*downloads-btns-div[^"']*["'][^>]*>/i,
             /<\/div>/i
         );
-        var links = parseAnchors(section, base).map(function (item) { return item.href; }).filter(Boolean);
+        var links = parseAnchors(section, base).filter(function (item) {
+            return item && item.href && !isIgnoredAnchorLink(item.href) && !/zip/i.test(String(item.text || ""));
+        }).map(function (item) { return item.href; }).filter(Boolean);
         if (links.length) return links;
 
         var buttonLinks = [];
@@ -564,7 +589,8 @@
             var text = String(item && item.text || "");
             if (!/^https?:\/\//i.test(href)) return false;
             if (baseOrigin(href) === baseOrigin(base)) return false;
-            if (/t\.me|telegram|hianime|fuckmaza|how-to-download/i.test(href)) return false;
+            if (isIgnoredAnchorLink(href) || /hianime|fuckmaza/i.test(href)) return false;
+            if (/zip/i.test(text)) return false;
             return /download|watch|server|drive|cloud|direct|gdflix|hubcloud|filepress|filebee|pixeldrain|gofile|m4ulinks|mdrive/i.test(text + " " + href);
         }).map(function (item) {
             return item.href;
@@ -634,14 +660,48 @@
             if (!episodeMatch) continue;
             blocks.push({
                 episode: Number(episodeMatch[1]),
-                links: parseAnchors(match[2], base).map(function (item) { return item.href; }).filter(Boolean)
+                links: parseAnchors(match[2], base).filter(function (item) {
+                    var href = String(item && item.href || "");
+                    var text = String(item && item.text || "");
+                    if (!href || isIgnoredAnchorLink(href)) return false;
+                    if (/zip/i.test(text)) return false;
+                    return true;
+                }).map(function (item) { return item.href; }).filter(Boolean)
             });
         }
         return blocks;
     }
 
+    function fetchJsonWithRetry(url, headers, attemptsLeft) {
+        return request(url, { headers: headers || defaultHeaders(), timeout: 15000 }).then(function (res) {
+            var json = parseJsonSafe(res.body, {});
+            if (json && typeof json === "object") return json;
+            if (attemptsLeft > 1) return fetchJsonWithRetry(url, headers, attemptsLeft - 1);
+            return {};
+        }).catch(function () {
+            if (attemptsLeft > 1) return fetchJsonWithRetry(url, headers, attemptsLeft - 1);
+            return {};
+        });
+    }
+
     function fetchTmdbJson(path) {
-        return getJson(path, defaultHeaders()).catch(function () { return {}; });
+        var key = String(path || "");
+        var now = Date.now();
+        if (tmdbJsonCache[key] && (now - tmdbJsonCache[key].time) < CACHE_TTL) {
+            return Promise.resolve(tmdbJsonCache[key].data);
+        }
+        if (tmdbInflight[key]) return tmdbInflight[key];
+        tmdbInflight[key] = fetchJsonWithRetry(key, defaultHeaders(), 3).then(function (json) {
+            if (hasMeaningfulJsonData(json)) {
+                tmdbJsonCache[key] = { data: json || {}, time: Date.now() };
+            }
+            delete tmdbInflight[key];
+            return json || {};
+        }).catch(function () {
+            delete tmdbInflight[key];
+            return {};
+        });
+        return tmdbInflight[key];
     }
 
     function fetchTmdbLogoUrl(type, tmdbId) {
@@ -849,6 +909,28 @@
         if (/mdrive\.ink\//i.test(value)) return true;
         if (/vcloud\.zip|fastdl\.zip/i.test(value)) return true;
         return false;
+    }
+
+    function isPreferredStreamUrl(url) {
+        var value = String(url || "");
+        if (!/^https?:\/\//i.test(value)) return false;
+        if (/(\.zip(?:[?#]|$)|Complete(?:\s+Zip)?\s+File)/i.test(value)) return false;
+        return isDirectMediaUrl(value)
+            || /pixeldrain\.(dev|com)\/api\/file\//i.test(value)
+            || /video-downloads\.googleusercontent\.com|instant\.busycdn\.xyz|fastcdn-dl\.pages\.dev|rest\.awscdn\.rest|diskcdn\.buzz|hub\.diskcdn\.buzz|hub\.hailmary\.lat/i.test(value)
+            || /gofile\.io\/download/i.test(value)
+            || /\/cdn-cgi\/content\?id=/i.test(value)
+            || looksLikeGoogleDriveUrl(value);
+    }
+
+    function isZipLikeResult(item) {
+        var url = String(item && item.url || "");
+        var source = String(item && item.source || "");
+        return /\.zip(?:[?#]|$)/i.test(url) || /\bzip\b/i.test(source);
+    }
+
+    function isPixeldrainResult(item) {
+        return /pixeldrain\.(dev|com)\/api\/file\//i.test(String(item && item.url || ""));
     }
 
     function isInterestingExtractorUrl(url) {
@@ -1070,7 +1152,14 @@
                 });
             }
             return Promise.all(blocks.map(function (block) {
-                return Promise.all((block.anchors || []).map(function (anchor) {
+                var anchors = (block.anchors || []).filter(function (anchor) {
+                    var href = String(anchor && anchor.href || "");
+                    var text = String(anchor && anchor.text || "");
+                    if (!href || isIgnoredAnchorLink(href)) return false;
+                    if (/zip/i.test(text) && !/gdflix|hubcloud|pixeldrain|gofile|filepress|filebee|drive/i.test(href + " " + text)) return false;
+                    return true;
+                });
+                return Promise.all(anchors.map(function (anchor) {
                     return resolveExtractorUrl(anchor.href, trim(block.qualityLabel || ""));
                 })).then(flattenResults);
             })).then(flattenResults);
@@ -1717,7 +1806,8 @@
             }
 
             var tmdbId = await findTmdbId(imdbId, isMovie ? "movie" : "tv", title, titleYear);
-            var logoUrl = await fetchTmdbLogoUrl(isMovie ? "movie" : "tv", tmdbId);
+            var logoPromise = fetchTmdbLogoUrl(isMovie ? "movie" : "tv", tmdbId);
+            var detailsPromise = tmdbId ? fetchTmdbDetails(isMovie ? "movie" : "tv", tmdbId) : Promise.resolve({});
 
             var episodeMeta = {};
             var episodeLinksMap = {};
@@ -1760,7 +1850,8 @@
                 }
             }
 
-            var tmdbDetails = tmdbId ? await fetchTmdbDetails(isMovie ? "movie" : "tv", tmdbId) : {};
+            var tmdbDetails = await detailsPromise;
+            var logoUrl = await logoPromise;
             if (tmdbDetails) {
                 title = tmdbDetails.name || tmdbDetails.title || title;
             }
@@ -1890,6 +1981,27 @@
                 return String(item.url || "") + "|" + JSON.stringify(item.headers || {});
             }).filter(function (item) {
                 return !!(item && item.url) && isUsableStreamUrl(item.url);
+            });
+
+            var preferredStreams = streams.filter(function (item) {
+                return isPreferredStreamUrl(item.url) && !isZipLikeResult(item);
+            });
+            if (preferredStreams.length) {
+                streams = preferredStreams;
+            } else {
+                var nonZipStreams = streams.filter(function (item) { return !isZipLikeResult(item); });
+                if (nonZipStreams.length) streams = nonZipStreams;
+            }
+
+            streams = streams.filter(function (item, _, list) {
+                if (!isPixeldrainResult(item)) return true;
+                var quality = getQualityFromText(item && item.source || "") || Number(item && item.quality || 0);
+                for (var i = 0; i < list.length; i++) {
+                    if (list[i] === item) continue;
+                    var otherQuality = getQualityFromText(list[i] && list[i].source || "") || Number(list[i] && list[i].quality || 0);
+                    if (otherQuality === quality && !isPixeldrainResult(list[i])) return false;
+                }
+                return true;
             });
 
             cb({

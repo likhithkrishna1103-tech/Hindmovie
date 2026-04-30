@@ -409,18 +409,19 @@
         return groups;
     }
 
-    function selectSeriesIntermediateAnchor(group) {
-        var anchors = group.anchors || [];
+    function selectSeriesIntermediateAnchors(group) {
+        var anchors = (group && group.anchors || []).filter(function (anchor) {
+            return anchor && anchor.href && !/batch|zip/i.test(String(anchor.text || ""));
+        });
+        var preferred = [];
         var i;
         for (i = 0; i < anchors.length; i++) {
-            if (/(?:V-?Cloud|Episode|Download)/i.test(anchors[i].text + " " + anchors[i].href) && !/batch|zip/i.test(anchors[i].text)) {
-                return anchors[i];
+            var value = String(anchors[i].text || "") + " " + String(anchors[i].href || "");
+            if (/(?:G-?Direct|V-?Cloud|Episode|Download|File)/i.test(value)) {
+                preferred.push(anchors[i]);
             }
         }
-        for (i = 0; i < anchors.length; i++) {
-            if (/G-?Direct/i.test(anchors[i].text)) return anchors[i];
-        }
-        return anchors[0] || null;
+        return preferred.length ? uniqueBy(preferred, function (item) { return item.href; }) : uniqueBy(anchors, function (item) { return item.href; });
     }
 
     function sourceLabelFromAnchor(anchor) {
@@ -428,7 +429,7 @@
         if (/vcloud/i.test(value)) return "V-Cloud";
         if (/fastdl|g-direct/i.test(value)) return "G-Direct";
         if (/gdtot/i.test(value)) return "GDToT";
-        if (/filebee/i.test(value)) return "FileBee";
+        if (/filebee|direct-\[drive-link\]|direct-download/i.test(value)) return "FileBee";
         if (/filepress/i.test(value)) return "Filepress";
         if (/pixeldrain/i.test(value)) return "Pixeldrain";
         if (/hubcloud|hubdrive/i.test(value)) return "HubCloud";
@@ -438,17 +439,17 @@
     }
 
     function isUsefulNexdriveAnchor(anchor) {
-        var value = String((anchor && (anchor.href + " " + anchor.text)) || "");
-        if (!/^https?:\/\//i.test(anchor && anchor.href || "")) return false;
-        if (/vglist|xmlrpc|wp-json|wp-content|telegram|google\.com\/search|one\.one\.one\.one|tinyurl\.com\/Unblock/i.test(value)) return false;
+        var href = String(anchor && anchor.href || "");
+        var value = String((anchor && (href + " " + anchor.text)) || "");
+        if (!/^https?:\/\//i.test(href)) return false;
+        if (/#(?:content)?(?:$|[?#])/i.test(href)) return false;
+        if (/vglist|xmlrpc|wp-json|wp-content|telegram|google\.com\/search|one\.one\.one\.one|tinyurl\.com\/Unblock|skip to content/i.test(value)) return false;
         return /vcloud|fastdl|g-direct|filebee|filepress|gdtot|drive|hubcloud|hubdrive|pixeldrain|dropgalaxy|uploadever/i.test(value);
     }
 
     function extractNexdriveSources(html, pageUrl, context) {
         var anchors = extractAnchors(html, pageUrl).filter(isUsefulNexdriveAnchor);
-        var vcloud = anchors.filter(function (anchor) { return /vcloud/i.test(anchor.href + " " + anchor.text); });
-        var chosen = vcloud.length ? vcloud : anchors;
-        return uniqueBy(chosen.map(function (anchor) {
+        return uniqueBy(anchors.map(function (anchor) {
             return {
                 source: anchor.href,
                 sourceName: sourceLabelFromAnchor(anchor),
@@ -493,23 +494,51 @@
     }
 
     function extractEpisodeVcloudSources(html, pageUrl, context) {
-        var anchors = extractAnchors(html, pageUrl);
         var out = [];
-        var episode = 0;
-        for (var i = 0; i < anchors.length; i++) {
-            if (!/vcloud/i.test(anchors[i].href + " " + anchors[i].text)) continue;
-            episode++;
-            out.push({
-                episode: episode,
-                source: anchors[i].href,
-                sourceName: "V-Cloud",
+        var matchedEpisodes = false;
+        var blockRe = /<h4\b[^>]*>([\s\S]*?)<\/h4>\s*<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+        var blockMatch;
+        while ((blockMatch = blockRe.exec(String(html || ""))) !== null) {
+            var headingText = stripTags(blockMatch[1] || "");
+            var episode = Number(firstMatch(headingText, [/Episodes?\s*[:\-]?\s*0*([0-9]+)/i, /\bE(?:pisode)?\s*0*([0-9]+)/i])) || 0;
+            if (!episode) continue;
+            var anchors = extractAnchors(blockMatch[2] || "", pageUrl).filter(isUsefulNexdriveAnchor);
+            if (!anchors.length) continue;
+            matchedEpisodes = true;
+            for (var i = 0; i < anchors.length; i++) {
+                out.push({
+                    episode: episode,
+                    source: anchors[i].href,
+                    sourceName: sourceLabelFromAnchor(anchors[i]),
+                    title: context && context.title || "",
+                    quality: context && context.quality || getQualityFromText(anchors[i].text + " " + anchors[i].href),
+                    size: context && context.size || sizeFromText(anchors[i].text),
+                    referer: pageUrl
+                });
+            }
+        }
+
+        if (matchedEpisodes) {
+            return uniqueBy(out, function (item) { return String(item.episode) + "|" + item.source; });
+        }
+
+        var anchors = extractAnchors(html, pageUrl).filter(isUsefulNexdriveAnchor);
+        var fallback = [];
+        var episodeCounter = 0;
+        for (var j = 0; j < anchors.length; j++) {
+            if (!/vcloud|fastdl|g-direct|filebee|filepress|gdtot|drive|hubcloud|hubdrive|pixeldrain|dropgalaxy|uploadever/i.test(anchors[j].href + " " + anchors[j].text)) continue;
+            episodeCounter++;
+            fallback.push({
+                episode: episodeCounter,
+                source: anchors[j].href,
+                sourceName: sourceLabelFromAnchor(anchors[j]),
                 title: context && context.title || "",
-                quality: context && context.quality || getQualityFromText(anchors[i].text + " " + anchors[i].href),
-                size: context && context.size || sizeFromText(anchors[i].text),
+                quality: context && context.quality || getQualityFromText(anchors[j].text + " " + anchors[j].href),
+                size: context && context.size || sizeFromText(anchors[j].text),
                 referer: pageUrl
             });
         }
-        return out;
+        return fallback;
     }
 
     async function extractSeriesEpisodes(html, pageUrl, meta) {
@@ -517,22 +546,25 @@
         var episodeLinksMap = {};
         for (var i = 0; i < groups.length; i++) {
             var group = groups[i];
-            var anchor = selectSeriesIntermediateAnchor(group);
-            if (!anchor || !anchor.href) continue;
-            try {
-                var linkPage = await getText(anchor.href, defaultHeaders({ "Referer": pageUrl }));
-                var episodeSources = extractEpisodeVcloudSources(linkPage.body, linkPage.finalUrl || anchor.href, {
-                    title: group.title,
-                    quality: group.quality,
-                    size: group.size
-                });
-                for (var j = 0; j < episodeSources.length; j++) {
-                    var item = episodeSources[j];
-                    var key = String(group.season || 1) + "_" + String(item.episode || (j + 1));
-                    if (!episodeLinksMap[key]) episodeLinksMap[key] = [];
-                    episodeLinksMap[key].push(item);
-                }
-            } catch (_) {}
+            var anchors = selectSeriesIntermediateAnchors(group);
+            for (var a = 0; a < anchors.length; a++) {
+                var anchor = anchors[a];
+                if (!anchor || !anchor.href) continue;
+                try {
+                    var linkPage = await getText(anchor.href, defaultHeaders({ "Referer": pageUrl }));
+                    var episodeSources = extractEpisodeVcloudSources(linkPage.body, linkPage.finalUrl || anchor.href, {
+                        title: group.title,
+                        quality: group.quality,
+                        size: group.size
+                    });
+                    for (var j = 0; j < episodeSources.length; j++) {
+                        var item = episodeSources[j];
+                        var key = String(group.season || 1) + "_" + String(item.episode || (j + 1));
+                        if (!episodeLinksMap[key]) episodeLinksMap[key] = [];
+                        episodeLinksMap[key].push(item);
+                    }
+                } catch (_) {}
+            }
         }
 
         return Object.keys(episodeLinksMap).sort(function (a, b) {
@@ -622,6 +654,43 @@
         return out;
     }
 
+    function extractFastdlDirectUrl(html, pageUrl) {
+        return absoluteUrl(pageUrl, firstMatch(html, [
+            /var\s+reurl\s*=\s*"([^"]+)"/i,
+            /var\s+reurl\s*=\s*'([^']+)'/i,
+            /window\.location\s*=\s*reurl/i
+        ]));
+    }
+
+    function extractHiddenContentLinks(html, pageUrl) {
+        return extractAnchors(html, pageUrl).map(function (anchor) { return anchor.href; }).filter(function (href) {
+            return /\/cdn-cgi\/content\?id=/i.test(String(href || ""));
+        });
+    }
+
+    async function resolveFastdl(source, context) {
+        var sourceUrl = typeof source === "string" ? source : source.source;
+        var normalizedUrl = sourceUrl.replace(/fastdl\.zip\/embed\?(?=download=)/i, "fastdl.zip/embed.php?");
+        var page = await getText(normalizedUrl, defaultHeaders({ "Referer": source.referer || context.sourceUrl || DEFAULT_BASE_URL + "/" }));
+        var direct = extractFastdlDirectUrl(page.body, page.finalUrl || sourceUrl);
+        if (!direct) return [];
+        var quality = source.quality || getQualityFromText(source.title + " " + direct + " " + context.title);
+        return [buildStreamResult(direct, source.sourceName || "G-Direct", {}, quality)];
+    }
+
+    async function resolveFilebee(source, context) {
+        var sourceUrl = typeof source === "string" ? source : source.source;
+        var page = await getText(sourceUrl, defaultHeaders({ "Referer": source.referer || context.sourceUrl || DEFAULT_BASE_URL + "/" }));
+        var hiddenLinks = extractHiddenContentLinks(page.body, page.finalUrl || sourceUrl);
+        var quality = source.quality || getQualityFromText(source.title + " " + sourceUrl + " " + context.title);
+        if (hiddenLinks.length) {
+            return hiddenLinks.map(function (link) {
+                return buildStreamResult(link, source.sourceName || "FileBee", {}, quality);
+            });
+        }
+        return [buildStreamResult(sourceUrl, source.sourceName || "FileBee", { "Referer": source.referer || context.sourceUrl || DEFAULT_BASE_URL + "/" }, quality)];
+    }
+
     async function resolveVcloud(source, context) {
         var sourceUrl = typeof source === "string" ? source : source.source;
         var base = baseOrigin(sourceUrl);
@@ -700,9 +769,23 @@
         var sourceUrl = typeof source === "string" ? source : source.source;
         var name = source.sourceName || "VegaMovies";
         var quality = source.quality || getQualityFromText(source.title + " " + sourceUrl + " " + context.title);
-        if (/vcloud|gamerxyt\.com\/hubcloud\.php|hubcloud\./i.test(sourceUrl)) {
-            var vcloud = await resolveVcloud(source, context);
-            if (vcloud.length) return vcloud;
+        try {
+            if (/vcloud|gamerxyt\.com\/hubcloud\.php|hubcloud\./i.test(sourceUrl)) {
+                var vcloud = await resolveVcloud(source, context);
+                if (vcloud.length) return vcloud;
+            }
+            if (/fastdl\.zip\/embed/i.test(sourceUrl)) {
+                var fastdl = await resolveFastdl(source, context);
+                if (fastdl.length) return fastdl;
+            }
+            if (/filebee\.xyz|filepress/i.test(sourceUrl)) {
+                var filebee = await resolveFilebee(source, context);
+                if (filebee.length) return filebee;
+            }
+        } catch (_) {
+            if (!/vcloud/i.test(sourceUrl)) {
+                return [buildStreamResult(sourceUrl, name, { "Referer": source.referer || context.sourceUrl || DEFAULT_BASE_URL + "/" }, quality)];
+            }
         }
         if (isDirectMediaUrl(sourceUrl)) {
             return [buildStreamResult(sourceUrl, name, { "Referer": source.referer || context.sourceUrl || DEFAULT_BASE_URL + "/" }, quality)];
