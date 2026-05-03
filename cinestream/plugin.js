@@ -4990,7 +4990,7 @@
                 var query = trim(queries[i]);
                 if (!query) continue;
                 try {
-                    var json = await getJson(mainUrl + "/searchapi.php?q=" + encodeURIComponent(query) + "&page=1", commonHeaders({
+                    var json = await getJson(mainUrl + "/search.php?q=" + encodeURIComponent(query) + "&page=1", commonHeaders({
                         "Accept": "application/json, text/plain, */*",
                         "Referer": mainUrl + "/search.html?q=" + encodeURIComponent(query)
                     }));

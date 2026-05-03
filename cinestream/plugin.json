@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.cinestream",
   "name": "CineStream",
-  "version": 22,
+  "version": 23,
   "baseUrl": "https://cinemeta-catalogs.strem.io",
   "description": "CineMeta-powered catalog with an expanded CineStream source stack, including Stremio, direct OTT mirrors, and embedded stream resolvers.",
   "authors": [
