@@ -19,8 +19,8 @@
 
     var MAIN_PAGE_SECTIONS = [
         { path: "", title: "Home" },
-        { path: "category/bollywood/", title: "BollyWood" },
-        { path: "category/hollywood/", title: "HollyWood" },
+        { path: "category/bollywood-movies/", title: "BollyWood" },
+        { path: "category/hollywood-movies/", title: "HollyWood" },
         { path: "category/web-series/", title: "WEB-Series" },
         { path: "category/anime/", title: "Anime / Animation" },
         { path: "category/k-drama/", title: "K-Drama" },
