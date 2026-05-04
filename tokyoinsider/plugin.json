@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.tokyoinsider",
   "name": "TokyoInsider",
-  "version": 4,
+  "version": 6,
   "baseUrl": "https://www.tokyoinsider.com",
   "description": "TMDB anime catalog with TokyoInsider links.",
   "authors": [

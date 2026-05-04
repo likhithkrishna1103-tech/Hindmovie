@@ -1383,6 +1383,35 @@
     var tmdbJsonCache = Object.create(null);
     var tmdbJsonInflight = Object.create(null);
 
+    async function httpParallelGet(requests) {
+        var items = Array.isArray(requests) ? requests.filter(function (item) { return item && item.url; }) : [];
+        if (!items.length) return [];
+        if (typeof http_parallel === "function") {
+            try {
+                var parallelRes = await http_parallel(items.map(function (item) {
+                    return {
+                        method: "GET",
+                        url: item.url,
+                        headers: item.headers || {}
+                    };
+                }));
+                return (parallelRes || []).map(function (res, index) {
+                    return {
+                        status: responseStatus(res) || 200,
+                        body: res && typeof res.body !== "undefined" ? res.body : "",
+                        headers: parseHeaders(res && res.headers),
+                        finalUrl: (res && (res.url || res.finalUrl)) || items[index].url
+                    };
+                });
+            } catch (_) {}
+        }
+        return Promise.all(items.map(function (item) {
+            return request(item.url, { headers: item.headers || {} }).catch(function () {
+                return { status: 599, body: "", headers: {}, finalUrl: item.url };
+            });
+        }));
+    }
+
     async function getTmdbJson(path, preferWorker) {
         var normalized = normalizeTmdbPath(path);
         var cacheKey = normalized;
@@ -1413,6 +1442,66 @@
         } finally {
             delete tmdbJsonInflight[cacheKey];
         }
+    }
+
+    async function getManyTmdbJson(paths, preferWorker) {
+        var normalized = (paths || []).map(normalizeTmdbPath);
+        var results = new Array(normalized.length);
+        var requests = [];
+        var now = Date.now();
+
+        normalized.forEach(function (path, index) {
+            var cached = tmdbJsonCache[path];
+            if (cached && (now - cached.at) < TMDB_CACHE_TTL) {
+                results[index] = cached.data;
+            } else if (tmdbJsonInflight[path]) {
+                results[index] = tmdbJsonInflight[path];
+            } else {
+                requests.push({
+                    index: index,
+                    path: path,
+                    workerUrl: TMDB_WORKER_API + "/" + path,
+                    apiUrl: TMDB_API + "/" + path
+                });
+            }
+        });
+
+        if (requests.length) {
+            var preferredResponses = await httpParallelGet(requests.map(function (item) {
+                return { url: preferWorker ? item.workerUrl : item.apiUrl, headers: {} };
+            }));
+            await Promise.all(requests.map(async function (item, idx) {
+                var res = preferredResponses[idx] || {};
+                var ok = (responseStatus(res) || 0) < 400;
+                var parsed = ok ? parseJsonSafe(res.body, null) : null;
+                if (parsed && typeof parsed === "object" && Object.keys(parsed).length) {
+                    tmdbJsonCache[item.path] = { at: Date.now(), data: parsed };
+                    results[item.index] = parsed;
+                    return;
+                }
+                try {
+                    var fallback = await getJson(preferWorker ? item.apiUrl : item.workerUrl);
+                    if (fallback && typeof fallback === "object" && Object.keys(fallback).length) {
+                        tmdbJsonCache[item.path] = { at: Date.now(), data: fallback };
+                    }
+                    results[item.index] = fallback;
+                } catch (_) {
+                    results[item.index] = {};
+                }
+            }));
+        }
+
+        for (var i = 0; i < results.length; i++) {
+            if (results[i] && typeof results[i].then === "function") {
+                try {
+                    results[i] = await results[i];
+                } catch (_) {
+                    results[i] = {};
+                }
+            }
+            if (!results[i]) results[i] = {};
+        }
+        return results;
     }
 
     function isoDate(offsetDays) {
@@ -1522,20 +1611,23 @@
 
     async function getHome(cb) {
         try {
-            var sections = await Promise.all(HOME_SECTIONS.map(function (section) {
-                return getTmdbJson(section.path, true).then(function (json) {
-                    return {
-                        title: section.title,
-                        items: uniqueBy(((json && json.results) || []).map(buildTmdbItem).filter(Boolean), function (item) {
-                            return item && item.url;
-                        })
-                    };
-                }).catch(function () {
-                    return {
-                        title: section.title,
-                        items: []
-                    };
+            var jsons = await getManyTmdbJson(HOME_SECTIONS.map(function (section) { return section.path; }), true);
+            var sections = await Promise.all(HOME_SECTIONS.map(async function (section, index) {
+                var items = uniqueBy((((jsons[index] || {}).results) || []).map(buildTmdbItem).filter(Boolean), function (item) {
+                    return item && item.url;
                 });
+                if (!items.length) {
+                    try {
+                        var fallbackJson = await getTmdbJson(section.path, true);
+                        items = uniqueBy((((fallbackJson || {}).results) || []).map(buildTmdbItem).filter(Boolean), function (item) {
+                            return item && item.url;
+                        });
+                    } catch (_) {}
+                }
+                return {
+                    title: section.title,
+                    items: items
+                };
             }));
             var data = {};
             sections.forEach(function (section) {

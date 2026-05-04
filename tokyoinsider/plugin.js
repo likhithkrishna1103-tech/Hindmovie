@@ -223,20 +223,126 @@
         throw new Error("Invalid payload");
     }
 
-    async function getTmdbJson(path) {
-        var urls = [
-            TMDB_WORKER_API + "/" + String(path || "").replace(/^\/+/, ""),
-            TMDB_API + "/" + String(path || "").replace(/^\/+/, "")
-        ];
-        var lastError = null;
-        for (var i = 0; i < urls.length; i++) {
+    var TMDB_CACHE_TTL = 5 * 60 * 1000;
+    var tmdbCache = Object.create(null);
+    var tmdbInflight = Object.create(null);
+
+    async function httpParallelGet(requests) {
+        var items = Array.isArray(requests) ? requests.filter(function (item) { return item && item.url; }) : [];
+        if (!items.length) return [];
+        if (typeof http_parallel === "function") {
             try {
-                return await getJson(urls[i]);
-            } catch (error) {
-                lastError = error;
-            }
+                var parallelRes = await http_parallel(items.map(function (item) {
+                    return {
+                        method: "GET",
+                        url: item.url,
+                        headers: item.headers || {}
+                    };
+                }));
+                return (parallelRes || []).map(function (res, index) {
+                    return {
+                        status: responseStatus(res) || 200,
+                        body: res && typeof res.body !== "undefined" ? res.body : "",
+                        headers: parseHeaders(res && res.headers),
+                        finalUrl: (res && (res.url || res.finalUrl)) || items[index].url
+                    };
+                });
+            } catch (_) {}
         }
-        throw lastError || new Error("TMDB request failed");
+        return Promise.all(items.map(function (item) {
+            return request(item.url, { headers: item.headers || {} }).catch(function () {
+                return { status: 599, body: "", headers: {}, finalUrl: item.url };
+            });
+        }));
+    }
+
+    async function getTmdbJson(path) {
+        var normalized = String(path || "").replace(/^\/+/, "");
+        var now = Date.now();
+        var cached = tmdbCache[normalized];
+        if (cached && (now - cached.at) < TMDB_CACHE_TTL) return cached.data;
+        if (tmdbInflight[normalized]) return tmdbInflight[normalized];
+
+        tmdbInflight[normalized] = (async function () {
+            var urls = [
+                TMDB_WORKER_API + "/" + normalized,
+                TMDB_API + "/" + normalized
+            ];
+            var lastError = null;
+            for (var i = 0; i < urls.length; i++) {
+                try {
+                    var data = await getJson(urls[i]);
+                    if (data && typeof data === "object" && Object.keys(data).length) {
+                        tmdbCache[normalized] = { at: Date.now(), data: data };
+                    }
+                    return data;
+                } catch (error) {
+                    lastError = error;
+                }
+            }
+            throw lastError || new Error("TMDB request failed: " + normalized);
+        })();
+
+        try {
+            return await tmdbInflight[normalized];
+        } finally {
+            delete tmdbInflight[normalized];
+        }
+    }
+
+    async function getManyTmdbJson(paths) {
+        var normalized = (paths || []).map(function (path) { return String(path || "").replace(/^\/+/, ""); });
+        var results = new Array(normalized.length);
+        var requests = [];
+        var now = Date.now();
+
+        normalized.forEach(function (path, index) {
+            var cached = tmdbCache[path];
+            if (cached && (now - cached.at) < TMDB_CACHE_TTL) {
+                results[index] = cached.data;
+            } else if (tmdbInflight[path]) {
+                results[index] = tmdbInflight[path];
+            } else {
+                requests.push({ index: index, path: path, url: TMDB_WORKER_API + "/" + path });
+            }
+        });
+
+        if (requests.length) {
+            var workerResponses = await httpParallelGet(requests.map(function (item) {
+                return { url: item.url, headers: commonHeaders() };
+            }));
+            await Promise.all(requests.map(async function (item, idx) {
+                var res = workerResponses[idx] || {};
+                var ok = (responseStatus(res) || 0) < 400;
+                var parsed = ok ? parseJsonSafe(res.body, null) : null;
+                if (parsed && typeof parsed === "object" && Object.keys(parsed).length) {
+                    tmdbCache[item.path] = { at: Date.now(), data: parsed };
+                    results[item.index] = parsed;
+                    return;
+                }
+                try {
+                    var fallback = await getJson(TMDB_API + "/" + item.path);
+                    if (fallback && typeof fallback === "object" && Object.keys(fallback).length) {
+                        tmdbCache[item.path] = { at: Date.now(), data: fallback };
+                    }
+                    results[item.index] = fallback;
+                } catch (_) {
+                    results[item.index] = {};
+                }
+            }));
+        }
+
+        for (var i = 0; i < results.length; i++) {
+            if (results[i] && typeof results[i].then === "function") {
+                try {
+                    results[i] = await results[i];
+                } catch (_) {
+                    results[i] = {};
+                }
+            }
+            if (!results[i]) results[i] = {};
+        }
+        return results;
     }
 
     function tmdbImage(path) {
@@ -288,14 +394,29 @@
 
     async function getHome(cb) {
         try {
-            cb({
-                success: true,
-                data: {
-                    "Popular Anime Series": await buildHomeSection("discover/tv?api_key=" + TMDB_API_KEY + "&with_genres=16&with_original_language=ja&sort_by=popularity.desc"),
-                    "Top Anime Movies": await buildHomeSection("discover/movie?api_key=" + TMDB_API_KEY + "&with_genres=16&with_original_language=ja&sort_by=popularity.desc"),
-                    "Trending Anime": await buildHomeSection("trending/tv/week?api_key=" + TMDB_API_KEY)
+            var sections = [
+                { title: "Popular Anime Series", path: "discover/tv?api_key=" + TMDB_API_KEY + "&with_genres=16&with_original_language=ja&sort_by=popularity.desc", mediaType: "tv" },
+                { title: "Top Anime Movies", path: "discover/movie?api_key=" + TMDB_API_KEY + "&with_genres=16&with_original_language=ja&sort_by=popularity.desc", mediaType: "movie" },
+                { title: "Trending Anime", path: "trending/tv/week?api_key=" + TMDB_API_KEY, mediaType: "tv" }
+            ];
+            var jsons = await getManyTmdbJson(sections.map(function (section) { return section.path; }));
+            var data = {};
+            await Promise.all(sections.map(async function (section, index) {
+                var rows = (jsons[index] && jsons[index].results) || [];
+                var items = rows.filter(isAnimeItem).slice(0, 20).map(function (item) {
+                    item.media_type = item.media_type || section.mediaType;
+                    return tmdbItemToCard(item);
+                }).filter(Boolean);
+                if (!items.length) {
+                    try {
+                        items = await buildHomeSection(section.path);
+                    } catch (_) {
+                        items = [];
+                    }
                 }
-            });
+                data[section.title] = items;
+            }));
+            cb({ success: true, data: data });
         } catch (error) {
             cb({ success: false, errorCode: "SITE_OFFLINE", message: String(error && error.message || error) });
         }
@@ -431,7 +552,78 @@
         return /\.(?:m3u8|mp4|mkv|webm|avi)(?:[?#].*)?$/i.test(String(url || ""));
     }
 
-    function parseDirectEpisodeLinks(html, pageUrl) {
+    function isSubtitleUrl(url) {
+        return /\.(?:srt|vtt|ass|ssa|sub)(?:[?#].*)?$/i.test(String(url || ""));
+    }
+
+    function inferSubtitleLang(text, url) {
+        var value = String(text || url || "").toLowerCase();
+        if (/\beng(?:lish)?\b/.test(value)) return "en";
+        if (/\bjp|jpn|japanese\b/.test(value)) return "ja";
+        if (/\bhin|hindi\b/.test(value)) return "hi";
+        return "unknown";
+    }
+
+    function parseSubtitleTracks(html, pageUrl) {
+        return uniqueBy(parseAnchors(html, pageUrl).filter(function (row) {
+            return isSubtitleUrl(row && row.href);
+        }).map(function (row) {
+            return {
+                url: row.href,
+                label: trim(row.text || "Subtitle") || "Subtitle",
+                lang: inferSubtitleLang(row.text, row.href)
+            };
+        }), function (item) { return item.url; });
+    }
+
+    function buildStreamResult(url, source, headers, quality, subtitles) {
+        var stream = new StreamResult({
+            url: url,
+            source: source || "TokyoInsider",
+            quality: quality || 0,
+            headers: headers || {}
+        });
+        if (subtitles && subtitles.length) stream.subtitles = subtitles;
+        return stream;
+    }
+
+    async function expandM3u8(url, source, headers, subtitles) {
+        var text = "";
+        try {
+            text = await getText(url, headers || {});
+        } catch (_) {
+            text = "";
+        }
+
+        if (!/#EXTM3U/i.test(text) || text.indexOf("#EXT-X-STREAM-INF") === -1) {
+            return [buildStreamResult(url, source, headers, qualityFromText(url) || 0, subtitles)];
+        }
+
+        var lines = text.split(/\r?\n/);
+        var streams = [];
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (line.indexOf("#EXT-X-STREAM-INF") !== 0) continue;
+            var nextLine = "";
+            for (var j = i + 1; j < lines.length; j++) {
+                if (lines[j] && lines[j].charAt(0) !== "#") {
+                    nextLine = trim(lines[j]);
+                    break;
+                }
+            }
+            if (!nextLine) continue;
+            var resMatch = line.match(/RESOLUTION=\d+x(\d+)/i);
+            var quality = resMatch ? parseInt(resMatch[1], 10) : qualityFromText(nextLine);
+            streams.push(buildStreamResult(absoluteUrl(url, nextLine), source, headers, quality || 0, subtitles));
+        }
+
+        if (!streams.length) {
+            streams.push(buildStreamResult(url, source, headers, qualityFromText(url) || 0, subtitles));
+        }
+        return dedupeStreams(streams);
+    }
+
+    function parseDirectEpisodeLinks(html, pageUrl, subtitles) {
         return parseAnchors(html, pageUrl).filter(function (row) {
             return isDirectMediaUrl(row && row.href);
         }).map(function (row) {
@@ -439,7 +631,8 @@
                 url: row.href,
                 source: "TokyoInsider",
                 quality: qualityFromText(row.text || row.href),
-                headers: {}
+                headers: {},
+                subtitles: subtitles || []
             };
         });
     }
@@ -462,9 +655,19 @@
             var targetUrl = payload.isMovie ? match.url : (match.url.replace(/\/+$/g, "") + "/episode/" + encodeURIComponent(payload.episode || 1));
             var html = await getText(targetUrl, commonHeaders({ "Referer": match.url }), true).catch(function () { return ""; });
             if (!html) return cb({ success: true, data: [] });
-            var streams = sortStreams(dedupeStreams(parseDirectEpisodeLinks(html, targetUrl))).map(function (item) {
-                return new StreamResult(item);
-            });
+            var subtitles = parseSubtitleTracks(html, targetUrl);
+            var directLinks = parseDirectEpisodeLinks(html, targetUrl, subtitles);
+            var expanded = [];
+            for (var i = 0; i < directLinks.length; i++) {
+                var item = directLinks[i];
+                if (/\.m3u8(?:[?#].*)?$/i.test(item.url)) {
+                    var built = await expandM3u8(item.url, item.source, item.headers, item.subtitles || []);
+                    Array.prototype.push.apply(expanded, built);
+                } else {
+                    expanded.push(buildStreamResult(item.url, item.source, item.headers, item.quality, item.subtitles || []));
+                }
+            }
+            var streams = sortStreams(dedupeStreams(expanded));
             cb({ success: true, data: streams });
         } catch (error) {
             cb({ success: false, errorCode: "STREAM_ERROR", message: String(error && error.message || error) });
