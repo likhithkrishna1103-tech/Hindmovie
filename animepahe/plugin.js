@@ -1044,7 +1044,6 @@
                 var quality      = qualityMatch ? parseInt(qualityMatch[1], 10) : (button.resolution || 0);
                 var label        = (button.btnText.split('·')[0] || "").trim() || "Kwik";
                 var sourceBase   = "AnimePahe " + label + " [" + (button.isDub ? "DUB" : "SUB") + "]";
-                var streamHeaders = { ...HEADERS, "Referer": "https://kwik.cx/" };
 
                 console.log("[loadStreams] Extracting Kwik [" + (button.isDub ? "DUB" : "SUB") + "]:", button.kwikHref);
                 var streamUrl = await extractKwikStream(button.kwikHref);
@@ -1054,7 +1053,8 @@
                         url: streamUrl,
                         quality: quality || qualityFromText(streamUrl) || qualityFromText(button.btnText),
                         source: sourceBase,
-                        headers: streamHeaders
+                        referer: "https://kwik.cx",
+                        headers: { "origin": "https://kwik.cx" }
                     })];
                 }
                 console.error("[loadStreams] Failed to extract stream for:", button.kwikHref);
