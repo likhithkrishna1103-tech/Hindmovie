@@ -286,9 +286,9 @@
   {
     "packageName": "com.igris.repo.piratexplay",
     "name": "PirateXPlay",
-    "version": 3,
-    "baseUrl": "https://example.com",
-    "description": "Movies and shows with fast stream picks.",
+    "version": 4,
+    "baseUrl": "https://piratexplay.cc",
+    "description": "Movies, series, anime, and cartoons with faster multi-provider stream extraction.",
     "authors": [
       "IGRIS"
     ],
