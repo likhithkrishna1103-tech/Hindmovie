@@ -651,6 +651,30 @@
         }
     }
 
+    async function extractMulti(url, source, quality) {
+        var results = [];
+        try {
+            var res = await http_get(url, COMMON_HEADERS);
+            var html = String(res && res.body || "");
+            if (!html) return results;
+            var fileUrlMatch = html.match(/const\s+fileurl\s*=\s*"([^"]+)"/i);
+            var fileUrl = fileUrlMatch ? decodeHtml(fileUrlMatch[1].replace(/\\\//g, "/")) : "";
+            var fileNameMatch = html.match(/const\s+filename\s*=\s*"([^"]+)"/i);
+            var fileName = fileNameMatch ? decodeHtml(fileNameMatch[1].replace(/\\\//g, "/")) : "";
+            var mergedQuality = quality || parseQuality(fileName) || parseQuality(html);
+            if (fileUrl) {
+                results.push(toStreamResult(fileUrl, source + " Direct", mergedQuality, {
+                    "User-Agent": UA,
+                    "Referer": String(res && res.finalUrl || url).replace(/\/file\/.*/, "/"),
+                    "Accept": "*/*"
+                }));
+            }
+            return dedupeStreams(results);
+        } catch (_) {
+            return results;
+        }
+    }
+
     function dedupeStreams(items) {
         var out = [];
         var seen = {};
@@ -677,6 +701,8 @@
             return [toStreamResult("https://pixeldrain.dev/api/file/" + url.split("/").pop() + "?download", source, quality)];
         }
         if (url.indexOf("gdmirrorbot.nl") !== -1) {
+            var multiResults = await extractMulti(url, source, quality);
+            if (multiResults.length) return multiResults;
             return [toStreamResult(url, source, quality)];
         }
         if (url.indexOf("hubcloud") !== -1) {
