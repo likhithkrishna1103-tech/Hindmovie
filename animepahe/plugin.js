@@ -1138,7 +1138,8 @@
                 var qualityMatch = button.btnText.match(/(\d{3,4})p/);
                 var quality      = qualityMatch ? parseInt(qualityMatch[1], 10) : (button.resolution || 0);
                 var label        = (button.btnText.split('·')[0] || "").trim() || "Kwik";
-                var sourceBase   = "AnimePahe " + label + " [" + (button.isDub ? "DUB" : "SUB") + "]";
+                var qualityTag   = quality ? (" [" + quality + "p]") : "";
+                var sourceBase   = "AnimePahe " + label + " [" + (button.isDub ? "DUB" : "SUB") + "]" + qualityTag;
 
                 console.log("[loadStreams] Extracting Kwik [" + (button.isDub ? "DUB" : "SUB") + "]:", button.kwikHref);
                 var streamUrl = await extractKwikStream(button.kwikHref);
