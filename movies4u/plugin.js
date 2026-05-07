@@ -1,8 +1,8 @@
 (function () {
     "use strict";
 
-    var DEFAULT_BASE_URL = "https://new1.movies4u.style";
-    var DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
+    var DEFAULT_BASE_URL = "https://new2.movies4u.style";
+    var DOMAINS_URL = "https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json";
     var TMDB_WORKER_API = "https://api.themoviedb.org/3";
     var TMDB_FALLBACK_API = "https://wild-surf-4a0d.phisher1.workers.dev";
     var TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original";
@@ -1757,7 +1757,7 @@
         if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php/i.test(url)) return withTimeout(resolveHubCloudWithFallback(url, refererLabel || "HubCloud"), 25000, "HubCloud");
         if (/hubdrive\./i.test(url)) return withTimeout(resolveHubDrive(url), 20000, "HubDrive");
         if (/filepress\.|filebee/i.test(url)) return withTimeout(resolveFilepress(url), 25000, "Filepress");
-        if (/gdfli?x/i.test(url)) return withTimeout(resolveGdflix(url), 25000, "GDFlix");
+        if (/gdfli?x|gdlink/i.test(url)) return withTimeout(resolveGdflix(url), 25000, "GDFlix");
         if (/validate\.multiup2\.workers\.dev|multiup/i.test(url)) return withTimeout(resolveMultiupMirror(url, "", "", getQualityFromText(url)), 25000, "MultiUp");
         if (/gofile\.io/i.test(url)) return withTimeout(resolveGofile(url), 20000, "Gofile");
         if (/mdrive\.ink\//i.test(url)) return withTimeout(resolveMdrive(url), 30000, "MDrive");
@@ -1779,17 +1779,27 @@
             var mainUrl = await getMainUrl();
             var results = {};
             var firstHtml = "";
-
-            for (var i = 0; i < MAIN_PAGE_SECTIONS.length; i++) {
-                var section = MAIN_PAGE_SECTIONS[i];
+            var sectionEntries = await Promise.all(MAIN_PAGE_SECTIONS.map(function (section) {
                 var url = absoluteUrl(mainUrl + "/", section.path);
-                try {
-                    var html = await getText(url, mainPageHeaders(mainUrl));
-                    if (!firstHtml) firstHtml = html;
-                    results[section.title] = parseHomeResults(html, mainUrl);
-                } catch (_) {
-                    results[section.title] = [];
-                }
+                return getText(url, mainPageHeaders(mainUrl)).then(function (html) {
+                    return {
+                        title: section.title,
+                        html: html,
+                        items: parseHomeResults(html, mainUrl)
+                    };
+                }).catch(function () {
+                    return {
+                        title: section.title,
+                        html: "",
+                        items: []
+                    };
+                });
+            }));
+
+            for (var i = 0; i < sectionEntries.length; i++) {
+                var entry = sectionEntries[i];
+                if (!firstHtml && entry.html) firstHtml = entry.html;
+                results[entry.title] = entry.items;
             }
 
             var total = 0;
@@ -1859,38 +1869,58 @@
 
             if (!isMovie) {
                 var seasonSections = getSeasonSections(html, baseOrigin(sourceUrl));
-                for (var i = 0; i < seasonSections.length; i++) {
-                    var section = seasonSections[i];
+                var seasonResults = await Promise.all(seasonSections.map(async function (section) {
                     var seasonMetadata = tmdbId ? await fetchSeasonMetadata(tmdbId, section.season) : {};
                     var seasonEpisodeNumbers = getSeasonEpisodeNumbers(seasonMetadata, section.season);
-                    for (var metaKey in seasonMetadata) {
-                        if (Object.prototype.hasOwnProperty.call(seasonMetadata, metaKey)) {
-                            episodeMeta[metaKey] = seasonMetadata[metaKey];
+                    var resolvedBlocks = await Promise.all((section.links || []).map(function (qualityLink) {
+                        return getText(qualityLink, defaultHeaders({ "Referer": sourceUrl })).then(function (seasonHtml) {
+                            return {
+                                qualityLink: qualityLink,
+                                episodeBlocks: getEpisodeBlocks(seasonHtml, baseOrigin(qualityLink))
+                            };
+                        }).catch(function () {
+                            return {
+                                qualityLink: qualityLink,
+                                episodeBlocks: []
+                            };
+                        });
+                    }));
+
+                    return {
+                        section: section,
+                        seasonMetadata: seasonMetadata,
+                        seasonEpisodeNumbers: seasonEpisodeNumbers,
+                        resolvedBlocks: resolvedBlocks
+                    };
+                }));
+
+                for (var i = 0; i < seasonResults.length; i++) {
+                    var seasonResult = seasonResults[i];
+                    var section = seasonResult.section;
+                    for (var metaKey in seasonResult.seasonMetadata) {
+                        if (Object.prototype.hasOwnProperty.call(seasonResult.seasonMetadata, metaKey)) {
+                            episodeMeta[metaKey] = seasonResult.seasonMetadata[metaKey];
                         }
                     }
 
-                    for (var j = 0; j < section.links.length; j++) {
-                        var qualityLink = section.links[j];
-                        try {
-                            var seasonHtml = await getText(qualityLink, defaultHeaders({ "Referer": sourceUrl }));
-                            var episodeBlocks = getEpisodeBlocks(seasonHtml, baseOrigin(qualityLink));
-                            if (episodeBlocks.length) {
-                                for (var k = 0; k < episodeBlocks.length; k++) {
-                                    var epBlock = episodeBlocks[k];
-                                    var key = String(section.season) + "_" + String(epBlock.episode);
-                                    if (!episodeLinksMap[key]) episodeLinksMap[key] = [];
-                                    episodeLinksMap[key] = episodeLinksMap[key].concat(epBlock.links);
-                                }
-                            } else {
-                                var fallbackEpisodes = seasonEpisodeNumbers.length ? seasonEpisodeNumbers : [1];
-                                for (var epIndex = 0; epIndex < fallbackEpisodes.length; epIndex++) {
-                                    var fallbackEpisode = fallbackEpisodes[epIndex];
-                                    var fallbackKey = String(section.season) + "_" + String(fallbackEpisode);
-                                    if (!episodeLinksMap[fallbackKey]) episodeLinksMap[fallbackKey] = [];
-                                    episodeLinksMap[fallbackKey].push(qualityLink);
-                                }
+                    for (var j = 0; j < seasonResult.resolvedBlocks.length; j++) {
+                        var resolvedBlock = seasonResult.resolvedBlocks[j];
+                        if (resolvedBlock.episodeBlocks.length) {
+                            for (var k = 0; k < resolvedBlock.episodeBlocks.length; k++) {
+                                var epBlock = resolvedBlock.episodeBlocks[k];
+                                var key = String(section.season) + "_" + String(epBlock.episode);
+                                if (!episodeLinksMap[key]) episodeLinksMap[key] = [];
+                                episodeLinksMap[key] = episodeLinksMap[key].concat(epBlock.links);
                             }
-                        } catch (_) {}
+                        } else {
+                            var fallbackEpisodes = seasonResult.seasonEpisodeNumbers.length ? seasonResult.seasonEpisodeNumbers : [1];
+                            for (var epIndex = 0; epIndex < fallbackEpisodes.length; epIndex++) {
+                                var fallbackEpisode = fallbackEpisodes[epIndex];
+                                var fallbackKey = String(section.season) + "_" + String(fallbackEpisode);
+                                if (!episodeLinksMap[fallbackKey]) episodeLinksMap[fallbackKey] = [];
+                                episodeLinksMap[fallbackKey].push(resolvedBlock.qualityLink);
+                            }
+                        }
                     }
                 }
             }
