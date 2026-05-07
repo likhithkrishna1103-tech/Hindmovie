@@ -1144,19 +1144,37 @@
                 var streamUrl = await extractKwikStream(button.kwikHref);
 
                 if (streamUrl) {
-                    var finalUrl = streamUrl;
+                    var rows = [];
                     if (/\.m3u8(?:$|\?)/i.test(streamUrl)) {
-                        finalUrl = await buildMagicM3u8Url(streamUrl, {
+                        var streamHeaders = {
                             "Referer": "https://kwik.cx/",
                             "Origin": "https://kwik.cx",
                             "User-Agent": HEADERS["User-Agent"] || "Mozilla/5.0"
-                        });
+                        };
+                        var magicUrl = await buildMagicM3u8Url(streamUrl, streamHeaders);
+                        rows.push(new StreamResult({
+                            url: streamUrl,
+                            quality: quality || qualityFromText(streamUrl) || qualityFromText(button.btnText),
+                            source: sourceBase,
+                            referer: "https://kwik.cx/",
+                            type: "hls",
+                            headers: streamHeaders
+                        }));
+                        rows.push(new StreamResult({
+                            url: magicUrl,
+                            quality: quality || qualityFromText(streamUrl) || qualityFromText(button.btnText),
+                            source: sourceBase + " [Proxy]",
+                            referer: "https://kwik.cx/",
+                            type: "hls",
+                            headers: streamHeaders
+                        }));
+                        return rows;
                     }
                     return [new StreamResult({
-                        url: finalUrl,
+                        url: streamUrl,
                         quality: quality || qualityFromText(streamUrl) || qualityFromText(button.btnText),
                         source: sourceBase,
-                        type: /\.m3u8(?:$|\?)/i.test(streamUrl) ? "hls" : undefined,
+                        referer: "https://kwik.cx",
                         headers: {}
                     })];
                 }
