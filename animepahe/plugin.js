@@ -586,10 +586,6 @@
 
     function unpackJS(script) {
         try {
-            if (typeof getAndUnpack === "function") {
-                var nativeUnpacked = getAndUnpack(script);
-                if (nativeUnpacked && nativeUnpacked !== script) return nativeUnpacked;
-            }
             if (!script.includes("function(p,a,c,k,e")) {
                 console.error("[unpackJS] Not a packed script");
                 return null;
