@@ -1,0 +1,17 @@
+{
+  "packageName": "com.igris.repo.reanime",
+  "name": "ReAnime",
+  "version": 1,
+  "baseUrl": "https://reanime.to",
+  "description": "ReAnime anime streaming plugin with FlixCloud stream extraction, subtitles, and next airing support.",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "ja"
+  ],
+  "categories": [
+    "Anime"
+  ]
+}

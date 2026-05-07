@@ -175,6 +175,92 @@
         return value;
     }
 
+    function qualityFromText(value) {
+        value = String(value || "");
+        var match = value.match(/(\d{3,4})p/i);
+        if (match) return parseInt(match[1], 10) || 0;
+        if (/2160|4k|uhd/i.test(value)) return 2160;
+        if (/1440|2k|qhd/i.test(value)) return 1440;
+        if (/1080|fhd|full\s*hd/i.test(value)) return 1080;
+        if (/720|hd/i.test(value)) return 720;
+        if (/576/i.test(value)) return 576;
+        if (/480|sd/i.test(value)) return 480;
+        if (/360/i.test(value)) return 360;
+        if (/240/i.test(value)) return 240;
+        return 0;
+    }
+
+    function formatSourceName(base, quality) {
+        return quality ? (base + " [" + quality + "p]") : base;
+    }
+
+    function buildStreamResult(url, source, headers, quality) {
+        return new StreamResult({
+            url: url,
+            source: formatSourceName(source || "AnimePahe", quality || 0),
+            quality: quality || 0,
+            headers: headers || {}
+        });
+    }
+
+    function absoluteUrl(base, value) {
+        value = String(value || "").trim();
+        if (!value) return "";
+        if (/^https?:\/\//i.test(value)) return value;
+        if (value.indexOf("//") === 0) return "https:" + value;
+        try {
+            return new URL(value, base).toString();
+        } catch (_) {
+            return value;
+        }
+    }
+
+    async function expandM3u8(url, source, headers, fallbackQuality) {
+        var text = "";
+        try {
+            var res = await http_get(url, headers || {});
+            text = res && (res.body || res.text || "") || "";
+        } catch (_) {
+            text = "";
+        }
+
+        if (!/#EXTM3U/i.test(text) || text.indexOf("#EXT-X-STREAM-INF") === -1) {
+            return [buildStreamResult(url, source, headers, fallbackQuality || qualityFromText(url))];
+        }
+
+        var lines = text.split(/\r?\n/);
+        var streams = [];
+        var seen = {};
+        for (var i = 0; i < lines.length; i++) {
+            var line = String(lines[i] || "").trim();
+            if (line.indexOf("#EXT-X-STREAM-INF") !== 0) continue;
+            var nextLine = "";
+            for (var j = i + 1; j < lines.length; j++) {
+                var candidate = String(lines[j] || "").trim();
+                if (candidate && candidate.charAt(0) !== "#") {
+                    nextLine = candidate;
+                    break;
+                }
+            }
+            if (!nextLine) continue;
+            var variantUrl = absoluteUrl(url, nextLine);
+            if (!variantUrl || seen[variantUrl]) continue;
+            seen[variantUrl] = true;
+            var resMatch = line.match(/RESOLUTION=\d+x(\d+)/i);
+            var quality = resMatch ? (parseInt(resMatch[1], 10) || 0) : 0;
+            if (!quality) quality = qualityFromText(nextLine) || fallbackQuality || qualityFromText(url);
+            streams.push(buildStreamResult(variantUrl, source, headers, quality));
+        }
+
+        if (!streams.length) {
+            streams.push(buildStreamResult(url, source, headers, fallbackQuality || qualityFromText(url)));
+        }
+
+        return streams.sort(function(a, b) {
+            return Number(b.quality || 0) - Number(a.quality || 0);
+        });
+    }
+
     async function postJson(url, payload, headers) {
         var body = JSON.stringify(payload || {});
         var mergedHeaders = Object.assign({
@@ -882,46 +968,80 @@
             var html = res.body;
 
             var streams = [];
-
-            var kwikRegex = /<button[^>]*data-src="(https:\/\/kwik\.cx\/e\/[^"]*)"[^>]*>([\s\S]*?)<\/button>/g;
+            var buttonRegex = /<button[^>]*data-src="(https:\/\/kwik\.cx\/e\/[^"]+)"([^>]*)>([\s\S]*?)<\/button>/g;
+            var attrRegex = /([:@\w-]+)="([^"]*)"/g;
             var match;
             var wantDub = (data.dubStatus === "dub");
+            var wantAudio = wantDub ? "eng" : "jpn";
             var buttons = [];
 
-            while ((match = kwikRegex.exec(html)) !== null) {
+            while ((match = buttonRegex.exec(html)) !== null) {
                 var kwikHref = match[1];
-                var btnText  = match[2].replace(/<[^>]+>/g, ' ').trim();
-                var isDub    = btnText.toLowerCase().includes('eng');
+                var attrsRaw = match[2] || "";
+                var btnHtml  = match[3] || "";
+                var attrs = {};
+                var attrMatch;
+                while ((attrMatch = attrRegex.exec(attrsRaw)) !== null) {
+                    attrs[attrMatch[1]] = attrMatch[2];
+                }
+                var btnText = btnHtml.replace(/<[^>]+>/g, " ").replace(/&middot;/g, "·").trim();
+                var audio = String(attrs["data-audio"] || "").toLowerCase();
+                var isDub = audio === "eng" || /\beng(?:lish)?\b/i.test(btnText);
+                var resolution = parseInt(attrs["data-resolution"] || "0", 10) || 0;
 
-                if (isDub !== wantDub) continue;
                 buttons.push({
                     kwikHref: kwikHref,
                     btnText: btnText,
-                    isDub: isDub
+                    isDub: isDub,
+                    audio: audio,
+                    resolution: resolution
                 });
             }
 
-            var streamRows = await Promise.all(buttons.map(async function(button) {
+            if (!buttons.length) {
+                var currentUrl = (html.match(/let\s+url\s*=\s*"(https:\/\/kwik\.cx\/e\/[^"]+)"/i) || [])[1] || "";
+                if (currentUrl) {
+                    buttons.push({
+                        kwikHref: currentUrl,
+                        btnText: "Current",
+                        isDub: wantDub,
+                        audio: wantAudio,
+                        resolution: 0
+                    });
+                }
+            }
+
+            var filteredButtons = buttons.filter(function(button) {
+                if (!button || !button.kwikHref) return false;
+                if (button.audio) return button.audio === wantAudio;
+                return button.isDub === wantDub;
+            });
+            if (!filteredButtons.length) filteredButtons = buttons;
+            filteredButtons = filteredButtons.filter(function(button, index, arr) {
+                return arr.findIndex(function(other) { return other.kwikHref === button.kwikHref; }) === index;
+            });
+
+            var streamRows = await Promise.all(filteredButtons.map(async function(button) {
                 var qualityMatch = button.btnText.match(/(\d{3,4})p/);
-                var quality      = qualityMatch ? parseInt(qualityMatch[1]) : 0;
+                var quality      = qualityMatch ? parseInt(qualityMatch[1], 10) : (button.resolution || 0);
                 var label        = (button.btnText.split('·')[0] || "").trim() || "Kwik";
+                var sourceBase   = "AnimePahe " + label + " [" + (button.isDub ? "DUB" : "SUB") + "]";
+                var streamHeaders = { ...HEADERS, "Referer": "https://kwik.cx/" };
 
                 console.log("[loadStreams] Extracting Kwik [" + (button.isDub ? "DUB" : "SUB") + "]:", button.kwikHref);
                 var streamUrl = await extractKwikStream(button.kwikHref);
 
                 if (streamUrl) {
-                    return new StreamResult({
-                        url:     streamUrl,
-                        quality: quality,
-                        source:  "AnimePahe " + label + " [" + (button.isDub ? 'DUB' : 'SUB') + "]",
-                        headers: { ...HEADERS, "Referer": "https://kwik.cx/" }
-                    });
+                    if (/\.m3u8(?:[?#].*)?$/i.test(streamUrl)) {
+                        return await expandM3u8(streamUrl, sourceBase, streamHeaders, quality || qualityFromText(button.btnText));
+                    }
+                    return [buildStreamResult(streamUrl, sourceBase, streamHeaders, quality || qualityFromText(streamUrl) || qualityFromText(button.btnText))];
                 }
                 console.error("[loadStreams] Failed to extract stream for:", button.kwikHref);
-                return null;
+                return [];
             }));
 
-            streams = streamRows.filter(Boolean);
+            streams = [].concat.apply([], streamRows).filter(Boolean);
 
             console.log("[loadStreams] Total streams found:", streams.length);
             cb({ success: true, data: streams });
