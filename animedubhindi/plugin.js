@@ -217,6 +217,7 @@
         if (value.indexOf("desidubanime") !== -1) return false;
         if (value.indexOf("t.me/") !== -1) return false;
         if (value.indexOf("watch") !== -1) return false;
+        if (value.indexOf("hubcloud") !== -1) return true;
         return value.indexOf("gdflix") !== -1
             || value.indexOf("gdlink") !== -1
             || value.indexOf("/re.php") !== -1
@@ -547,6 +548,32 @@
         });
     }
 
+    function isExtractorHost(url) {
+        var value = String(url || "").toLowerCase();
+        return value.indexOf("hubcloud") !== -1
+            || value.indexOf("dood") !== -1
+            || value.indexOf("filemoon") !== -1
+            || value.indexOf("mixdrop") !== -1
+            || value.indexOf("streamtape") !== -1
+            || value.indexOf("voe") !== -1;
+    }
+
+    async function tryBuiltinExtractor(url, source, quality) {
+        if (!url || typeof globalThis.loadExtractor !== "function" || !isExtractorHost(url)) return [];
+        var out = [];
+        try {
+            await globalThis.loadExtractor(url, function(stream) {
+                if (!stream) return;
+                if (!stream.source && source) stream.source = sourceWithQuality(source, quality);
+                if (!stream.quality && quality) stream.quality = quality;
+                out.push(stream);
+            });
+        } catch (_) {
+            return [];
+        }
+        return dedupeStreams(out);
+    }
+
     function base64Decode(text) {
         try { return atob(text); } catch (_) { return ""; }
     }
@@ -641,6 +668,8 @@
         var source = cleanText(link && link.source || "AnimeDubHindi");
         var quality = parseInt(link && link.quality, 10) || 0;
         if (!url) return [];
+        var extracted = await tryBuiltinExtractor(url, source, quality);
+        if (extracted.length) return extracted;
         if (url.indexOf("gdflix") !== -1 || url.indexOf("gdlink") !== -1) {
             return extractGdflix(url, source, quality);
         }
@@ -648,6 +677,9 @@
             return [toStreamResult("https://pixeldrain.dev/api/file/" + url.split("/").pop() + "?download", source, quality)];
         }
         if (url.indexOf("gdmirrorbot.nl") !== -1) {
+            return [toStreamResult(url, source, quality)];
+        }
+        if (url.indexOf("hubcloud") !== -1) {
             return [toStreamResult(url, source, quality)];
         }
         return [];
