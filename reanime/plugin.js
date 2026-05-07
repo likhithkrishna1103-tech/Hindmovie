@@ -208,12 +208,15 @@
     }
 
     function buildCard(row) {
-        return {
+        var posterUrl = absoluteUrl(BASE_URL, row && row.cover_image && (row.cover_image.extra_large || row.cover_image.large || row.cover_image.medium) || "");
+        var bannerUrl = absoluteUrl(BASE_URL, row && row.banner_image || posterUrl);
+        return new MultimediaItem({
             title: displayTitle(row),
-            image: row && row.cover_image && (row.cover_image.extra_large || row.cover_image.large || row.cover_image.medium) || "",
+            posterUrl: posterUrl,
+            bannerUrl: bannerUrl,
             url: absoluteUrl(BASE_URL, "/anime/" + row.anime_id),
             type: rowType(row)
-        };
+        });
     }
 
     function buildNextAiring(next) {
@@ -390,8 +393,8 @@
             var isMovie = /movie/i.test(String(anime.format || "")) || episodeRows.length <= 1;
             var title = trim(anime.title && (anime.title.english || anime.title.user_preferred || anime.title.romaji || anime.title.native)) || slug;
             var originalTitle = trim(anime.title && (anime.title.romaji || anime.title.native || anime.title.english)) || title;
-            var posterUrl = anime.cover_image && (anime.cover_image.extra_large || anime.cover_image.large || anime.cover_image.medium) || "";
-            var bannerUrl = anime.banner_image || posterUrl;
+            var posterUrl = absoluteUrl(BASE_URL, anime.cover_image && (anime.cover_image.extra_large || anime.cover_image.large || anime.cover_image.medium) || "");
+            var bannerUrl = absoluteUrl(BASE_URL, anime.banner_image || posterUrl);
             var item = new MultimediaItem({
                 title: title,
                 originalTitle: originalTitle,

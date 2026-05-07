@@ -720,6 +720,24 @@
         }
     }
 
+    async function extractPaheUrl(paheUrl) {
+        try {
+            var res = await http_get(paheUrl, {
+                "Referer": MAIN_URL + "/",
+                "User-Agent": HEADERS["User-Agent"] || "Mozilla/5.0"
+            });
+            var html = res && (res.body || res.text || "") || "";
+            if (!html) return null;
+            var direct = (html.match(/https:\/\/kwik\.cx\/f\/[A-Za-z0-9]+/i) || [])[0]
+                || (html.match(/https:\/\/kwik\.cx\/e\/[A-Za-z0-9]+/i) || [])[0]
+                || "";
+            return direct || null;
+        } catch (e) {
+            console.error("[Pahe] Error:", e.message);
+            return null;
+        }
+    }
+
     // ─────────────────────────────────────────────
     // Load (anime detail page)
     // ─────────────────────────────────────────────
@@ -1026,7 +1044,11 @@
                 var quality      = qualityMatch ? parseInt(qualityMatch[1], 10) : (button.resolution || 0);
                 var label        = (button.btnText.split('·')[0] || "").trim() || "Kwik";
                 var sourceBase   = "AnimePahe " + label + " [" + (button.isDub ? "DUB" : "SUB") + "]";
-                var streamHeaders = { ...HEADERS, "Referer": "https://kwik.cx/" };
+                var streamHeaders = {
+                    "Referer": "https://kwik.cx/",
+                    "Origin": "https://kwik.cx",
+                    "User-Agent": HEADERS["User-Agent"] || "Mozilla/5.0"
+                };
 
                 console.log("[loadStreams] Extracting Kwik [" + (button.isDub ? "DUB" : "SUB") + "]:", button.kwikHref);
                 var streamUrl = await extractKwikStream(button.kwikHref);
@@ -1041,7 +1063,27 @@
                 return [];
             }));
 
-            streams = [].concat.apply([], streamRows).filter(Boolean);
+            var downloadRegex = /<a[^>]*href="(https:\/\/pahe\.win\/[^"]+)"[^>]*class="[^"]*dropdown-item[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
+            var downloadRows = [];
+            while ((match = downloadRegex.exec(html)) !== null) {
+                var href = match[1];
+                var text = match[2].replace(/<[^>]+>/g, " ").replace(/&middot;/g, "·").trim();
+                var audioText = text.toLowerCase();
+                var isDub = /\beng(?:lish)?\b/.test(audioText);
+                if (wantDub !== isDub && (/\beng(?:lish)?\b|\bjpn|japanese\b/.test(audioText))) continue;
+                var qMatch = text.match(/(\d{3,4})p/i);
+                var quality = qMatch ? (parseInt(qMatch[1], 10) || 0) : qualityFromText(text);
+                var label = (text.split("·")[0] || "").trim() || "Pahe";
+                var finalUrl = await extractPaheUrl(href);
+                if (!finalUrl) continue;
+                downloadRows.push(buildStreamResult(finalUrl, "AnimePahe Pahe " + label + " [" + (isDub ? "DUB" : "SUB") + "]", {
+                    "Referer": "https://kwik.cx/",
+                    "Origin": "https://kwik.cx",
+                    "User-Agent": HEADERS["User-Agent"] || "Mozilla/5.0"
+                }, quality));
+            }
+
+            streams = [].concat.apply([], streamRows).concat(downloadRows).filter(Boolean);
 
             console.log("[loadStreams] Total streams found:", streams.length);
             cb({ success: true, data: streams });
