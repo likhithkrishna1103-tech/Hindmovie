@@ -7,6 +7,7 @@
     var TMDB_IMAGE = "https://image.tmdb.org/t/p/original";
     var MAIN_URL = "https://www.tokyoinsider.com";
     var COMMON_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
+    var NEXT_AIRING_CACHE = {};
 
     function trim(value) {
         return String(value == null ? "" : value).replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "");
@@ -52,6 +53,72 @@
             headers[String(key).toLowerCase()] = rawHeaders[key];
         }
         return headers;
+    }
+
+    function cacheGet(cache, key, ttl) {
+        var entry = cache[key];
+        if (!entry) return null;
+        if (Date.now() - entry.time > (ttl || 1800000)) {
+            delete cache[key];
+            return null;
+        }
+        return entry.value;
+    }
+
+    function cacheSet(cache, key, value) {
+        cache[key] = { value: value, time: Date.now() };
+        return value;
+    }
+
+    async function postJson(url, payload, headers) {
+        var body = JSON.stringify(payload || {});
+        var mergedHeaders = Object.assign({
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": COMMON_USER_AGENT
+        }, headers || {});
+        try {
+            var res1 = await http_post(url, mergedHeaders, body);
+            if (!res1 || !res1.body) throw new Error("Empty response");
+            return JSON.parse(res1.body);
+        } catch (_) {
+            var res2 = await http_post(url, body, mergedHeaders);
+            if (!res2 || !res2.body) throw new Error("Empty response");
+            return JSON.parse(res2.body);
+        }
+    }
+
+    function buildNextAiring(episode, season, unixTime) {
+        if (!episode || !unixTime) return undefined;
+        var payload = { episode: Number(episode), season: Number(season || 1), unixTime: Number(unixTime) };
+        return typeof NextAiring === "function" ? new NextAiring(payload) : payload;
+    }
+
+    async function fetchNextAiring(params) {
+        params = params || {};
+        var cacheKey = params.anilistId ? ("al:" + params.anilistId)
+            : params.malId ? ("mal:" + params.malId)
+            : params.title ? ("title:" + String(params.title).toLowerCase())
+            : "";
+        if (!cacheKey) return undefined;
+        if (Object.prototype.hasOwnProperty.call(NEXT_AIRING_CACHE, cacheKey)) {
+            return cacheGet(NEXT_AIRING_CACHE, cacheKey, 1800000);
+        }
+        try {
+            var variables = {};
+            if (params.anilistId) variables.id = Number(params.anilistId);
+            else if (params.malId) variables.idMal = Number(params.malId);
+            else variables.search = String(params.title || "");
+            var json = await postJson("https://graphql.anilist.co", {
+                query: "query($id:Int,$idMal:Int,$search:String){Media(id:$id,idMal:$idMal,search:$search,type:ANIME){status nextAiringEpisode{episode airingAt}}}",
+                variables: variables
+            });
+            var media = json && json.data && json.data.Media;
+            var next = media && media.nextAiringEpisode;
+            return cacheSet(NEXT_AIRING_CACHE, cacheKey, buildNextAiring(next && next.episode, 1, next && next.airingAt) || null);
+        } catch (_) {
+            return cacheSet(NEXT_AIRING_CACHE, cacheKey, null);
+        }
     }
 
     function responseStatus(res) {
@@ -439,6 +506,11 @@
             var payload = parsePayload(url);
             var isMovie = String(payload.mediaType) === "movie";
             var details = await getTmdbJson((isMovie ? "movie/" : "tv/") + payload.tmdbId + "?api_key=" + TMDB_API_KEY);
+            var nextAiring = !isMovie
+                ? await fetchNextAiring({
+                    title: details.name || details.original_name || payload.originalTitle || payload.title
+                })
+                : undefined;
             var item = new MultimediaItem({
                 title: details.title || details.name || payload.title,
                 url: buildPayload({
@@ -455,7 +527,8 @@
                 bannerUrl: tmdbImage(details.backdrop_path),
                 description: details.overview || "",
                 year: Number(String(details.release_date || details.first_air_date || "").slice(0, 4)) || payload.year || 0,
-                type: isMovie ? "movie" : "anime"
+                type: isMovie ? "movie" : "anime",
+                nextAiring: nextAiring || undefined
             });
 
             if (!isMovie) {

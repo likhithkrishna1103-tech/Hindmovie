@@ -11,6 +11,11 @@
     const TMDB_API_KEY = "1865f43a0549ca50d341dd9ab8b29f49";
     const TMDB_BASE    = "https://api.themoviedb.org/3";
     const TMDB_IMG     = "https://image.tmdb.org/t/p/w500";
+    const CACHE_TTL    = 300000;
+    var searchCache = {};
+    var searchInflight = {};
+    var kwikCache = {};
+    var nextAiringCache = {};
     // Poster lookup:
     // AnimePahe's search API returns a proper "poster" cover image for each anime.
     // We search by title and take the first result's poster — same proxy, always works.
@@ -153,6 +158,71 @@
             seen[key] = true;
             return true;
         });
+    }
+
+    function cacheGet(map, key, ttl) {
+        var entry = map[key];
+        if (!entry) return null;
+        if (Date.now() - entry.time > (ttl || CACHE_TTL)) {
+            delete map[key];
+            return null;
+        }
+        return entry.value;
+    }
+
+    function cacheSet(map, key, value) {
+        map[key] = { value: value, time: Date.now() };
+        return value;
+    }
+
+    async function postJson(url, payload, headers) {
+        var body = JSON.stringify(payload || {});
+        var mergedHeaders = Object.assign({
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }, headers || {});
+        try {
+            var res1 = await http_post(url, mergedHeaders, body);
+            if (!res1 || !res1.body) throw new Error("Empty response");
+            return JSON.parse(res1.body);
+        } catch (_) {
+            var res2 = await http_post(url, body, mergedHeaders);
+            if (!res2 || !res2.body) throw new Error("Empty response");
+            return JSON.parse(res2.body);
+        }
+    }
+
+    function buildNextAiring(episode, season, unixTime) {
+        if (!episode || !unixTime) return undefined;
+        var payload = { episode: Number(episode), season: Number(season || 1), unixTime: Number(unixTime) };
+        return typeof NextAiring === "function" ? new NextAiring(payload) : payload;
+    }
+
+    async function fetchNextAiring(params) {
+        params = params || {};
+        var cacheKey = params.anilistId ? ("al:" + params.anilistId)
+            : params.malId ? ("mal:" + params.malId)
+            : params.title ? ("title:" + String(params.title).toLowerCase())
+            : "";
+        if (!cacheKey) return undefined;
+        if (Object.prototype.hasOwnProperty.call(nextAiringCache, cacheKey)) {
+            return cacheGet(nextAiringCache, cacheKey, 1800000);
+        }
+        try {
+            var variables = {};
+            if (params.anilistId) variables.id = Number(params.anilistId);
+            else if (params.malId) variables.idMal = Number(params.malId);
+            else variables.search = String(params.title || "");
+            var json = await postJson("https://graphql.anilist.co", {
+                query: "query($id:Int,$idMal:Int,$search:String){Media(id:$id,idMal:$idMal,search:$search,type:ANIME){status nextAiringEpisode{episode airingAt}}}",
+                variables: variables
+            });
+            var media = json && json.data && json.data.Media;
+            var next = media && media.nextAiringEpisode;
+            return cacheSet(nextAiringCache, cacheKey, buildNextAiring(next && next.episode, 1, next && next.airingAt) || null);
+        } catch (_) {
+            return cacheSet(nextAiringCache, cacheKey, null);
+        }
     }
 
     async function fetchAniZipMeta(malId) {
@@ -329,42 +399,12 @@
                 var res = await http_get(url, HEADERS);
                 if (!res || !res.body) throw new Error("Empty response");
                 var data = new AiringResponse(JSON.parse(res.body));
-                var items = data.data.map(function(item) {
+                return data.data.map(function(item) {
                     var m = toMultimediaItem(item, true);
                     m.description = "Episode " + item.episode;
+                    if (!m.posterUrl && item.snapshot) m.posterUrl = item.snapshot;
                     return m;
                 });
-                // Enrich posters in parallel using session (fastest) or title fallback
-                var enriched = await Promise.all(items.map(async function(m, idx) {
-                    var rawItem = data.data[idx];
-                    var session = rawItem && rawItem.animeSession;
-                    var title   = m.title || "";
-
-                    // Try session-based lookup first (most accurate — direct anime page)
-                    if (session) {
-                        try {
-                            var spUrl = PROXY + MAIN_URL + "/api?m=search&l=1&q=" + encodeURIComponent(title);
-                            var spRes = await http_get(spUrl, HEADERS);
-                            if (spRes && spRes.body) {
-                                var spData = JSON.parse(spRes.body);
-                                // Find result whose session matches exactly
-                                var match = (spData.data || []).find(function(d) {
-                                    return d.session === session;
-                                }) || spData.data && spData.data[0];
-                                if (match && match.poster && match.poster.indexOf("/snapshots/") === -1) {
-                                    m.posterUrl = match.poster;
-                                    return m;
-                                }
-                            }
-                        } catch(e) { /* fall through */ }
-                    }
-
-                    // Fallback: getPoster by title
-                    var poster = await getPoster(title);
-                    if (poster) m.posterUrl = poster;
-                    return m;
-                }));
-                return enriched;
             }
 
             // Helper: fetch one search page for anime type, enrich posters from Jikan
@@ -373,47 +413,33 @@
                 var res = await http_get(url, HEADERS);
                 if (!res || !res.body) throw new Error("Empty response");
                 var data = new SearchResponse(JSON.parse(res.body));
-                var items = data.data.map(function(item) { return toMultimediaItem(item, false); });
-                var enriched = await Promise.all(items.map(async function(m) {
-                    var poster = await getPoster(m.title || "");
-                    if (poster) m.posterUrl = poster;
-                    return m;
-                }));
-                return enriched;
+                return data.data.map(function(item) { return toMultimediaItem(item, false); });
             }
 
-            // ── Row 1: Latest Releases ─────────────────────────────────
-            try {
-                var row1 = await fetchAiringPage(1);
-                if (row1.length) homeData["🔴 Latest Releases"] = row1;
-            } catch(e) { console.error("[Home] Row 1 error:", e.message); }
+            var rowJobs = [
+                { key: "🔴 Latest Releases", run: function() { return fetchAiringPage(1); } },
+                { key: "🎌 New This Season", run: function() { return fetchAiringPage(2); } },
+                { key: "🔥 Popular Right Now", run: function() { return fetchAiringPage(3); } },
+                { key: "🎬 Anime Movies", run: async function() {
+                    var row4 = await fetchSearchPage("movie");
+                    var movies = row4.filter(function(i) { return i.type === "movie"; });
+                    return movies.length ? movies : row4;
+                }},
+                { key: "⭐ Recently Added", run: function() { return fetchAiringPage(4); } }
+            ];
 
-            // ── Row 2: New This Season ─────────────────────────────────
-            try {
-                var row2 = await fetchAiringPage(2);
-                if (row2.length) homeData["🎌 New This Season"] = row2;
-            } catch(e) { console.error("[Home] Row 2 error:", e.message); }
+            var rowResults = await Promise.all(rowJobs.map(async function(job) {
+                try {
+                    return { key: job.key, items: await job.run() };
+                } catch(e) {
+                    console.error("[Home] " + job.key + " error:", e.message);
+                    return { key: job.key, items: [] };
+                }
+            }));
 
-            // ── Row 3: Popular Right Now ───────────────────────────────
-            try {
-                var row3 = await fetchAiringPage(3);
-                if (row3.length) homeData["🔥 Popular Right Now"] = row3;
-            } catch(e) { console.error("[Home] Row 3 error:", e.message); }
-
-            // ── Row 4: Anime Movies ────────────────────────────────────
-            try {
-                var row4 = await fetchSearchPage("movie");
-                // Filter to only movie-type items
-                var movies = row4.filter(function(i) { return i.type === "movie"; });
-                if (!movies.length) movies = row4; // fallback: show all if none tagged movie
-                if (movies.length) homeData["🎬 Anime Movies"] = movies;
-            } catch(e) { console.error("[Home] Row 4 error:", e.message); }
-
-            // ── Row 5: Recently Added ──────────────────────────────────
-            try {
-                var row5 = await fetchAiringPage(4);
-                if (row5.length) homeData["⭐ Recently Added"] = row5;
-            } catch(e) { console.error("[Home] Row 5 error:", e.message); }
+            rowResults.forEach(function(result) {
+                if (result.items && result.items.length) homeData[result.key] = result.items;
+            });
 
             cb({ success: true, data: homeData });
 
@@ -428,6 +454,17 @@
 
     async function search(query, cb) {
         try {
+            var key = String(query || "").trim().toLowerCase();
+            var cached = cacheGet(searchCache, key, CACHE_TTL);
+            if (cached) {
+                cb({ success: true, data: cached });
+                return;
+            }
+            if (searchInflight[key]) {
+                cb({ success: true, data: await searchInflight[key] });
+                return;
+            }
+            searchInflight[key] = (async function() {
             // Primary: AnimePahe API
             var url = PROXY + MAIN_URL + "/api?m=search&l=8&q=" + encodeURIComponent(query);
             var res = await http_get(url, HEADERS);
@@ -437,17 +474,22 @@
                 return toMultimediaItem(item, false);
             });
 
-            // Supplement with TMDB if AnimePahe returns too few results
-            if (items.length < 4) {
+            // Supplement with TMDB only if AnimePahe returns nothing
+            if (!items.length) {
                 try {
                     var tmdbResults = await tmdbAnimeSearch(query);
                     var tmdbItems   = tmdbResults.slice(0, 10).map(tmdbToMultimediaItem);
                     items = items.concat(tmdbItems);
                 } catch(te) { console.error("[Search] TMDB fallback error:", te.message); }
             }
+            return cacheSet(searchCache, key, uniqueByUrl(items));
+            })();
 
-            cb({ success: true, data: items });
+            var finalItems = await searchInflight[key];
+            delete searchInflight[key];
+            cb({ success: true, data: finalItems });
         } catch(e) {
+            delete searchInflight[String(query || "").trim().toLowerCase()];
             cb({ success: false, errorCode: "SEARCH_ERROR", message: e.message });
         }
     }
@@ -458,6 +500,10 @@
 
     function unpackJS(script) {
         try {
+            if (typeof getAndUnpack === "function") {
+                var nativeUnpacked = getAndUnpack(script);
+                if (nativeUnpacked && nativeUnpacked !== script) return nativeUnpacked;
+            }
             if (!script.includes("function(p,a,c,k,e")) {
                 console.error("[unpackJS] Not a packed script");
                 return null;
@@ -560,6 +606,8 @@
 
     async function extractKwikStream(kwikUrl) {
         try {
+            var cached = cacheGet(kwikCache, kwikUrl, CACHE_TTL);
+            if (cached) return cached;
             console.log("[Kwik] Fetching embed: " + kwikUrl);
             var res = await http_get(kwikUrl, { ...HEADERS, "Referer": kwikUrl });
             var html = res.body;
@@ -573,10 +621,10 @@
             console.log("[Kwik] Unpacked (first 300 chars):", unpacked.substring(0, 300));
 
             var m3u8Match = unpacked.match(/source\s*=\s*'([^']*\.m3u8[^']*)'/);
-            if (m3u8Match) { console.log("[Kwik] Found m3u8:", m3u8Match[1]); return m3u8Match[1]; }
+            if (m3u8Match) { console.log("[Kwik] Found m3u8:", m3u8Match[1]); return cacheSet(kwikCache, kwikUrl, m3u8Match[1]); }
 
             var bare = unpacked.match(/(https?:\/\/[^\s'"]+\.m3u8[^\s'"]*)/);
-            if (bare) { console.log("[Kwik] Found m3u8 (bare):", bare[1]); return bare[1]; }
+            if (bare) { console.log("[Kwik] Found m3u8 (bare):", bare[1]); return cacheSet(kwikCache, kwikUrl, bare[1]); }
 
             console.error("[Kwik] m3u8 not found in unpacked script");
             return null;
@@ -646,9 +694,15 @@
             var session = loadData.session;
             var name    = loadData.name;
 
-            // Refresh session if older than 10 minutes
-            var now = Math.floor(Date.now() / 1000);
-            if (loadData.sessionDate && (loadData.sessionDate + 600 < now)) {
+            async function fetchAnimePage(targetSession) {
+                var animeUrl = PROXY + MAIN_URL + "/anime/" + targetSession;
+                var res = await http_get(animeUrl, HEADERS);
+                return { animeUrl: animeUrl, html: res.body || "" };
+            }
+
+            var pageData = await fetchAnimePage(session);
+            var html = pageData.html;
+            if (!html || html.indexOf("anime-info") === -1) {
                 var searchRes = await new Promise(function(resolve, reject) {
                     search(name, function(result) {
                         if (result.success && result.data.length > 0) resolve(result.data[0]);
@@ -657,11 +711,9 @@
                 });
                 var freshData = JSON.parse(searchRes.url);
                 session = freshData.session;
+                pageData = await fetchAnimePage(session);
+                html = pageData.html;
             }
-
-            var animeUrl = PROXY + MAIN_URL + "/anime/" + session;
-            var res      = await http_get(animeUrl, HEADERS);
-            var html     = res.body;
 
             var japaneseTitle = (html.match(/<h2 class="japanese">([^<]+)<\/h2>/) || [])[1] || "";
             var animeTitle    = (html.match(/<span class="sr-only unselectable">([^<]+)<\/span>/) || [])[1]
@@ -695,11 +747,15 @@
             if (malMatch) malId     = malMatch[1];
             if (aniMatch) anilistId = aniMatch[1];
 
+            var nextAiringPromise = (getType(type) === "anime" && status !== "completed")
+                ? fetchNextAiring({ anilistId: anilistId, malId: malId, title: animeTitle || name })
+                : Promise.resolve(undefined);
             var aniZipMeta = await fetchAniZipMeta(malId);
             var metaEpisodes = buildAniZipEpisodeMap(aniZipMeta);
             var backgroundFanart = getAniZipFanart(aniZipMeta);
             var recommendations = parseRecommendations(html);
             var episodes = await fetchAllEpisodes(session, metaEpisodes);
+            var nextAiring = await nextAiringPromise;
 
             var result = new MultimediaItem({
                 title:       animeTitle,
@@ -713,6 +769,7 @@
                 status:      status,
                 genres:      genres,
                 syncData:    { mal: malId, anilist: anilistId },
+                nextAiring:  nextAiring || undefined,
                 recommendations: recommendations,
                 episodes:    episodes,
                 headers:     HEADERS
@@ -829,6 +886,7 @@
             var kwikRegex = /<button[^>]*data-src="(https:\/\/kwik\.cx\/e\/[^"]*)"[^>]*>([\s\S]*?)<\/button>/g;
             var match;
             var wantDub = (data.dubStatus === "dub");
+            var buttons = [];
 
             while ((match = kwikRegex.exec(html)) !== null) {
                 var kwikHref = match[1];
@@ -836,25 +894,34 @@
                 var isDub    = btnText.toLowerCase().includes('eng');
 
                 if (isDub !== wantDub) continue;
+                buttons.push({
+                    kwikHref: kwikHref,
+                    btnText: btnText,
+                    isDub: isDub
+                });
+            }
 
-                var qualityMatch = btnText.match(/(\d{3,4})p/);
+            var streamRows = await Promise.all(buttons.map(async function(button) {
+                var qualityMatch = button.btnText.match(/(\d{3,4})p/);
                 var quality      = qualityMatch ? parseInt(qualityMatch[1]) : 0;
-                var label        = (btnText.split('·')[0] || "").trim() || "Kwik";
+                var label        = (button.btnText.split('·')[0] || "").trim() || "Kwik";
 
-                console.log("[loadStreams] Extracting Kwik [" + (isDub ? "DUB" : "SUB") + "]:", kwikHref);
-                var streamUrl = await extractKwikStream(kwikHref);
+                console.log("[loadStreams] Extracting Kwik [" + (button.isDub ? "DUB" : "SUB") + "]:", button.kwikHref);
+                var streamUrl = await extractKwikStream(button.kwikHref);
 
                 if (streamUrl) {
-                    streams.push(new StreamResult({
+                    return new StreamResult({
                         url:     streamUrl,
                         quality: quality,
-                        source:  "AnimePahe " + label + " [" + (isDub ? 'DUB' : 'SUB') + "]",
+                        source:  "AnimePahe " + label + " [" + (button.isDub ? 'DUB' : 'SUB') + "]",
                         headers: { ...HEADERS, "Referer": "https://kwik.cx/" }
-                    }));
-                } else {
-                    console.error("[loadStreams] Failed to extract stream for:", kwikHref);
+                    });
                 }
-            }
+                console.error("[loadStreams] Failed to extract stream for:", button.kwikHref);
+                return null;
+            }));
+
+            streams = streamRows.filter(Boolean);
 
             console.log("[loadStreams] Total streams found:", streams.length);
             cb({ success: true, data: streams });

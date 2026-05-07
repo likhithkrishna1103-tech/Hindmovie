@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.animekai",
   "name": "AnimeKai",
-  "version": 4,
+  "version": 5,
   "baseUrl": "https://anikai.to",
   "domains": [
     {
