@@ -175,6 +175,17 @@
         return value;
     }
 
+    function encodeBase64String(value) {
+        var input = String(value || "");
+        try {
+            if (typeof btoa === "function") return btoa(input);
+        } catch (_) {}
+        try {
+            if (typeof Buffer !== "undefined") return Buffer.from(input, "binary").toString("base64");
+        } catch (_) {}
+        return "";
+    }
+
     function qualityFromText(value) {
         value = String(value || "");
         var match = value.match(/(\d{3,4})p/i);
@@ -201,6 +212,94 @@
             quality: quality || 0,
             headers: headers || {}
         });
+    }
+
+    function isLikelyHls(url, body) {
+        var text = String(body || "");
+        var value = String(url || "");
+        return /\.m3u8(?:$|\?)/i.test(value) || /^#EXTM3U/i.test(text);
+    }
+
+    function proxifyUrl(url, headers, referer, mirrorHosts) {
+        var payload = {
+            url: url,
+            headers: headers || {},
+            options: {
+                referer: referer || "",
+                mirrorHosts: mirrorHosts || []
+            }
+        };
+        return "MAGIC_PROXY_v2" + encodeBase64String(JSON.stringify(payload));
+    }
+
+    function proxifyUrlV1(url) {
+        return "MAGIC_PROXY_v1" + encodeBase64String(String(url || ""));
+    }
+
+    function buildMagicM3u8(body, playlistUrl) {
+        var lines = String(body || "").split(/\r?\n/);
+        var rewritten = [];
+        for (var i = 0; i < lines.length; i++) {
+            var line = String(lines[i] || "");
+            var trimmed = line.trim();
+            if (!trimmed) {
+                rewritten.push(line);
+                continue;
+            }
+            if (trimmed.charAt(0) === "#") {
+                if (/^#EXT-X-KEY:/i.test(trimmed) && /URI="/i.test(trimmed)) {
+                    rewritten.push(line.replace(/URI="([^"]+)"/i, function (_, uri) {
+                        return 'URI="' + proxifyUrlV1(absoluteUrl(playlistUrl, uri)) + '"';
+                    }));
+                } else {
+                    rewritten.push(line);
+                }
+                continue;
+            }
+            rewritten.push(proxifyUrlV1(absoluteUrl(playlistUrl, trimmed)));
+        }
+        return "magic_m3u8:" + encodeBase64String(rewritten.join("\n"));
+    }
+
+    async function buildMagicM3u8Url(url, headers) {
+        try {
+            var res = await http_get(url, headers || {});
+            var body = res && (res.body || res.text || "") || "";
+            if (!/#EXTM3U/i.test(body)) return proxifyUrlV1(url);
+            return buildMagicM3u8(body, url);
+        } catch (_) {
+            return proxifyUrlV1(url);
+        }
+    }
+
+    function buildPlayableStreamResult(url, source, headers, quality, opts) {
+        var config = opts || {};
+        var referer = config.referer || (headers && (headers.Referer || headers.referer)) || "";
+        var mirrorHosts = config.mirrorHosts || [];
+        if (!mirrorHosts.length) {
+            try {
+                mirrorHosts = [new URL(url).hostname];
+            } catch (_) {
+                mirrorHosts = [];
+            }
+        }
+        if (config.forceProxy || isLikelyHls(url, config.body)) {
+            return new StreamResult({
+                url: proxifyUrl(url, headers, referer, mirrorHosts),
+                source: source || "AnimePahe",
+                quality: quality || 0,
+                type: "hls",
+                headers: {}
+            });
+        }
+        var stream = new StreamResult({
+            url: url,
+            source: source || "AnimePahe",
+            quality: quality || 0,
+            referer: referer,
+            headers: headers || {}
+        });
+        return stream;
     }
 
     function absoluteUrl(base, value) {
@@ -1045,12 +1144,20 @@
                 var streamUrl = await extractKwikStream(button.kwikHref);
 
                 if (streamUrl) {
+                    var finalUrl = streamUrl;
+                    if (/\.m3u8(?:$|\?)/i.test(streamUrl)) {
+                        finalUrl = await buildMagicM3u8Url(streamUrl, {
+                            "Referer": "https://kwik.cx/",
+                            "Origin": "https://kwik.cx",
+                            "User-Agent": HEADERS["User-Agent"] || "Mozilla/5.0"
+                        });
+                    }
                     return [new StreamResult({
-                        url: streamUrl,
+                        url: finalUrl,
                         quality: quality || qualityFromText(streamUrl) || qualityFromText(button.btnText),
                         source: sourceBase,
-                        referer: "https://kwik.cx",
-                        headers: { "origin": "https://kwik.cx" }
+                        type: /\.m3u8(?:$|\?)/i.test(streamUrl) ? "hls" : undefined,
+                        headers: {}
                     })];
                 }
                 console.error("[loadStreams] Failed to extract stream for:", button.kwikHref);
