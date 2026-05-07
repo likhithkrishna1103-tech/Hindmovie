@@ -1,7 +1,7 @@
 (function () {
     const DEBUG = false;
 
-    const MAIN_URL = "https://piratexplay.cc";
+    const MAIN_URL = normalizeUrl((manifest && manifest.baseUrl) || "https://piratexplay.cc");
     const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
     const DEFAULT_HEADERS = {
         "User-Agent": USER_AGENT
@@ -40,6 +40,24 @@
         }
     }
 
+    function providerPriority(url) {
+        const host = hostOf(url);
+        if (/(^|\.)piratexplay\.cc$/i.test(host) || /(^|\.)as-cdn21\.top$/i.test(host) || /(^|\.)z\.awstream\.net$/i.test(host)) return 100;
+        if (/(^|\.)gdmirrorbot\.nl$/i.test(host) || /(^|\.)pro\.iqsmartgames\.com$/i.test(host) || /(^|\.)streams\.iqsmartgames\.com$/i.test(host)) return 95;
+        if (/(^|\.)animesalt\.ac$/i.test(host) || /(^|\.)short\.icu$/i.test(host)) return 90;
+        if (/(^|\.)cloudy\.upns\.one$/i.test(host) || /(^|\.)pixdrive\.cfd$/i.test(host) || /(^|\.)ghbrisk\.com$/i.test(host)) return 80;
+        if (/(^|\.)vidstreaming\.xyz$/i.test(host)) return 70;
+        if (/(^|\.)rubystm\.com$/i.test(host)) return 60;
+        return 10;
+    }
+
+    function shouldSkipFrame(url) {
+        const host = hostOf(url);
+        return /(^|\.)strmup\.to$/i.test(host)
+            || /(^|\.)emturbovid\.com$/i.test(host)
+            || /(^|\.)vidmoly\.net$/i.test(host);
+    }
+
     function htmlDecode(text) {
         return String(text || "")
             .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
@@ -71,13 +89,19 @@
         return resolveUrl(attrOf(node, "src", "data-src", "data-lazy-src"), base);
     }
 
-    async function getDocument(url, headers = {}) {
+    function sanitizeHtmlForDom(html) {
+        return String(html || "")
+            .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+            .replace(/<link\b[^>]+rel=["']stylesheet["'][^>]*>/gi, "");
+    }
+
+    async function getDocument(url, headers = {}, parseDom = true) {
         const response = await http_get(url, { ...DEFAULT_HEADERS, ...headers });
         const html = String(response?.body || "");
         return {
             response,
             html,
-            document: await parseHtml(html)
+            document: parseDom ? await parseHtml(sanitizeHtmlForDom(html)) : null
         };
     }
 
@@ -112,6 +136,11 @@
         return 0;
     }
 
+    function qualityLabel(quality) {
+        const value = parseInt(quality, 10) || 0;
+        return value > 0 ? `${value}p` : "";
+    }
+
     function formEncode(data) {
         return Object.entries(data || {})
             .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value == null ? "" : String(value))}`)
@@ -127,6 +156,36 @@
             seen.add(key);
             out.push(item);
         }
+        return out;
+    }
+
+    async function httpParallelGet(requests) {
+        const items = Array.isArray(requests) ? requests.filter((item) => item && item.url) : [];
+        if (!items.length) return [];
+        if (typeof http_parallel === "function") {
+            try {
+                return await http_parallel(items.map((item) => ({
+                    method: "GET",
+                    url: item.url,
+                    headers: item.headers || {}
+                })));
+            } catch (_) {}
+        }
+        return Promise.all(items.map((item) => http_get(item.url, item.headers || {}).catch(() => ({ body: "", finalUrl: item.url }))));
+    }
+
+    async function mapConcurrent(items, limit, worker) {
+        const rows = Array.isArray(items) ? items : [];
+        const count = Math.max(1, parseInt(limit, 10) || 1);
+        const out = new Array(rows.length);
+        let index = 0;
+        async function run() {
+            while (index < rows.length) {
+                const current = index++;
+                out[current] = await worker(rows[current], current);
+            }
+        }
+        await Promise.all(Array.from({ length: Math.min(count, rows.length) }, () => run()));
         return out;
     }
 
@@ -149,6 +208,47 @@
                 && !/%3c|%3e/i.test(value)
                 && !/[<>]/.test(value);
         });
+    }
+
+    function buildStreamResult(url, source, headers, quality, subtitles) {
+        const stream = new StreamResult({
+            url,
+            source: source || "PirateXPlay",
+            quality: quality || 0,
+            headers: headers || {}
+        });
+        if (subtitles && subtitles.length) stream.subtitles = subtitles;
+        return stream;
+    }
+
+    async function expandM3u8(url, source, headers, subtitles) {
+        let text = "";
+        try {
+            text = String((await http_get(url, headers || {}))?.body || "");
+        } catch (_) {
+            text = "";
+        }
+        if (!/#EXTM3U/i.test(text) || !/#EXT-X-STREAM-INF/i.test(text)) {
+            return [buildStreamResult(url, source, headers, qualityFromText(url), subtitles)];
+        }
+        const lines = text.split(/\r?\n/);
+        const streams = [];
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (!/^#EXT-X-STREAM-INF/i.test(line)) continue;
+            let next = "";
+            for (let j = i + 1; j < lines.length; j++) {
+                if (lines[j] && lines[j][0] !== "#") {
+                    next = lines[j].trim();
+                    break;
+                }
+            }
+            if (!next) continue;
+            const resMatch = line.match(/RESOLUTION=\d+x(\d+)/i);
+            const quality = resMatch ? parseInt(resMatch[1], 10) : qualityFromText(next);
+            streams.push(buildStreamResult(resolveUrl(next, url), source, headers, quality, subtitles));
+        }
+        return streams.length ? streams : [buildStreamResult(url, source, headers, qualityFromText(url), subtitles)];
     }
 
     function iframeUrls(document, baseUrl) {
@@ -189,8 +289,15 @@
         const seasonUrls = seasonHrefs.length ? seasonHrefs : [pageUrl];
         const episodes = [];
 
-        for (const seasonUrl of seasonUrls) {
-            const { document: seasonDoc } = await getDocument(seasonUrl, { Referer: MAIN_URL });
+        const seasonPages = await httpParallelGet(seasonUrls.map((seasonUrl) => ({
+            url: seasonUrl,
+            headers: { ...DEFAULT_HEADERS, Referer: MAIN_URL }
+        })));
+
+        for (let seasonIndex = 0; seasonIndex < seasonUrls.length; seasonIndex++) {
+            const seasonUrl = seasonUrls[seasonIndex];
+            const html = String(seasonPages[seasonIndex]?.body || "");
+            const seasonDoc = await parseHtml(html);
             const liNodes = [...seasonDoc.querySelectorAll("#episode_by_temp li")];
 
             for (const li of liNodes) {
@@ -223,7 +330,7 @@
             return sid ? [sid] : [];
         }
 
-        let pageText = (await getDocument(source, referer ? { Referer: referer } : {})).html;
+        let pageText = (await getDocument(source, referer ? { Referer: referer } : {}, false)).html;
 
         const finalId = pageText.match(/FinalID\s*=\s*"([^"]+)"/)?.[1];
         const myKey = pageText.match(/myKey\s*=\s*"([^"]+)"/)?.[1];
@@ -239,7 +346,7 @@
                 apiUrl = `${MAIN_URL}/mymovieapi?${encodeURIComponent(idType)}=${encodeURIComponent(finalId)}&key=${encodeURIComponent(myKey)}`;
             }
 
-            pageText = (await getDocument(apiUrl, { Referer: apiUrl })).html;
+            pageText = (await getDocument(apiUrl, { Referer: apiUrl }, false)).html;
         }
 
         const json = safeJsonParse(pageText);
@@ -259,7 +366,7 @@
         const hash = pageUrl.split("/").pop()?.split(/[?#]/)[0];
         if (!hash) return [];
 
-        await getDocument(pageUrl, referer ? { Referer: referer } : {});
+        await getDocument(pageUrl, referer ? { Referer: referer } : {}, false);
         const apiUrl = `${baseUrl}/player/index.php?data=${encodeURIComponent(hash)}&do=getVideo`;
         const body = formEncode({
             hash,
@@ -276,40 +383,35 @@
         const streamUrl = json?.videoSource;
         if (!streamUrl) return [];
 
-        return [new StreamResult({
-            url: streamUrl,
-            quality: 1080,
-            source: hostOf(pageUrl) || "AWSStream",
-            headers: {
-                Referer: ""
-            }
-        })];
+        return expandM3u8(streamUrl, hostOf(pageUrl) || "AWSStream", {
+            Referer: ""
+        }, []);
     }
 
     async function extractFilesimLike(url, referer) {
-        const { html } = await getDocument(url, referer ? { Referer: referer } : {});
+        const { html } = await getDocument(url, referer ? { Referer: referer } : {}, false);
         const mediaUrls = collectMediaUrls(html, url);
         if (mediaUrls.length) {
-            return mediaUrls.map((streamUrl) => new StreamResult({
-                url: streamUrl,
-                quality: qualityFromText(streamUrl),
-                source: hostOf(url) || "Filesim",
-                headers: {
-                    Referer: referer || getOrigin(url)
+            const streams = [];
+            for (const streamUrl of mediaUrls) {
+                if (/\.m3u8(?:[?#].*)?$/i.test(streamUrl)) {
+                    streams.push(...(await expandM3u8(streamUrl, hostOf(url) || "Filesim", {
+                        Referer: referer || getOrigin(url)
+                    }, [])));
+                } else {
+                    streams.push(buildStreamResult(streamUrl, hostOf(url) || "Filesim", {
+                        Referer: referer || getOrigin(url)
+                    }, qualityFromText(streamUrl), []));
                 }
-            }));
+            }
+            return streams;
         }
 
         const packedUrl = html.match(/["'](https?:\/\/[^"']+\/d\/[^"']+)["']/i)?.[1];
         if (packedUrl) {
-            return [new StreamResult({
-                url: packedUrl,
-                quality: 0,
-                source: hostOf(url) || "Filesim",
-                headers: {
-                    Referer: referer || getOrigin(url)
-                }
-            })];
+            return [buildStreamResult(packedUrl, hostOf(url) || "Filesim", {
+                Referer: referer || getOrigin(url)
+            }, 0, [])];
         }
 
         return [];
@@ -321,22 +423,105 @@
         const { html, document } = await getDocument(url, referer ? { Referer: referer } : {});
         const mediaUrls = collectMediaUrls(html, url);
         if (mediaUrls.length) {
-            return mediaUrls.map((streamUrl) => new StreamResult({
-                url: streamUrl,
-                quality: qualityFromText(streamUrl),
-                source: hostOf(url) || "Generic",
-                headers: {
-                    Referer: referer || getOrigin(url)
+            const streams = [];
+            for (const streamUrl of mediaUrls) {
+                if (/\.m3u8(?:[?#].*)?$/i.test(streamUrl)) {
+                    streams.push(...(await expandM3u8(streamUrl, hostOf(url) || "Generic", {
+                        Referer: referer || getOrigin(url)
+                    }, [])));
+                } else {
+                    streams.push(buildStreamResult(streamUrl, hostOf(url) || "Generic", {
+                        Referer: referer || getOrigin(url)
+                    }, qualityFromText(streamUrl), []));
                 }
-            }));
+            }
+            return streams;
         }
 
         const nestedFrames = iframeUrls(document, url);
-        let streams = [];
-        for (const frameUrl of nestedFrames) {
-            streams = streams.concat(await extractFromUrl(frameUrl, url, depth + 1));
+        const batches = await mapConcurrent(nestedFrames, 4, (frameUrl) => extractFromUrl(frameUrl, url, depth + 1));
+        return batches.flat();
+    }
+
+    function isBuiltinExtractorHost(url) {
+        const host = hostOf(url);
+        return /(^|\.)hubcloud/i.test(host)
+            || /(^|\.)dood/i.test(host)
+            || /(^|\.)filemoon/i.test(host)
+            || /(^|\.)mixdrop/i.test(host)
+            || /(^|\.)streamtape/i.test(host)
+            || /(^|\.)voe/i.test(host);
+    }
+
+    async function tryBuiltinExtractor(url, referer) {
+        if (!url || typeof globalThis.loadExtractor !== "function" || !isBuiltinExtractorHost(url)) return [];
+        const out = [];
+        try {
+            await globalThis.loadExtractor(url, (stream) => {
+                if (!stream) return;
+                if (!stream.headers && referer) stream.headers = { Referer: referer };
+                out.push(stream);
+            });
+        } catch (_) {
+            return [];
         }
-        return streams;
+        return dedupeStreams(out);
+    }
+
+    async function extractAnimesaltPlayer(url, referer, depth = 0) {
+        let parsed;
+        try {
+            parsed = new URL(String(url));
+        } catch (_) {
+            return [];
+        }
+        const rawData = parsed.searchParams.get("data");
+        if (!rawData) return [];
+        const decoded = safeJsonParse(base64ToUtf8(rawData)) || [];
+        const batches = await mapConcurrent(decoded, 4, async (item) => {
+            const lang = htmlDecode(item?.language || item?.lang || "").trim();
+            const link = resolveUrl(item?.link, parsed.origin);
+            if (!link) return [];
+            const streams = await extractFromUrl(link, referer || url, depth + 1);
+            return streams.map((stream) => {
+                const qualityTag = qualityLabel(stream?.quality);
+                const baseSource = [lang, stream?.source].filter(Boolean).join(" ").trim() || "Animesalt";
+                stream.source = qualityTag && !new RegExp(`\\b${qualityTag}\\b`, "i").test(baseSource)
+                    ? `${baseSource} ${qualityTag}`.trim()
+                    : baseSource;
+                return stream;
+            });
+        });
+        return batches.flat();
+    }
+
+    async function extractGDMirrorbotPage(url, referer) {
+        const { html, response } = await getDocument(url, referer ? { Referer: referer } : {}, false);
+        const fileUrl = html.match(/const\s+fileurl\s*=\s*"([^"]+)"/i)?.[1]?.replace(/\\\//g, "/");
+        const fileName = htmlDecode((html.match(/const\s+filename\s*=\s*"([^"]+)"/i)?.[1] || "").replace(/\\\//g, "/"));
+        const pageReferer = getOrigin(response?.finalUrl || url) || getOrigin(url);
+        const baseQuality = qualityFromText(fileName || html);
+        const streams = [];
+        if (fileUrl) {
+            const directSource = baseQuality > 0 ? `PirateXPlay Direct ${baseQuality}p` : "PirateXPlay Direct";
+            streams.push(buildStreamResult(fileUrl, directSource, {
+                Referer: pageReferer,
+                "User-Agent": USER_AGENT
+            }, baseQuality, []));
+        }
+        const visitMatches = [...html.matchAll(/<strong class="text-info">([\s\S]*?)<\/strong>[\s\S]*?<a href="([^"]+)"/gi)];
+        const visitBatches = await mapConcurrent(visitMatches, 4, async (match) => {
+            const label = htmlDecode(String(match[1] || "")).trim();
+            const visitUrl = resolveUrl(match[2], response?.finalUrl || url);
+            if (!visitUrl) return [];
+            const extracted = await tryBuiltinExtractor(visitUrl, pageReferer);
+            return extracted.map((stream) => {
+                const source = label ? `PirateXPlay ${label}` : (stream.source || "PirateXPlay Mirror");
+                if (!stream.source || /^unknown$/i.test(stream.source)) stream.source = source;
+                return stream;
+            });
+        });
+        return dedupeStreams(streams.concat(visitBatches.flat()));
     }
 
     async function extractGDMirrorbot(url, referer) {
@@ -386,11 +571,20 @@
             }
         }
 
+        if (!streams.length) {
+            const fallbackPages = uniqueBy(sids.map((sid) => resolveUrl(`/file/${sid}`, pageOrigin)).filter(Boolean), (item) => item);
+            const batches = await mapConcurrent(fallbackPages, 3, (pageUrl) => extractGDMirrorbotPage(pageUrl, referer || pageOrigin));
+            streams = streams.concat(batches.flat());
+        }
+
         return streams;
     }
 
     async function extractFromUrl(url, referer, depth = 0) {
         const host = hostOf(url);
+
+        const builtin = await tryBuiltinExtractor(url, referer);
+        if (builtin.length) return builtin;
 
         if (/piratexplay\.cc$/i.test(host)) {
             try {
@@ -418,6 +612,16 @@
             return extractGenericMedia(url, referer, depth + 1);
         }
 
+        if (/(?:^|\.)animesalt\.ac$/i.test(host) && /multi-lang-plyr\/player\.php/i.test(url)) {
+            return extractAnimesaltPlayer(url, referer, depth + 1);
+        }
+
+        if (/(?:^|\.)short\.icu$/i.test(host)) {
+            const response = await http_get(url, referer ? { ...DEFAULT_HEADERS, Referer: referer } : DEFAULT_HEADERS).catch(() => null);
+            const finalUrl = response?.finalUrl && response.finalUrl !== url ? response.finalUrl : "";
+            return finalUrl ? extractFromUrl(finalUrl, url, depth + 1) : [];
+        }
+
         if (/(?:^|\.)myanimeworld\.in$/i.test(host)) {
             const { document } = await getDocument(url, referer ? { Referer: referer } : {});
             const nested = resolveUrl(attrOf(document.querySelector("iframe"), "src"), url);
@@ -428,6 +632,9 @@
             || /(?:^|\.)gdmirrorbot\.nl$/i.test(host)
             || /(?:^|\.)streams\.iqsmartgames\.com$/i.test(host)
             || /(?:^|\.)pro\.iqsmartgames\.com$/i.test(host)) {
+            if (/\/files\//i.test(url)) {
+                return extractGDMirrorbotPage(url, referer);
+            }
             return extractGDMirrorbot(url, referer);
         }
 
@@ -463,11 +670,14 @@
             };
 
             const data = {};
-            for (const [name, path] of Object.entries(sections)) {
-                const page1 = await parseListingPage(`${MAIN_URL}/${path}?page=1`);
-                const page2 = await parseListingPage(`${MAIN_URL}/${path}?page=2`);
+            const jobs = Object.entries(sections).map(async ([name, path]) => {
+                const [page1, page2] = await Promise.all([
+                    parseListingPage(`${MAIN_URL}/${path}?page=1`).catch(() => []),
+                    parseListingPage(`${MAIN_URL}/${path}?page=2`).catch(() => [])
+                ]);
                 data[name] = uniqueBy(page1.concat(page2), (item) => item?.url);
-            }
+            });
+            await Promise.all(jobs);
 
             cb({ success: true, data });
         } catch (error) {
@@ -547,17 +757,21 @@
     async function loadStreams(url, cb) {
         try {
             const { document } = await getDocument(url, { Referer: MAIN_URL });
-            const frames = [...document.querySelectorAll("iframe")];
-            let streams = [];
-
-            for (const frame of frames) {
-                let link = attrOf(frame, "src", "data-src");
-                if (!link) continue;
-                link = link.includes("url=") ? decodeURIComponent(link.split("url=").pop()) : link;
-                const resolved = resolveUrl(link, url);
-                if (!resolved) continue;
-                streams = streams.concat(await extractFromUrl(resolved, MAIN_URL, 0));
-            }
+            const frames = [...document.querySelectorAll("iframe")]
+                .map((frame) => {
+                    let link = attrOf(frame, "src", "data-src");
+                    if (!link) return null;
+                    link = link.includes("url=") ? decodeURIComponent(link.split("url=").pop()) : link;
+                    return resolveUrl(link, url);
+                })
+                .filter(Boolean)
+                .filter((frameUrl) => !shouldSkipFrame(frameUrl))
+                .sort((a, b) => providerPriority(b) - providerPriority(a))
+                .slice(0, 8);
+            const batches = await mapConcurrent(frames, 4, async (frame) => {
+                return extractFromUrl(frame, MAIN_URL, 0);
+            });
+            const streams = batches.flat();
 
             cb({
                 success: true,
