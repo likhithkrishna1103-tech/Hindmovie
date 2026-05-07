@@ -66,7 +66,7 @@
   {
     "packageName": "com.igris.repo.animepahe",
     "name": "AnimePahe",
-    "version": 12,
+    "version": 13,
     "baseUrl": "https://animepahe.com",
     "domains": [
       "animepahe.com",
@@ -386,6 +386,24 @@
       "Livestream"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztv.sky"
+  },
+  {
+    "packageName": "com.igris.repo.reanime",
+    "name": "ReAnime",
+    "version": 1,
+    "baseUrl": "https://reanime.to",
+    "description": "ReAnime anime streaming plugin with FlixCloud stream extraction, subtitles, and next airing support.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.reanime.sky"
   },
   {
     "packageName": "com.igris.repo.tokyoinsider",
