@@ -4,7 +4,12 @@
     var BASE_URL = String((typeof manifest !== "undefined" && manifest && manifest.baseUrl) || "https://www.youtube.com").replace(/\/+$/, "");
     var MOBILE_URL = "https://m.youtube.com";
     var YOUTUBEI_BASE = "https://www.youtube.com/youtubei/v1";
+    var YOUTUBEI_GAPIS_BASE = "https://youtubei.googleapis.com/youtubei/v1";
     var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+    var ANDROID_CLIENT_VERSION = "21.03.36";
+    var IOS_CLIENT_VERSION = "21.03.2";
+    var IOS_USER_AGENT_VERSION = "18_7_2";
+    var IOS_DEVICE_MODEL = "iPhone16,2";
     var DEFAULT_PROVIDER_ID = "youtube_hindi";
     var LOCALE = { hl: "en", gl: "IN" };
     var SEARCH_HISTORY = {};
@@ -85,6 +90,12 @@
         channels: "EgIQAg%3D%3D",
         playlists: "EgIQAw%3D%3D"
     };
+    var CPN_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    var SUPPORTED_ITAGS = {
+        17: "video", 36: "video", 18: "video", 34: "video", 35: "video", 59: "video", 78: "video", 22: "video", 37: "video", 38: "video", 43: "video", 44: "video", 45: "video", 46: "video",
+        171: "audio", 172: "audio", 599: "audio", 139: "audio", 140: "audio", 141: "audio", 600: "audio", 249: "audio", 250: "audio", 251: "audio",
+        160: "video-only", 394: "video-only", 133: "video-only", 395: "video-only", 134: "video-only", 396: "video-only", 135: "video-only", 212: "video-only", 397: "video-only", 136: "video-only", 398: "video-only", 298: "video-only", 137: "video-only", 399: "video-only", 299: "video-only", 400: "video-only", 266: "video-only", 401: "video-only", 278: "video-only", 242: "video-only", 243: "video-only", 244: "video-only", 245: "video-only", 246: "video-only", 247: "video-only", 248: "video-only", 271: "video-only", 272: "video-only", 302: "video-only", 303: "video-only", 308: "video-only", 313: "video-only", 315: "video-only"
+    };
     var HOME_JUNK_RE = /\b(hot|sexy|sex|romantic|romance|love\s+songs?|valentine|instagram\s+reels?|insta\s+reels?|viral\s+reels?|kiss|kissing|bedroom|bold\s+scene|bikini|item\s+girl|18\+|adult|private video|deleted video)\b|रोमांटिक|प्रेम\s*गीत|लव\s*सॉन्ग|लव\s*स्टोरी/i;
 
     function providerId() {
@@ -126,6 +137,19 @@
         }, extra || {}));
     }
 
+    function mobileJsonHeaders(clientName, clientVersion, userAgent) {
+        return {
+            "User-Agent": userAgent,
+            "Accept": "application/json",
+            "Accept-Language": "en-IN,en;q=0.9",
+            "Content-Type": "application/json",
+            "Origin": BASE_URL,
+            "Referer": BASE_URL + "/",
+            "X-Youtube-Client-Name": clientName,
+            "X-Youtube-Client-Version": clientVersion
+        };
+    }
+
     function cleanText(value) {
         return String(value == null ? "" : value)
             .replace(/&amp;/g, "&")
@@ -150,6 +174,20 @@
     function cacheSet(key, value) {
         PAGE_CACHE[key] = { time: now(), value: value };
         return value;
+    }
+
+    function randomToken(length) {
+        var out = "";
+        for (var i = 0; i < length; i++) out += CPN_ALPHABET.charAt(Math.floor(Math.random() * CPN_ALPHABET.length));
+        return out;
+    }
+
+    function generateContentPlaybackNonce() {
+        return randomToken(16);
+    }
+
+    function generateTParameter() {
+        return randomToken(12);
     }
 
     function isStreamSensitiveUrl(url) {
@@ -1082,6 +1120,22 @@
         return codec.split(".")[0].toUpperCase();
     }
 
+    function formatQuality(format) {
+        var quality = parseInt(format && format.height, 10) || 0;
+        if (quality) return quality;
+        return parseInt(String(format && format.qualityLabel || "").replace(/[^0-9]/g, ""), 10) || 0;
+    }
+
+    function appendQueryParam(url, key, value) {
+        if (!url || value == null || value === "") return url;
+        return url + (url.indexOf("?") === -1 ? "?" : "&") + encodeURIComponent(key) + "=" + encodeURIComponent(value);
+    }
+
+    function itagType(format) {
+        var itag = parseInt(format && format.itag, 10) || 0;
+        return SUPPORTED_ITAGS[itag] || "";
+    }
+
     function streamUrlFromFormat(format) {
         if (format.url) return format.url;
         var cipher = format.signatureCipher || format.cipher || "";
@@ -1089,6 +1143,12 @@
         var params = parseQuery(cipher);
         if (params.url && !params.s) return params.url;
         return "";
+    }
+
+    function newpipeStreamUrlFromFormat(format, cpn) {
+        var url = streamUrlFromFormat(format);
+        if (!url || isExpiredStreamUrl(url)) return "";
+        return appendQueryParam(url, "cpn", cpn);
     }
 
     function isMuxed(format) {
@@ -1121,20 +1181,118 @@
         }).filter(Boolean);
     }
 
+    function audioLangBase(value) {
+        return String(value || "und").toLowerCase().split(/[.-]/)[0] || "und";
+    }
+
+    function audioFormatScore(format) {
+        var itag = parseInt(format && format.itag, 10) || 0;
+        var bitrate = parseInt(format && (format.bitrate || format.averageBitrate), 10) || 0;
+        var codec = normalizeCodec((String(format && format.mimeType || "").match(/codecs="([^"]+)"/) || [])[1]);
+        var codecScore = codec === "OPUS" ? 40 : codec === "MP4A" ? 30 : 0;
+        var itagScore = { 251: 60, 250: 50, 140: 45, 249: 40, 141: 35, 139: 20, 600: 15, 599: 10 };
+        return (itagScore[itag] || 0) + codecScore + Math.floor(bitrate / 10000);
+    }
+
+    function audioTrackRank(item) {
+        var lang = audioLangBase(item && item.lang);
+        var label = String(item && item.label || "").toLowerCase();
+        var preferred = { hi: 90, en: 85, te: 80, ta: 75, ml: 70 };
+        var score = preferred[lang] || 10;
+        if (/original|default/.test(label)) score += 100;
+        if (/dubbed|descriptive|commentary/.test(label)) score -= 25;
+        return score + (item && item._score || 0);
+    }
+
+    function compactAudioTracks(tracks) {
+        var preferredOrder = { hi: 0, en: 1, te: 2, ta: 3, ml: 4 };
+        var bestByLang = {};
+        (tracks || []).forEach(function (track) {
+            if (!track || !track.url) return;
+            var lang = audioLangBase(track.lang);
+            var existing = bestByLang[lang];
+            if (!existing || audioTrackRank(track) > audioTrackRank(existing)) bestByLang[lang] = track;
+        });
+        var preferred = Object.keys(preferredOrder).filter(function (lang) {
+            return !!bestByLang[lang];
+        }).map(function (lang) {
+            return bestByLang[lang];
+        }).sort(function (a, b) {
+            return preferredOrder[a.lang] - preferredOrder[b.lang];
+        });
+        var selected = preferred.length ? preferred : Object.keys(bestByLang).map(function (lang) {
+            return bestByLang[lang];
+        }).sort(function (a, b) {
+            return audioTrackRank(b) - audioTrackRank(a);
+        }).slice(0, 5);
+        return selected.map(function (track) {
+            delete track._score;
+            return track;
+        });
+    }
+
+    function audioTracksFromNewPipeFormats(formats, cpn) {
+        var tracks = (formats || []).filter(function (format) {
+            return itagType(format) === "audio" || isAudioOnly(format);
+        }).map(function (format) {
+            var url = newpipeStreamUrlFromFormat(format, cpn);
+            if (!url) return null;
+            var codec = normalizeCodec((String(format.mimeType || "").match(/codecs="([^"]+)"/) || [])[1]);
+            var audioTrack = format.audioTrack || {};
+            var lang = audioTrack.id || format.language || "und";
+            return {
+                url: url,
+                label: cleanText(audioTrack.displayName || format.quality || format.audioQuality || codec || "Audio"),
+                lang: audioLangBase(lang),
+                headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" },
+                _score: audioFormatScore(format)
+            };
+        }).filter(Boolean);
+        return compactAudioTracks(tracks);
+    }
+
     function buildStream(format, sourceName) {
         var url = streamUrlFromFormat(format);
         if (!url || isExpiredStreamUrl(url)) return null;
-        var quality = parseInt(format.height || format.qualityLabel, 10) || 0;
+        var quality = formatQuality(format);
         var codec = normalizeCodec((String(format.mimeType || "").match(/codecs="([^"]+)"/) || [])[1]);
+        var label = cleanText(sourceName + (quality ? " " + quality + "p" : "") + (codec ? " " + codec : ""));
         return new StreamResult({
             url: url,
-            source: cleanText(sourceName + (codec ? " " + codec : "")),
+            source: label,
             quality: quality || undefined,
             headers: {
                 "User-Agent": USER_AGENT,
                 "Referer": BASE_URL + "/"
             }
         });
+    }
+
+    function buildNewPipeStream(format, sourceName, cpn, subtitles) {
+        var url = newpipeStreamUrlFromFormat(format, cpn);
+        if (!url) return null;
+        var quality = formatQuality(format);
+        var codec = normalizeCodec((String(format.mimeType || "").match(/codecs="([^"]+)"/) || [])[1]);
+        var label = cleanText(sourceName + (quality ? " " + quality + "p" : "") + (codec ? " " + codec : ""));
+        var stream = new StreamResult({
+            url: url,
+            source: label,
+            quality: quality || undefined,
+            headers: {
+                "User-Agent": USER_AGENT,
+                "Referer": BASE_URL + "/"
+            }
+        });
+        if (subtitles && subtitles.length) stream.subtitles = subtitles;
+        return stream;
+    }
+
+    function buildNewPipeVideoOnlyStream(format, audioTracks, cpn, subtitles) {
+        if (!audioTracks || !audioTracks.length) return null;
+        var stream = buildNewPipeStream(format, "YouTube Video", cpn, subtitles);
+        if (!stream) return null;
+        stream.audioTracks = audioTracks;
+        return stream;
     }
 
     function buildVideoOnlyStream(format, audioTracks, subtitles) {
@@ -1314,23 +1472,85 @@
         }
     }
 
-    async function iosPlayer(videoId, forceConfigRefresh) {
-        var config = await getConfig(forceConfigRefresh);
-        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key), {
-            context: {
-                client: {
-                    clientName: "IOS",
-                    clientVersion: "20.10.4",
-                    hl: LOCALE.hl,
-                    gl: LOCALE.gl
-                }
+    function mobileClientContext(clientName, clientVersion, visitorData, extra) {
+        var client = Object.assign({
+            clientName: clientName,
+            clientVersion: clientVersion,
+            hl: LOCALE.hl,
+            gl: LOCALE.gl,
+            visitorData: visitorData || undefined
+        }, extra || {});
+        return {
+            client: client,
+            request: { internalExperimentFlags: [], useSsl: true },
+            user: { lockedSafetyMode: false }
+        };
+    }
+
+    async function visitorDataForMobile(clientName, clientVersion, headersForClient, extra) {
+        try {
+            var json = await requestJson(YOUTUBEI_GAPIS_BASE + "/visitor_id?prettyPrint=false", {
+                context: mobileClientContext(clientName, clientVersion, "", extra)
+            }, headersForClient);
+            return json && json.responseContext && json.responseContext.visitorData || "";
+        } catch (_) {
+            return "";
+        }
+    }
+
+    function androidUserAgent() {
+        return "com.google.android.youtube/" + ANDROID_CLIENT_VERSION + " (Linux; U; Android 13; " + LOCALE.gl + ") gzip";
+    }
+
+    function iosUserAgent() {
+        return "com.google.ios.youtube/" + IOS_CLIENT_VERSION + " (" + IOS_DEVICE_MODEL + "; U; CPU iOS " + IOS_USER_AGENT_VERSION + " like Mac OS X; " + LOCALE.gl + ")";
+    }
+
+    async function androidReelPlayer(videoId, cpn) {
+        var h = mobileJsonHeaders("3", ANDROID_CLIENT_VERSION, androidUserAgent());
+        var visitor = await visitorDataForMobile("ANDROID", ANDROID_CLIENT_VERSION, h, {
+            osName: "Android",
+            osVersion: "13",
+            androidSdkVersion: 33
+        });
+        var payload = {
+            context: mobileClientContext("ANDROID", ANDROID_CLIENT_VERSION, visitor, {
+                osName: "Android",
+                osVersion: "13",
+                androidSdkVersion: 33
+            }),
+            playerRequest: {
+                videoId: videoId,
+                cpn: cpn,
+                contentCheckOk: true,
+                racyCheckOk: true
             },
-            videoId: videoId
-        }, jsonHeaders({
-            "User-Agent": "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
-            "X-Youtube-Client-Name": "5",
-            "X-Youtube-Client-Version": "20.10.4"
-        }));
+            disablePlayerResponse: false
+        };
+        var json = await requestJson(YOUTUBEI_GAPIS_BASE + "/reel/reel_item_watch?prettyPrint=false&t=" + encodeURIComponent(generateTParameter()) + "&id=" + encodeURIComponent(videoId) + "&$fields=playerResponse", payload, h);
+        return json && json.playerResponse || {};
+    }
+
+    async function iosPlayer(videoId, cpn) {
+        var h = mobileJsonHeaders("5", IOS_CLIENT_VERSION, iosUserAgent());
+        var visitor = await visitorDataForMobile("IOS", IOS_CLIENT_VERSION, h, {
+            deviceMake: "Apple",
+            deviceModel: IOS_DEVICE_MODEL,
+            osName: "iOS",
+            osVersion: IOS_USER_AGENT_VERSION.replace(/_/g, ".")
+        });
+        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?prettyPrint=false&t=" + encodeURIComponent(generateTParameter()) + "&id=" + encodeURIComponent(videoId), {
+            context: mobileClientContext("IOS", IOS_CLIENT_VERSION, visitor, {
+                deviceMake: "Apple",
+                deviceModel: IOS_DEVICE_MODEL,
+                osName: "iOS",
+                osVersion: IOS_USER_AGENT_VERSION.replace(/_/g, ".")
+            }),
+            videoId: videoId,
+            cpn: cpn,
+            contentCheckOk: true,
+            racyCheckOk: true
+        }, h);
     }
 
     function subtitleTracks(player) {
@@ -1346,6 +1566,27 @@
         }).filter(function (track) { return !!track.url; });
     }
 
+    function compactSubtitleTracks(tracks) {
+        var preferredOrder = { hi: 0, en: 1, te: 2, ta: 3, ml: 4 };
+        var out = [];
+        var seen = {};
+        (tracks || []).forEach(function (track) {
+            var lang = String(track && track.lang || "und");
+            if (!track || !track.url || seen[lang] || typeof preferredOrder[lang] === "undefined") return;
+            seen[lang] = true;
+            out.push(track);
+        });
+        out.sort(function (a, b) {
+            return preferredOrder[a.lang] - preferredOrder[b.lang];
+        });
+        if (out.length) return out.slice(0, 5);
+        return (tracks || []).filter(function (track) {
+            if (!track || !track.url || seen[track.lang]) return false;
+            seen[track.lang] = true;
+            return true;
+        }).slice(0, 5);
+    }
+
     function attachSubtitles(stream, subtitles) {
         if (stream && subtitles && subtitles.length) stream.subtitles = subtitles;
         return stream;
@@ -1359,12 +1600,47 @@
 
     function streamPriority(item) {
         var source = String(item && item.source || "");
-        if (/HLS Auto/i.test(source)) return 5000;
         if (/^YouTube Live/i.test(source)) return 5000;
-        if (/^YouTube(?:\s|$)/i.test(source) && !/Video|HLS/i.test(source)) return 4000;
-        if (/HLS/i.test(source)) return 3000;
-        if (item && item.audioTracks && item.audioTracks.length) return 2000;
+        if (/^YouTube(?:\s|$)/i.test(source) && !/Video|HLS/i.test(source)) return 4500;
+        if (item && item.audioTracks && item.audioTracks.length) return 4000;
+        if (/HLS Auto/i.test(source)) return 3000;
+        if (/HLS/i.test(source)) return 1000;
         return 1000;
+    }
+
+    function streamCodecRank(item) {
+        var source = String(item && item.source || "");
+        if (/H264/i.test(source)) return 50;
+        if (/VP9/i.test(source)) return 30;
+        if (/AV1/i.test(source)) return 20;
+        if (/H265/i.test(source)) return 10;
+        return 0;
+    }
+
+    function streamQuality(item) {
+        return parseInt(item && item.quality, 10) || parseInt((String(item && item.source || "").match(/(\d{3,4})p/i) || [])[1], 10) || 0;
+    }
+
+    function compactStreams(items) {
+        var selectedByQuality = {};
+        var other = [];
+        (items || []).forEach(function (item) {
+            var source = String(item && item.source || "");
+            if (/^YouTube Video/i.test(source) && item && item.audioTracks && item.audioTracks.length) {
+                var quality = streamQuality(item);
+                var key = String(quality || source);
+                var existing = selectedByQuality[key];
+                if (!existing || streamCodecRank(item) > streamCodecRank(existing)) selectedByQuality[key] = item;
+                return;
+            }
+            other.push(item);
+        });
+        var video = Object.keys(selectedByQuality).map(function (key) {
+            return selectedByQuality[key];
+        }).sort(function (a, b) {
+            return streamQuality(b) - streamQuality(a);
+        }).slice(0, 8);
+        return other.concat(video);
     }
 
     function usableStream(item) {
@@ -1378,10 +1654,17 @@
             applyLocale(providerConfig());
             var id = extractVideoId(url);
             if (!id) return cb({ success: false, errorCode: "INVALID_URL", message: "Invalid YouTube video URL" });
-            var page = await videoPage(id);
-            var player = page.player || {};
+            var cpn = generateContentPlaybackNonce();
+            var player = {};
+            try {
+                player = await androidReelPlayer(id, cpn);
+            } catch (_) {}
+            if (!player || !player.streamingData) {
+                var page = await videoPage(id);
+                player = page.player || {};
+            }
             var streaming = player.streamingData || {};
-            var subs = subtitleTracks(player);
+            var subs = compactSubtitleTracks(subtitleTracks(player));
             var results = [];
 
             if (isLivePlayer(player) && streaming.hlsManifestUrl && !isExpiredStreamUrl(streaming.hlsManifestUrl)) {
@@ -1394,34 +1677,34 @@
             }
 
             (streaming.formats || []).filter(isMuxed).forEach(function (format) {
-                var stream = buildStream(format, "YouTube");
+                if (itagType(format) && itagType(format) !== "video") return;
+                var stream = buildNewPipeStream(format, "YouTube", cpn, subs);
                 if (!stream) return;
-                results.push(attachSubtitles(stream, subs));
+                results.push(stream);
             });
 
             var webAdaptive = streaming.adaptiveFormats || [];
             webAdaptive.filter(isMuxed).forEach(function (format) {
-                var stream = buildStream(format, "YouTube Adaptive");
+                var stream = buildNewPipeStream(format, "YouTube Adaptive", cpn, subs);
                 if (!stream) return;
-                results.push(attachSubtitles(stream, subs));
+                results.push(stream);
             });
 
-            var audioTracks = audioTracksFromFormats(webAdaptive);
-            webAdaptive.filter(isVideoOnly).forEach(function (format) {
-                var stream = buildVideoOnlyStream(format, audioTracks, subs);
+            var audioTracks = audioTracksFromNewPipeFormats(webAdaptive, cpn);
+            webAdaptive.filter(function (format) {
+                return itagType(format) === "video-only" || isVideoOnly(format);
+            }).forEach(function (format) {
+                var stream = buildNewPipeVideoOnlyStream(format, audioTracks, cpn, subs);
                 if (stream) results.push(stream);
             });
 
             var ios = null;
             try {
-                ios = await iosPlayer(id, false);
-                if (!(ios && ios.streamingData && ios.streamingData.hlsManifestUrl)) ios = await iosPlayer(id, true);
-            } catch (_) {
-                try { ios = await iosPlayer(id, true); } catch (_) {}
-            }
+                ios = await iosPlayer(id, generateContentPlaybackNonce());
+            } catch (_) {}
 
             if (ios && ios.streamingData) {
-                var iosSubs = subs.length ? subs : subtitleTracks(ios);
+                var iosSubs = subs.length ? subs : compactSubtitleTracks(subtitleTracks(ios));
                 var hlsUrl = ios.streamingData.hlsManifestUrl;
                 if (hlsUrl && !isExpiredStreamUrl(hlsUrl)) {
                     results.push(attachSubtitles(new StreamResult({
@@ -1430,7 +1713,7 @@
                         quality: undefined,
                         headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
                     }), iosSubs));
-                    results = results.concat(await hlsVariantStreams(hlsUrl, iosSubs));
+                    if (!results.length) results = results.concat(await hlsVariantStreams(hlsUrl, iosSubs));
                 }
             }
 
@@ -1442,7 +1725,12 @@
             }).sort(function (a, b) {
                 var priority = streamPriority(b) - streamPriority(a);
                 if (priority) return priority;
-                return (parseInt(b.quality, 10) || 0) - (parseInt(a.quality, 10) || 0);
+                return streamQuality(b) - streamQuality(a);
+            });
+            results = compactStreams(results).sort(function (a, b) {
+                var priority = streamPriority(b) - streamPriority(a);
+                if (priority) return priority;
+                return streamQuality(b) - streamQuality(a);
             });
 
             cb({ success: true, data: results });
