@@ -152,6 +152,30 @@
         return value;
     }
 
+    function isStreamSensitiveUrl(url) {
+        url = String(url || "");
+        return /\/watch\?/i.test(url)
+            || /\/youtubei\/v1\/player/i.test(url)
+            || /(?:^https?:\/\/)?(?:[^/]+\.)?(?:googlevideo\.com|youtube\.com\/api\/manifest)/i.test(url)
+            || /\.m3u8(?:\?|$)/i.test(url)
+            || /manifest\.googlevideo\.com/i.test(url);
+    }
+
+    function urlExpiry(url) {
+        var match = String(url || "").match(/[?&](?:expire|expires)=([0-9]{9,})/i);
+        return match ? parseInt(match[1], 10) || 0 : 0;
+    }
+
+    function isExpiredStreamUrl(url) {
+        var expiry = urlExpiry(url);
+        return !!expiry && expiry <= Math.floor(now() / 1000) + 60;
+    }
+
+    function shouldUseCache(url, options) {
+        if (options && options.noCache) return false;
+        return !isStreamSensitiveUrl(url);
+    }
+
     function absoluteUrl(value, base) {
         value = String(value || "").trim();
         if (!value) return "";
@@ -309,17 +333,20 @@
         return out;
     }
 
-    async function requestText(url, requestHeaders) {
+    async function requestText(url, requestHeaders, options) {
         var key = "GET:" + url;
-        var hit = cached(key);
+        var useCache = shouldUseCache(url, options);
+        var hit = useCache ? cached(key) : null;
         if (hit != null) return hit;
         if (typeof http_get === "function") {
             var res = await http_get(url, requestHeaders || headers());
-            return cacheSet(key, String(res && res.body || ""));
+            var body = String(res && res.body || "");
+            return useCache ? cacheSet(key, body) : body;
         }
         if (typeof fetch === "function") {
             var response = await fetch(url, { headers: requestHeaders || headers() });
-            return cacheSet(key, await response.text());
+            var text = await response.text();
+            return useCache ? cacheSet(key, text) : text;
         }
         throw new Error("No HTTP GET backend");
     }
@@ -398,7 +425,11 @@
         return { key: key, clientVersion: clientVersion, visitorData: visitorData };
     }
 
-    async function getConfig() {
+    async function getConfig(forceRefresh) {
+        if (forceRefresh) {
+            CONFIG_CACHE = null;
+            CONFIG_PROMISE = null;
+        }
         if (CONFIG_CACHE) return CONFIG_CACHE;
         if (CONFIG_PROMISE) return CONFIG_PROMISE;
         CONFIG_PROMISE = (async function () {
@@ -1065,9 +1096,34 @@
         return mime.indexOf("video/") !== -1 && mime.indexOf("audio") !== -1;
     }
 
+    function isVideoOnly(format) {
+        var mime = String(format && format.mimeType || "");
+        return mime.indexOf("video/") !== -1 && mime.indexOf("audio") === -1;
+    }
+
+    function isAudioOnly(format) {
+        var mime = String(format && format.mimeType || "");
+        return mime.indexOf("audio/") !== -1;
+    }
+
+    function audioTracksFromFormats(formats) {
+        return (formats || []).filter(isAudioOnly).map(function (format) {
+            var url = streamUrlFromFormat(format);
+            if (!url || isExpiredStreamUrl(url)) return null;
+            var codec = normalizeCodec((String(format.mimeType || "").match(/codecs="([^"]+)"/) || [])[1]);
+            var label = cleanText(format.audioTrack && format.audioTrack.displayName || format.quality || format.audioQuality || codec || "Audio");
+            return {
+                url: url,
+                label: label || "Audio",
+                lang: format.audioTrack && format.audioTrack.id || format.language || "und",
+                headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
+            };
+        }).filter(Boolean);
+    }
+
     function buildStream(format, sourceName) {
         var url = streamUrlFromFormat(format);
-        if (!url) return null;
+        if (!url || isExpiredStreamUrl(url)) return null;
         var quality = parseInt(format.height || format.qualityLabel, 10) || 0;
         var codec = normalizeCodec((String(format.mimeType || "").match(/codecs="([^"]+)"/) || [])[1]);
         return new StreamResult({
@@ -1079,6 +1135,15 @@
                 "Referer": BASE_URL + "/"
             }
         });
+    }
+
+    function buildVideoOnlyStream(format, audioTracks, subtitles) {
+        if (!audioTracks || !audioTracks.length) return null;
+        var stream = buildStream(format, "YouTube Video");
+        if (!stream) return null;
+        stream.audioTracks = audioTracks;
+        if (subtitles && subtitles.length) stream.subtitles = subtitles;
+        return stream;
     }
 
     function base64Encode(value) {
@@ -1159,6 +1224,17 @@
         });
     }
 
+    function hasPlayableHlsAudio(variantLine, mediaLines) {
+        var audioGroup = hlsAttribute(variantLine, "AUDIO");
+        if (!audioGroup) return true;
+        return (mediaLines || []).some(function (line) {
+            return hlsAttribute(line, "TYPE").toUpperCase() === "AUDIO"
+                && mediaGroup(line, "GROUP-ID") === audioGroup
+                && !!hlsAttribute(line, "URI")
+                && !isExpiredStreamUrl(hlsAttribute(line, "URI"));
+        });
+    }
+
     function parseHlsVariants(masterText, masterUrl) {
         var lines = String(masterText || "").split(/\r?\n/);
         var mediaLines = collectHlsMedia(lines, masterUrl);
@@ -1175,6 +1251,8 @@
                 break;
             }
             if (!variantUrl) continue;
+            var variantMediaLines = matchingMediaLines(mediaLines, line);
+            if (!hasPlayableHlsAudio(line, variantMediaLines) || isExpiredStreamUrl(variantUrl)) continue;
             variants.push({
                 url: variantUrl,
                 quality: hlsQuality(line),
@@ -1182,7 +1260,7 @@
                 rank: hlsCodecRank(line),
                 bandwidth: parseInt(hlsAttribute(line, "BANDWIDTH"), 10) || 0,
                 streamInf: line,
-                mediaLines: matchingMediaLines(mediaLines, line)
+                mediaLines: variantMediaLines
             });
         }
         var byQuality = {};
@@ -1227,7 +1305,7 @@
         try {
             var body = await requestText(masterUrl, headers({
                 "Accept": "application/vnd.apple.mpegurl,application/x-mpegURL,*/*"
-            }));
+            }), { noCache: true });
             return parseHlsVariants(body, masterUrl).map(function (variant) {
                 return buildHlsStream(variant, subtitles);
             }).filter(Boolean);
@@ -1236,8 +1314,8 @@
         }
     }
 
-    async function iosPlayer(videoId) {
-        var config = await getConfig();
+    async function iosPlayer(videoId, forceConfigRefresh) {
+        var config = await getConfig(forceConfigRefresh);
         return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key), {
             context: {
                 client: {
@@ -1249,7 +1327,9 @@
             },
             videoId: videoId
         }, jsonHeaders({
-            "User-Agent": "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
+            "User-Agent": "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+            "X-Youtube-Client-Name": "5",
+            "X-Youtube-Client-Version": "20.10.4"
         }));
     }
 
@@ -1266,6 +1346,33 @@
         }).filter(function (track) { return !!track.url; });
     }
 
+    function attachSubtitles(stream, subtitles) {
+        if (stream && subtitles && subtitles.length) stream.subtitles = subtitles;
+        return stream;
+    }
+
+    function isLivePlayer(player) {
+        var details = player && player.videoDetails || {};
+        var micro = player && player.microformat && player.microformat.playerMicroformatRenderer || {};
+        return details.isLive === true || details.isLiveContent === true || !!micro.liveBroadcastDetails;
+    }
+
+    function streamPriority(item) {
+        var source = String(item && item.source || "");
+        if (/HLS Auto/i.test(source)) return 5000;
+        if (/^YouTube Live/i.test(source)) return 5000;
+        if (/^YouTube(?:\s|$)/i.test(source) && !/Video|HLS/i.test(source)) return 4000;
+        if (/HLS/i.test(source)) return 3000;
+        if (item && item.audioTracks && item.audioTracks.length) return 2000;
+        return 1000;
+    }
+
+    function usableStream(item) {
+        if (!item || !item.url) return false;
+        if (String(item.url).indexOf("magic_m3u8:") === 0) return true;
+        return !isExpiredStreamUrl(item.url);
+    }
+
     async function loadStreams(url, cb) {
         try {
             applyLocale(providerConfig());
@@ -1277,56 +1384,64 @@
             var subs = subtitleTracks(player);
             var results = [];
 
-            if (streaming.hlsManifestUrl) {
-                var live = new StreamResult({
+            if (isLivePlayer(player) && streaming.hlsManifestUrl && !isExpiredStreamUrl(streaming.hlsManifestUrl)) {
+                results.push(attachSubtitles(new StreamResult({
                     url: streaming.hlsManifestUrl,
                     source: "YouTube Live",
                     quality: undefined,
                     headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
-                });
-                if (subs.length) live.subtitles = subs;
-                results.push(live);
+                }), subs));
             }
 
             (streaming.formats || []).filter(isMuxed).forEach(function (format) {
                 var stream = buildStream(format, "YouTube");
                 if (!stream) return;
-                if (subs.length) stream.subtitles = subs;
-                results.push(stream);
+                results.push(attachSubtitles(stream, subs));
             });
 
-            if (!results.length) {
-                (streaming.adaptiveFormats || []).filter(isMuxed).forEach(function (format) {
-                    var stream = buildStream(format, "YouTube Adaptive");
-                    if (!stream) return;
-                    if (subs.length) stream.subtitles = subs;
-                    results.push(stream);
-                });
+            var webAdaptive = streaming.adaptiveFormats || [];
+            webAdaptive.filter(isMuxed).forEach(function (format) {
+                var stream = buildStream(format, "YouTube Adaptive");
+                if (!stream) return;
+                results.push(attachSubtitles(stream, subs));
+            });
+
+            var audioTracks = audioTracksFromFormats(webAdaptive);
+            webAdaptive.filter(isVideoOnly).forEach(function (format) {
+                var stream = buildVideoOnlyStream(format, audioTracks, subs);
+                if (stream) results.push(stream);
+            });
+
+            var ios = null;
+            try {
+                ios = await iosPlayer(id, false);
+                if (!(ios && ios.streamingData && ios.streamingData.hlsManifestUrl)) ios = await iosPlayer(id, true);
+            } catch (_) {
+                try { ios = await iosPlayer(id, true); } catch (_) {}
             }
 
-            if (!results.length) {
-                try {
-                    var ios = await iosPlayer(id);
-                    if (ios && ios.streamingData && ios.streamingData.hlsManifestUrl) {
-                        results = results.concat(await hlsVariantStreams(ios.streamingData.hlsManifestUrl, subs));
-                        var iosStream = new StreamResult({
-                            url: ios.streamingData.hlsManifestUrl,
-                            source: "YouTube HLS Auto",
-                            quality: undefined,
-                            headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
-                        });
-                        if (subs.length) iosStream.subtitles = subs;
-                        results.push(iosStream);
-                    }
-                } catch (_) {}
+            if (ios && ios.streamingData) {
+                var iosSubs = subs.length ? subs : subtitleTracks(ios);
+                var hlsUrl = ios.streamingData.hlsManifestUrl;
+                if (hlsUrl && !isExpiredStreamUrl(hlsUrl)) {
+                    results.push(attachSubtitles(new StreamResult({
+                        url: hlsUrl,
+                        source: "YouTube HLS Auto",
+                        quality: undefined,
+                        headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
+                    }), iosSubs));
+                    results = results.concat(await hlsVariantStreams(hlsUrl, iosSubs));
+                }
             }
 
             var seen = {};
             results = results.filter(function (item) {
-                if (!item || !item.url || seen[item.url]) return false;
+                if (!usableStream(item) || seen[item.url]) return false;
                 seen[item.url] = true;
                 return true;
             }).sort(function (a, b) {
+                var priority = streamPriority(b) - streamPriority(a);
+                if (priority) return priority;
                 return (parseInt(b.quality, 10) || 0) - (parseInt(a.quality, 10) || 0);
             });
 
