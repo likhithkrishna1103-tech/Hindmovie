@@ -1,0 +1,20 @@
+{
+  "packageName": "com.igris.repo.animewave",
+  "name": "AnimeWave",
+  "version": 1,
+  "baseUrl": "https://animewave.to",
+  "domains": [
+    "animewave.to"
+  ],
+  "description": "A clone for hianime",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "ja"
+  ],
+  "categories": [
+    "Anime"
+  ]
+}
