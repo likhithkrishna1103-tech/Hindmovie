@@ -15,7 +15,7 @@
             gl: "IN",
             language: "telugu",
             sections: [
-                { title: "Trending", query: "trending telugu videos", type: "videos" },
+                { title: "Trending", source: "trending", fallbackQuery: "telugu latest popular videos", type: "videos" },
                 { title: "Latest Videos", query: "latest telugu videos", type: "videos" },
                 { title: "Popular Channels", query: "popular telugu youtube channels", type: "channels" },
                 { title: "Music", query: "latest telugu songs", type: "videos" },
@@ -31,7 +31,7 @@
             gl: "IN",
             language: "tamil",
             sections: [
-                { title: "Trending", query: "trending tamil videos", type: "videos" },
+                { title: "Trending", source: "trending", fallbackQuery: "tamil latest popular videos", type: "videos" },
                 { title: "Latest Videos", query: "latest tamil videos", type: "videos" },
                 { title: "Popular Channels", query: "popular tamil youtube channels", type: "channels" },
                 { title: "Music", query: "latest tamil songs", type: "videos" },
@@ -47,7 +47,7 @@
             gl: "IN",
             language: "hindi",
             sections: [
-                { title: "Trending", query: "trending hindi videos", type: "videos" },
+                { title: "Trending", source: "trending", fallbackQuery: "hindi latest popular videos", type: "videos" },
                 { title: "Latest Videos", query: "latest hindi videos", type: "videos" },
                 { title: "Popular Channels", query: "popular hindi youtube channels", type: "channels" },
                 { title: "Music", query: "latest hindi songs", type: "videos" },
@@ -63,7 +63,7 @@
             gl: "IN",
             language: "malayalam",
             sections: [
-                { title: "Trending", query: "trending malayalam videos", type: "videos" },
+                { title: "Trending", source: "trending", fallbackQuery: "malayalam latest popular videos", type: "videos" },
                 { title: "Latest Videos", query: "latest malayalam videos", type: "videos" },
                 { title: "Popular Channels", query: "popular malayalam youtube channels", type: "channels" },
                 { title: "Music", query: "latest malayalam songs", type: "videos" },
@@ -78,12 +78,14 @@
     var CONFIG_PROMISE = null;
     var PAGE_CACHE = {};
     var CACHE_TTL = 5 * 60 * 1000;
+    var HISTORY_STORAGE_KEY = "skystream_youtube_search_history_v1";
 
     var SEARCH_FILTERS = {
         videos: "EgIQAQ%3D%3D",
         channels: "EgIQAg%3D%3D",
         playlists: "EgIQAw%3D%3D"
     };
+    var HOME_JUNK_RE = /\b(hot|sexy|sex|romantic|romance|love\s+songs?|valentine|instagram\s+reels?|insta\s+reels?|viral\s+reels?|kiss|kissing|bedroom|bold\s+scene|bikini|item\s+girl|18\+|adult|private video|deleted video)\b|रोमांटिक|प्रेम\s*गीत|लव\s*सॉन्ग|लव\s*स्टोरी/i;
 
     function providerId() {
         var id = String(typeof manifest !== "undefined" && manifest && manifest.providerId || DEFAULT_PROVIDER_ID).toLowerCase() || DEFAULT_PROVIDER_ID;
@@ -162,6 +164,13 @@
         }
     }
 
+    function normalizeImageUrl(value) {
+        value = String(value || "").trim();
+        if (!value) return "";
+        if (value.indexOf("//") === 0) return "https:" + value;
+        return value;
+    }
+
     function getText(obj) {
         if (!obj) return "";
         if (typeof obj === "string") return obj;
@@ -178,7 +187,7 @@
     function lastThumb(thumbnails) {
         thumbnails = Array.isArray(thumbnails) ? thumbnails : [];
         if (!thumbnails.length) return "";
-        return thumbnails[thumbnails.length - 1].url || thumbnails[0].url || "";
+        return normalizeImageUrl(thumbnails[thumbnails.length - 1].url || thumbnails[0].url || "");
     }
 
     function thumbsFrom(obj) {
@@ -537,6 +546,23 @@
         });
     }
 
+    function channelThumbs(renderer) {
+        var sources = [];
+        function add(list) {
+            if (Array.isArray(list)) {
+                for (var i = 0; i < list.length; i++) if (list[i] && list[i].url) sources.push(list[i]);
+            }
+        }
+        add(renderer && renderer.thumbnail && renderer.thumbnail.thumbnails);
+        add(renderer && renderer.avatar && renderer.avatar.thumbnails);
+        add(renderer && renderer.channelThumbnail && renderer.channelThumbnail.thumbnails);
+        add(renderer && renderer.avatarViewModel && renderer.avatarViewModel.image && renderer.avatarViewModel.image.sources);
+        add(renderer && renderer.decoratedAvatarViewModel && renderer.decoratedAvatarViewModel.avatar && renderer.decoratedAvatarViewModel.avatar.avatarViewModel && renderer.decoratedAvatarViewModel.avatar.avatarViewModel.image && renderer.decoratedAvatarViewModel.avatar.avatarViewModel.image.sources);
+        var imageSources = collectRenderers(renderer, "sources");
+        for (var j = 0; j < imageSources.length; j++) add(imageSources[j]);
+        return sources;
+    }
+
     function channelItem(renderer) {
         if (!renderer) return null;
         var title = cleanText(getText(renderer.title));
@@ -549,7 +575,7 @@
         return new MultimediaItem({
             title: title,
             url: channelUrl(path || id),
-            posterUrl: lastThumb(thumbsFrom(renderer)) || undefined,
+            posterUrl: lastThumb(channelThumbs(renderer)) || lastThumb(thumbsFrom(renderer)) || undefined,
             type: "series",
             description: cleanText(getText(renderer.descriptionSnippet)) || undefined,
             contentRating: cleanText(getText(renderer.subscriberCountText)) || undefined
@@ -611,16 +637,33 @@
         return cleanText(query).replace(/[^\w\s\u0900-\u097F\u0B80-\u0BFF\u0C00-\u0C7F\u0D00-\u0D7F-]/g, "").slice(0, 80);
     }
 
+    function readStoredHistory() {
+        var stored = storageGet(HISTORY_STORAGE_KEY);
+        try {
+            var parsed = JSON.parse(stored || "[]");
+            return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+        } catch (_) {
+            return {};
+        }
+    }
+
+    function writeStoredHistory(value) {
+        storageSet(HISTORY_STORAGE_KEY, JSON.stringify(value || {}));
+    }
+
     function readSearchHistory(provider) {
         provider = provider || providerId();
         if (SEARCH_HISTORY[provider]) return SEARCH_HISTORY[provider];
-        var stored = storageGet(storageKey(provider));
-        try {
-            var parsed = JSON.parse(stored || "[]");
-            SEARCH_HISTORY[provider] = Array.isArray(parsed) ? parsed.filter(Boolean).slice(0, 20) : [];
-        } catch (_) {
-            SEARCH_HISTORY[provider] = [];
+        var allHistory = readStoredHistory();
+        var stored = allHistory[provider];
+        if (!Array.isArray(stored)) {
+            try {
+                stored = JSON.parse(storageGet(storageKey(provider)) || "[]");
+            } catch (_) {
+                stored = [];
+            }
         }
+        SEARCH_HISTORY[provider] = Array.isArray(stored) ? stored.filter(Boolean).slice(0, 20) : [];
         return SEARCH_HISTORY[provider];
     }
 
@@ -634,6 +677,9 @@
         history.unshift(clean);
         history = history.slice(0, 20);
         SEARCH_HISTORY[provider] = history;
+        var allHistory = readStoredHistory();
+        allHistory[provider] = history;
+        writeStoredHistory(allHistory);
         storageSet(storageKey(provider), JSON.stringify(history));
     }
 
@@ -641,8 +687,8 @@
         return readSearchHistory(provider).slice(0, 3);
     }
 
-    async function searchItemsForProvider(query, config) {
-        var fullQuery = normalizeSearchQuery(query + " " + (config && config.language || ""));
+    async function searchItemsForProvider(query) {
+        var fullQuery = normalizeSearchQuery(query);
         var mixed = [];
         try {
             var json = await youtubei("search", { query: fullQuery });
@@ -655,10 +701,20 @@
     }
 
     async function homeSearch(section, config) {
+        if (section.source === "trending") return trendingItems(section, config);
         var query = section.query;
         if (section.personalized) query = section.query + " " + config.language;
         if (section.mixed) return searchItemsForProvider(query, config);
         return searchItems(query, section.type || "videos");
+    }
+
+    async function trendingItems(section, config) {
+        try {
+            var html = await requestText(BASE_URL + "/feed/trending?hl=" + encodeURIComponent(config.hl || LOCALE.hl) + "&gl=" + encodeURIComponent(config.gl || LOCALE.gl), headers());
+            var items = parseItems(parseInitialData(html), "videos");
+            if (items.length) return items;
+        } catch (_) {}
+        return searchItems(section.fallbackQuery || (config.language + " latest popular videos"), section.type || "videos");
     }
 
     async function resolveHomeSection(section, config, seen) {
@@ -669,11 +725,17 @@
     function filterHomeItems(items, seen, limit) {
         var out = [];
         (items || []).forEach(function (item) {
-            if (!item || !item.url || seen[item.url]) return;
+            if (!item || !item.url || seen[item.url] || isHomeJunk(item)) return;
             seen[item.url] = true;
             out.push(item);
         });
         return out.slice(0, limit || 20);
+    }
+
+    function isHomeJunk(item) {
+        var text = cleanText((item && item.title || "") + " " + (item && item.description || "") + " " + (item && item.contentRating || ""));
+        if (!item || !item.posterUrl) return true;
+        return HOME_JUNK_RE.test(text);
     }
 
     async function fetchHomeSections(sections, config, concurrency) {
@@ -928,7 +990,12 @@
                 var resolvedItems = filterHomeItems(resolved.items, seen, resolvedSection.limit || 20);
                 if (resolvedItems.length) data[resolvedSection.title] = resolvedItems;
             }
-            if (!Object.keys(data).length) data.Trending = await searchItems(config.language + " trending videos", "videos");
+            if (!Object.keys(data).length) data.Trending = filterHomeItems(await trendingItems({
+                title: "Trending",
+                source: "trending",
+                fallbackQuery: config.language + " latest popular videos",
+                type: "videos"
+            }, config), seen, 20);
             cb({ success: true, data: data });
         } catch (error) {
             cb({ success: false, errorCode: "HOME_ERROR", message: String(error && error.message || error) });
