@@ -690,6 +690,102 @@
         });
     }
 
+    function hlsAttribute(line, name) {
+        var re = new RegExp(name + "=((?:\"[^\"]+\")|[^,]+)", "i");
+        var match = String(line || "").match(re);
+        if (!match) return "";
+        return String(match[1] || "").replace(/^"|"$/g, "");
+    }
+
+    function hlsQuality(line) {
+        var resolution = hlsAttribute(line, "RESOLUTION");
+        var match = resolution.match(/x(\d+)/i);
+        return match ? parseInt(match[1], 10) || 0 : 0;
+    }
+
+    function hlsCodecRank(line) {
+        var codecs = hlsAttribute(line, "CODECS").toLowerCase();
+        if (codecs.indexOf("avc1") !== -1 || codecs.indexOf("h264") !== -1) return 4;
+        if (codecs.indexOf("hev1") !== -1 || codecs.indexOf("hvc1") !== -1) return 3;
+        if (codecs.indexOf("vp09") !== -1 || codecs.indexOf("vp9") !== -1) return 2;
+        if (codecs.indexOf("av01") !== -1) return 1;
+        return 0;
+    }
+
+    function hlsCodecLabel(line) {
+        var codecs = hlsAttribute(line, "CODECS").toLowerCase();
+        if (codecs.indexOf("avc1") !== -1 || codecs.indexOf("h264") !== -1) return "H264";
+        if (codecs.indexOf("hev1") !== -1 || codecs.indexOf("hvc1") !== -1) return "H265";
+        if (codecs.indexOf("vp09") !== -1 || codecs.indexOf("vp9") !== -1) return "VP9";
+        if (codecs.indexOf("av01") !== -1) return "AV1";
+        return "";
+    }
+
+    function parseHlsVariants(masterText, masterUrl) {
+        var lines = String(masterText || "").split(/\r?\n/);
+        var variants = [];
+        for (var i = 0; i < lines.length; i++) {
+            var line = String(lines[i] || "").trim();
+            if (!/^#EXT-X-STREAM-INF:/i.test(line)) continue;
+            var variantUrl = "";
+            for (var j = i + 1; j < lines.length; j++) {
+                var next = String(lines[j] || "").trim();
+                if (!next) continue;
+                if (next.charAt(0) === "#") continue;
+                variantUrl = absoluteUrl(next, masterUrl);
+                break;
+            }
+            if (!variantUrl) continue;
+            variants.push({
+                url: variantUrl,
+                quality: hlsQuality(line),
+                codec: hlsCodecLabel(line),
+                rank: hlsCodecRank(line),
+                bandwidth: parseInt(hlsAttribute(line, "BANDWIDTH"), 10) || 0
+            });
+        }
+        var byQuality = {};
+        variants.forEach(function (variant) {
+            var key = String(variant.quality || 0);
+            var existing = byQuality[key];
+            if (!existing || variant.rank > existing.rank || (variant.rank === existing.rank && variant.bandwidth > existing.bandwidth)) {
+                byQuality[key] = variant;
+            }
+        });
+        return Object.keys(byQuality).map(function (key) { return byQuality[key]; }).sort(function (a, b) {
+            return (b.quality || 0) - (a.quality || 0);
+        });
+    }
+
+    function buildHlsStream(variant, subtitles) {
+        if (!variant || !variant.url) return null;
+        var label = variant.quality ? ("YouTube HLS " + variant.quality + "p") : "YouTube HLS";
+        if (variant.codec) label += " " + variant.codec;
+        var stream = new StreamResult({
+            url: variant.url,
+            source: label,
+            quality: variant.quality || undefined,
+            headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
+        });
+        if (subtitles && subtitles.length) stream.subtitles = subtitles;
+        return stream;
+    }
+
+    async function hlsVariantStreams(masterUrl, subtitles) {
+        if (!masterUrl) return [];
+        try {
+            var res = await http_get(masterUrl, headers({
+                "Accept": "application/vnd.apple.mpegurl,application/x-mpegURL,*/*"
+            }));
+            var body = String(res && res.body || "");
+            return parseHlsVariants(body, masterUrl).map(function (variant) {
+                return buildHlsStream(variant, subtitles);
+            }).filter(Boolean);
+        } catch (_) {
+            return [];
+        }
+    }
+
     async function iosPlayer(videoId) {
         var config = await getConfig();
         return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key), {
@@ -761,9 +857,10 @@
                 try {
                     var ios = await iosPlayer(id);
                     if (ios && ios.streamingData && ios.streamingData.hlsManifestUrl) {
+                        results = results.concat(await hlsVariantStreams(ios.streamingData.hlsManifestUrl, subs));
                         var iosStream = new StreamResult({
                             url: ios.streamingData.hlsManifestUrl,
-                            source: "YouTube HLS",
+                            source: "YouTube HLS Auto",
                             quality: undefined,
                             headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
                         });
