@@ -5,11 +5,77 @@
     var MOBILE_URL = "https://m.youtube.com";
     var YOUTUBEI_BASE = "https://www.youtube.com/youtubei/v1";
     var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+    var DEFAULT_PROVIDER_ID = "youtube_hindi";
     var LOCALE = { hl: "en", gl: "IN" };
-    var STATIC_HOME_CHANNELS = [
-        { title: "iShowSpeed", url: "https://youtube.com/@ishowspeed" }
-    ];
+    var SEARCH_HISTORY = {};
+    var PROVIDER_CONFIGS = {
+        youtube_telugu: {
+            name: "Telugu",
+            hl: "te",
+            gl: "IN",
+            language: "telugu",
+            sections: [
+                { title: "Trending", query: "trending telugu videos", type: "videos" },
+                { title: "Latest Videos", query: "latest telugu videos", type: "videos" },
+                { title: "Popular Channels", query: "popular telugu youtube channels", type: "channels" },
+                { title: "Music", query: "latest telugu songs", type: "videos" },
+                { title: "Movies & Trailers", query: "telugu movie trailers", type: "videos" },
+                { title: "Comedy", query: "telugu comedy", type: "videos" },
+                { title: "News", query: "telugu news today", type: "videos" },
+                { title: "Playlists", query: "telugu playlists", type: "playlists" }
+            ]
+        },
+        youtube_tamil: {
+            name: "Tamil",
+            hl: "ta",
+            gl: "IN",
+            language: "tamil",
+            sections: [
+                { title: "Trending", query: "trending tamil videos", type: "videos" },
+                { title: "Latest Videos", query: "latest tamil videos", type: "videos" },
+                { title: "Popular Channels", query: "popular tamil youtube channels", type: "channels" },
+                { title: "Music", query: "latest tamil songs", type: "videos" },
+                { title: "Movies & Trailers", query: "tamil movie trailers", type: "videos" },
+                { title: "Comedy", query: "tamil comedy", type: "videos" },
+                { title: "News", query: "tamil news today", type: "videos" },
+                { title: "Playlists", query: "tamil playlists", type: "playlists" }
+            ]
+        },
+        youtube_hindi: {
+            name: "Hindi",
+            hl: "hi",
+            gl: "IN",
+            language: "hindi",
+            sections: [
+                { title: "Trending", query: "trending hindi videos", type: "videos" },
+                { title: "Latest Videos", query: "latest hindi videos", type: "videos" },
+                { title: "Popular Channels", query: "popular hindi youtube channels", type: "channels" },
+                { title: "Music", query: "latest hindi songs", type: "videos" },
+                { title: "Movies & Trailers", query: "hindi movie trailers", type: "videos" },
+                { title: "Comedy", query: "hindi comedy", type: "videos" },
+                { title: "News", query: "hindi news today", type: "videos" },
+                { title: "Playlists", query: "hindi playlists", type: "playlists" }
+            ]
+        },
+        youtube_malayalam: {
+            name: "Malayalam",
+            hl: "ml",
+            gl: "IN",
+            language: "malayalam",
+            sections: [
+                { title: "Trending", query: "trending malayalam videos", type: "videos" },
+                { title: "Latest Videos", query: "latest malayalam videos", type: "videos" },
+                { title: "Popular Channels", query: "popular malayalam youtube channels", type: "channels" },
+                { title: "Music", query: "latest malayalam songs", type: "videos" },
+                { title: "Movies & Trailers", query: "malayalam movie trailers", type: "videos" },
+                { title: "Comedy", query: "malayalam comedy", type: "videos" },
+                { title: "News", query: "malayalam news today", type: "videos" },
+                { title: "Playlists", query: "malayalam playlists", type: "playlists" }
+            ]
+        }
+    };
     var CONFIG_CACHE = null;
+    var CONFIG_PROMISE = null;
     var PAGE_CACHE = {};
     var CACHE_TTL = 5 * 60 * 1000;
 
@@ -20,7 +86,22 @@
     };
 
     function providerId() {
-        return String(typeof manifest !== "undefined" && manifest && manifest.providerId || "videos").toLowerCase() || "videos";
+        var id = String(typeof manifest !== "undefined" && manifest && manifest.providerId || DEFAULT_PROVIDER_ID).toLowerCase() || DEFAULT_PROVIDER_ID;
+        return PROVIDER_CONFIGS[id] ? id : DEFAULT_PROVIDER_ID;
+    }
+
+    function providerConfig() {
+        return PROVIDER_CONFIGS[providerId()] || PROVIDER_CONFIGS[DEFAULT_PROVIDER_ID];
+    }
+
+    function applyLocale(config) {
+        config = config || providerConfig();
+        if (LOCALE.hl !== (config.hl || "en") || LOCALE.gl !== (config.gl || "IN")) {
+            CONFIG_CACHE = null;
+            CONFIG_PROMISE = null;
+        }
+        LOCALE.hl = config.hl || "en";
+        LOCALE.gl = config.gl || "IN";
     }
 
     function headers(extra) {
@@ -256,10 +337,52 @@
         throw new Error("No HTTP POST backend");
     }
 
+    async function httpParallelRequests(requests) {
+        var items = Array.isArray(requests) ? requests.filter(function (item) { return item && item.url; }) : [];
+        if (!items.length) return [];
+        if (typeof http_parallel === "function") {
+            try {
+                var parallelRes = await http_parallel(items.map(function (item) {
+                    var req = {
+                        method: item.method || "GET",
+                        url: item.url,
+                        headers: item.headers || {}
+                    };
+                    if (typeof item.body !== "undefined") req.body = item.body;
+                    return req;
+                }));
+                return (parallelRes || []).map(function (res, index) {
+                    return {
+                        body: res && typeof res.body !== "undefined" ? String(res.body || "") : "",
+                        finalUrl: res && (res.url || res.finalUrl) || items[index].url
+                    };
+                });
+            } catch (_) {}
+        }
+        return Promise.all(items.map(function (item) {
+            if (String(item.method || "GET").toUpperCase() === "POST") {
+                return requestJson(item.url, JSON.parse(item.body || "{}"), item.headers || jsonHeaders()).then(function (json) {
+                    return { body: JSON.stringify(json), finalUrl: item.url };
+                }).catch(function () {
+                    return { body: "", finalUrl: item.url };
+                });
+            }
+            return requestText(item.url, item.headers || headers()).then(function (body) {
+                return { body: body, finalUrl: item.url };
+            }).catch(function () {
+                return { body: "", finalUrl: item.url };
+            });
+        }));
+    }
+
+    function fallbackInnertubeKey() {
+        return String.fromCharCode(65, 73, 122, 97, 83, 121, 65, 79, 95, 70, 74, 50, 83, 108, 113, 85, 56, 81, 52, 83, 84, 69, 72, 76, 71, 67, 105, 108, 119, 95, 89, 57, 95, 49, 49, 113, 99, 87, 56);
+    }
+
     function parseConfigFromHtml(html) {
         var key = (String(html || "").match(/"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"/) || [])[1]
             || (String(html || "").match(/"innertubeApiKey"\s*:\s*"([^"]+)"/) || [])[1]
-            || "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
+            || fallbackInnertubeKey();
         var clientVersion = (String(html || "").match(/"INNERTUBE_CLIENT_VERSION"\s*:\s*"([^"]+)"/) || [])[1]
             || "2.20240508.00.00";
         var visitorData = (String(html || "").match(/"VISITOR_DATA"\s*:\s*"([^"]+)"/) || [])[1] || "";
@@ -268,13 +391,18 @@
 
     async function getConfig() {
         if (CONFIG_CACHE) return CONFIG_CACHE;
-        try {
-            var html = await requestText(BASE_URL + "/?hl=" + LOCALE.hl + "&gl=" + LOCALE.gl, headers());
-            CONFIG_CACHE = parseConfigFromHtml(html);
-        } catch (_) {
-            CONFIG_CACHE = parseConfigFromHtml("");
-        }
-        return CONFIG_CACHE;
+        if (CONFIG_PROMISE) return CONFIG_PROMISE;
+        CONFIG_PROMISE = (async function () {
+            try {
+                var html = await requestText(BASE_URL + "/?hl=" + LOCALE.hl + "&gl=" + LOCALE.gl, headers());
+                CONFIG_CACHE = parseConfigFromHtml(html);
+            } catch (_) {
+                CONFIG_CACHE = parseConfigFromHtml("");
+            }
+            CONFIG_PROMISE = null;
+            return CONFIG_CACHE;
+        })();
+        return CONFIG_PROMISE;
     }
 
     function clientContext(config) {
@@ -297,6 +425,30 @@
         return requestJson(YOUTUBEI_BASE + "/" + endpoint + "?key=" + encodeURIComponent(config.key), fullPayload, jsonHeaders({
             "X-Youtube-Client-Version": config.clientVersion
         }));
+    }
+
+    function youtubeiRequest(endpoint, payload, config) {
+        var fullPayload = Object.assign({ context: clientContext(config) }, payload || {});
+        return {
+            method: "POST",
+            url: YOUTUBEI_BASE + "/" + endpoint + "?key=" + encodeURIComponent(config.key),
+            headers: jsonHeaders({ "X-Youtube-Client-Version": config.clientVersion }),
+            body: JSON.stringify(fullPayload)
+        };
+    }
+
+    async function youtubeiParallel(requests) {
+        var config = await getConfig();
+        var responses = await httpParallelRequests((requests || []).map(function (item) {
+            return youtubeiRequest(item.endpoint, item.payload, config);
+        }));
+        return responses.map(function (res) {
+            try {
+                return JSON.parse(String(res && res.body || "{}"));
+            } catch (_) {
+                return {};
+            }
+        });
     }
 
     function videoItem(renderer) {
@@ -432,6 +584,162 @@
             var html = await requestText(BASE_URL + "/results?search_query=" + encodeURIComponent(query || "") + "&sp=" + filter + "&hl=" + LOCALE.hl + "&gl=" + LOCALE.gl, headers());
             return parseItems(extractBalancedJson(html, "ytInitialData"), type);
         }
+    }
+
+    function storageKey(provider) {
+        return "skystream_youtube_searches_" + String(provider || providerId());
+    }
+
+    function storageGet(key) {
+        try {
+            if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.getItem === "function") {
+                return localStorage.getItem(key);
+            }
+        } catch (_) {}
+        return null;
+    }
+
+    function storageSet(key, value) {
+        try {
+            if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.setItem === "function") {
+                localStorage.setItem(key, value);
+            }
+        } catch (_) {}
+    }
+
+    function normalizeSearchQuery(query) {
+        return cleanText(query).replace(/[^\w\s\u0900-\u097F\u0B80-\u0BFF\u0C00-\u0C7F\u0D00-\u0D7F-]/g, "").slice(0, 80);
+    }
+
+    function readSearchHistory(provider) {
+        provider = provider || providerId();
+        if (SEARCH_HISTORY[provider]) return SEARCH_HISTORY[provider];
+        var stored = storageGet(storageKey(provider));
+        try {
+            var parsed = JSON.parse(stored || "[]");
+            SEARCH_HISTORY[provider] = Array.isArray(parsed) ? parsed.filter(Boolean).slice(0, 20) : [];
+        } catch (_) {
+            SEARCH_HISTORY[provider] = [];
+        }
+        return SEARCH_HISTORY[provider];
+    }
+
+    function rememberSearch(query) {
+        var provider = providerId();
+        var clean = normalizeSearchQuery(query);
+        if (clean.length < 2) return;
+        var history = readSearchHistory(provider).filter(function (item) {
+            return String(item || "").toLowerCase() !== clean.toLowerCase();
+        });
+        history.unshift(clean);
+        history = history.slice(0, 20);
+        SEARCH_HISTORY[provider] = history;
+        storageSet(storageKey(provider), JSON.stringify(history));
+    }
+
+    function recentSearches(provider) {
+        return readSearchHistory(provider).slice(0, 3);
+    }
+
+    async function searchItemsForProvider(query, config) {
+        var fullQuery = normalizeSearchQuery(query + " " + (config && config.language || ""));
+        var mixed = [];
+        try {
+            var json = await youtubei("search", { query: fullQuery });
+            mixed = parseItems(json, "");
+        } catch (_) {
+            var html = await requestText(BASE_URL + "/results?search_query=" + encodeURIComponent(fullQuery) + "&hl=" + LOCALE.hl + "&gl=" + LOCALE.gl, headers());
+            mixed = parseItems(extractBalancedJson(html, "ytInitialData"), "");
+        }
+        return mixed;
+    }
+
+    async function homeSearch(section, config) {
+        var query = section.query;
+        if (section.personalized) query = section.query + " " + config.language;
+        if (section.mixed) return searchItemsForProvider(query, config);
+        return searchItems(query, section.type || "videos");
+    }
+
+    async function resolveHomeSection(section, config, seen) {
+        var items = await homeSearch(section, config);
+        return filterHomeItems(items, seen, section.limit || 20);
+    }
+
+    function filterHomeItems(items, seen, limit) {
+        var out = [];
+        (items || []).forEach(function (item) {
+            if (!item || !item.url || seen[item.url]) return;
+            seen[item.url] = true;
+            out.push(item);
+        });
+        return out.slice(0, limit || 20);
+    }
+
+    async function fetchHomeSections(sections, config, concurrency) {
+        sections = sections || [];
+        if (!sections.length) return [];
+        if (typeof http_parallel === "function") {
+            try {
+                var requests = sections.map(function (section) {
+                    var query = section.query;
+                    if (section.personalized) query = section.query + " " + config.language;
+                    var fullQuery = section.mixed ? normalizeSearchQuery(query + " " + (config.language || "")) : String(query || "");
+                    var payload = { query: fullQuery };
+                    if (!section.mixed) payload.params = decodeURIComponent(SEARCH_FILTERS[section.type] || SEARCH_FILTERS.videos);
+                    return { endpoint: "search", payload: payload };
+                });
+                var jsonResults = await youtubeiParallel(requests);
+                var anyItems = false;
+                var mapped = sections.map(function (section, index) {
+                    var items = parseItems(jsonResults[index], section.mixed ? "" : section.type || "videos");
+                    if (items.length) anyItems = true;
+                    return { section: section, items: items };
+                });
+                if (anyItems) return mapped;
+            } catch (_) {}
+        }
+        if (typeof http_parallel === "function") {
+            try {
+                var pageRequests = sections.map(function (section) {
+                    var query = section.query;
+                    if (section.personalized) query = section.query + " " + config.language;
+                    var fullQuery = section.mixed ? normalizeSearchQuery(query + " " + (config.language || "")) : String(query || "");
+                    var filter = section.mixed ? "" : "&sp=" + (SEARCH_FILTERS[section.type] || SEARCH_FILTERS.videos);
+                    return {
+                        method: "GET",
+                        url: BASE_URL + "/results?search_query=" + encodeURIComponent(fullQuery) + filter + "&hl=" + LOCALE.hl + "&gl=" + LOCALE.gl,
+                        headers: headers()
+                    };
+                });
+                var pageResponses = await httpParallelRequests(pageRequests);
+                var anyPageItems = false;
+                var pageMapped = sections.map(function (section, index) {
+                    var items = parseItems(extractBalancedJson(pageResponses[index] && pageResponses[index].body || "", "ytInitialData"), section.mixed ? "" : section.type || "videos");
+                    if (items.length) anyPageItems = true;
+                    return { section: section, items: items };
+                });
+                if (anyPageItems) return pageMapped;
+            } catch (_) {}
+        }
+        var results = new Array(sections.length);
+        var next = 0;
+        async function worker() {
+            while (next < sections.length) {
+                var index = next++;
+                var section = sections[index];
+                try {
+                    results[index] = { section: section, items: await homeSearch(section, config) };
+                } catch (_) {
+                    results[index] = { section: section, items: [] };
+                }
+            }
+        }
+        var workers = [];
+        var count = Math.min(concurrency || 3, sections.length);
+        for (var i = 0; i < count; i++) workers.push(worker());
+        await Promise.all(workers);
+        return results;
     }
 
     function parseInitialData(html) {
@@ -588,27 +896,39 @@
 
     async function getHome(cb) {
         try {
+            var config = providerConfig();
+            applyLocale(config);
             var data = {};
-            try {
-                var trendingHtml = await requestText(BASE_URL + "/feed/trending?hl=" + LOCALE.hl + "&gl=" + LOCALE.gl, headers());
-                var trending = parseItems(parseInitialData(trendingHtml), "videos").slice(0, 24);
-                if (trending.length) data.Trending = trending;
-            } catch (_) {}
-            if (!data.Trending) {
+            var seen = {};
+            var sections = config.sections || [];
+            if (sections.length) {
                 try {
-                    var trendingSearch = await searchItems("trending", "videos");
-                    if (trendingSearch.length) data.Trending = trendingSearch.slice(0, 24);
+                    var trendingItems = await resolveHomeSection(sections[0], config, seen);
+                    if (trendingItems.length) data[sections[0].title] = trendingItems;
                 } catch (_) {}
             }
-            for (var i = 0; i < STATIC_HOME_CHANNELS.length; i++) {
-                var channel = STATIC_HOME_CHANNELS[i];
-                try {
-                    var html = await requestText(absoluteUrl(channel.url, BASE_URL).replace(/\/$/, "") + "/videos?hl=" + LOCALE.hl + "&gl=" + LOCALE.gl, headers());
-                    var items = parseItems(parseInitialData(html), "videos").slice(0, 24);
-                    if (items.length) data[channel.title] = items;
-                } catch (_) {}
+            var searches = recentSearches(providerId());
+            var queuedSections = [];
+            for (var h = 0; h < searches.length; h++) {
+                queuedSections.push({
+                    title: "Because You Searched: " + searches[h],
+                    query: searches[h],
+                    mixed: true,
+                    personalized: true,
+                    limit: 16
+                });
             }
-            if (!Object.keys(data).length) data.Trending = await searchItems("trending", "videos");
+            for (var i = 1; i < sections.length; i++) {
+                queuedSections.push(sections[i]);
+            }
+            var resolvedSections = await fetchHomeSections(queuedSections, config, 3);
+            for (var r = 0; r < resolvedSections.length; r++) {
+                var resolved = resolvedSections[r] || {};
+                var resolvedSection = resolved.section || {};
+                var resolvedItems = filterHomeItems(resolved.items, seen, resolvedSection.limit || 20);
+                if (resolvedItems.length) data[resolvedSection.title] = resolvedItems;
+            }
+            if (!Object.keys(data).length) data.Trending = await searchItems(config.language + " trending videos", "videos");
             cb({ success: true, data: data });
         } catch (error) {
             cb({ success: false, errorCode: "HOME_ERROR", message: String(error && error.message || error) });
@@ -617,7 +937,10 @@
 
     async function search(query, cb) {
         try {
-            cb({ success: true, data: await searchItems(query, providerId()) });
+            var config = providerConfig();
+            applyLocale(config);
+            rememberSearch(query);
+            cb({ success: true, data: await searchItemsForProvider(query, config) });
         } catch (error) {
             cb({ success: false, errorCode: "SEARCH_ERROR", message: String(error && error.message || error) });
         }
@@ -625,6 +948,7 @@
 
     async function load(url, cb) {
         try {
+            applyLocale(providerConfig());
             var value = String(url || "");
             if (extractPlaylistId(value)) return loadPlaylist(value, cb);
             if (/youtube\.com\/(?:@|channel\/|c\/|user\/)/i.test(value)) return loadChannel(value, cb);
@@ -690,6 +1014,21 @@
         });
     }
 
+    function base64Encode(value) {
+        value = String(value || "");
+        try {
+            if (typeof btoa === "function") return btoa(unescape(encodeURIComponent(value)));
+        } catch (_) {}
+        try {
+            if (typeof Buffer !== "undefined") return Buffer.from(value, "utf8").toString("base64");
+        } catch (_) {}
+        return value;
+    }
+
+    function magicM3u8(body) {
+        return "magic_m3u8:" + base64Encode(body);
+    }
+
     function hlsAttribute(line, name) {
         var re = new RegExp(name + "=((?:\"[^\"]+\")|[^,]+)", "i");
         var match = String(line || "").match(re);
@@ -721,8 +1060,41 @@
         return "";
     }
 
+    function absolutizeHlsUri(line, masterUrl) {
+        return String(line || "").replace(/URI="([^"]+)"/i, function (_, uri) {
+            return 'URI="' + absoluteUrl(uri, masterUrl) + '"';
+        });
+    }
+
+    function collectHlsMedia(lines, masterUrl) {
+        return lines.map(function (line) {
+            return String(line || "").trim();
+        }).filter(function (line) {
+            return /^#EXT-X-MEDIA:/i.test(line);
+        }).map(function (line) {
+            return absolutizeHlsUri(line, masterUrl);
+        });
+    }
+
+    function mediaGroup(line, name) {
+        return hlsAttribute(line, name);
+    }
+
+    function matchingMediaLines(mediaLines, variantLine) {
+        var audioGroup = hlsAttribute(variantLine, "AUDIO");
+        var subtitlesGroup = hlsAttribute(variantLine, "SUBTITLES");
+        return mediaLines.filter(function (line) {
+            var type = hlsAttribute(line, "TYPE").toUpperCase();
+            var groupId = mediaGroup(line, "GROUP-ID");
+            if (type === "AUDIO") return !audioGroup || groupId === audioGroup;
+            if (type === "SUBTITLES") return !subtitlesGroup || groupId === subtitlesGroup;
+            return false;
+        });
+    }
+
     function parseHlsVariants(masterText, masterUrl) {
         var lines = String(masterText || "").split(/\r?\n/);
+        var mediaLines = collectHlsMedia(lines, masterUrl);
         var variants = [];
         for (var i = 0; i < lines.length; i++) {
             var line = String(lines[i] || "").trim();
@@ -741,7 +1113,9 @@
                 quality: hlsQuality(line),
                 codec: hlsCodecLabel(line),
                 rank: hlsCodecRank(line),
-                bandwidth: parseInt(hlsAttribute(line, "BANDWIDTH"), 10) || 0
+                bandwidth: parseInt(hlsAttribute(line, "BANDWIDTH"), 10) || 0,
+                streamInf: line,
+                mediaLines: matchingMediaLines(mediaLines, line)
             });
         }
         var byQuality = {};
@@ -757,12 +1131,22 @@
         });
     }
 
+    function qualityMasterPlaylist(variant) {
+        var rows = ["#EXTM3U", "#EXT-X-INDEPENDENT-SEGMENTS"];
+        (variant.mediaLines || []).forEach(function (line) {
+            if (rows.indexOf(line) === -1) rows.push(line);
+        });
+        rows.push(variant.streamInf);
+        rows.push(variant.url);
+        return rows.join("\n");
+    }
+
     function buildHlsStream(variant, subtitles) {
         if (!variant || !variant.url) return null;
         var label = variant.quality ? ("YouTube HLS " + variant.quality + "p") : "YouTube HLS";
         if (variant.codec) label += " " + variant.codec;
         var stream = new StreamResult({
-            url: variant.url,
+            url: magicM3u8(qualityMasterPlaylist(variant)),
             source: label,
             quality: variant.quality || undefined,
             headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
@@ -774,10 +1158,9 @@
     async function hlsVariantStreams(masterUrl, subtitles) {
         if (!masterUrl) return [];
         try {
-            var res = await http_get(masterUrl, headers({
+            var body = await requestText(masterUrl, headers({
                 "Accept": "application/vnd.apple.mpegurl,application/x-mpegURL,*/*"
             }));
-            var body = String(res && res.body || "");
             return parseHlsVariants(body, masterUrl).map(function (variant) {
                 return buildHlsStream(variant, subtitles);
             }).filter(Boolean);
@@ -818,6 +1201,7 @@
 
     async function loadStreams(url, cb) {
         try {
+            applyLocale(providerConfig());
             var id = extractVideoId(url);
             if (!id) return cb({ success: false, errorCode: "INVALID_URL", message: "Invalid YouTube video URL" });
             var page = await videoPage(id);

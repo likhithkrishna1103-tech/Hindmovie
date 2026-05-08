@@ -1,29 +1,36 @@
 {
   "packageName": "com.igris.repo.youtube",
   "name": "YouTube",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://www.youtube.com",
   "providers": [
     {
-      "id": "videos",
-      "name": "YouTube Videos"
+      "id": "youtube_telugu",
+      "name": "YouTube Telugu"
     },
     {
-      "id": "playlists",
-      "name": "YouTube Playlists"
+      "id": "youtube_tamil",
+      "name": "YouTube Tamil"
     },
     {
-      "id": "channels",
-      "name": "YouTube Channels"
+      "id": "youtube_hindi",
+      "name": "YouTube Hindi"
+    },
+    {
+      "id": "youtube_malayalam",
+      "name": "YouTube Malayalam"
     }
   ],
-  "description": "YouTube videos, playlists, channels, trending, and playable stream links.",
+  "description": "😉 No description needed",
   "authors": [
     "IGRIS"
   ],
   "languages": [
-    "en",
-    "hi"
+    "te",
+    "ta",
+    "hi",
+    "ml",
+    "en"
   ],
   "categories": [
     "Others"
