@@ -1,0 +1,31 @@
+{
+  "packageName": "com.igris.repo.youtube",
+  "name": "YouTube",
+  "version": 1,
+  "baseUrl": "https://www.youtube.com",
+  "providers": [
+    {
+      "id": "videos",
+      "name": "YouTube Videos"
+    },
+    {
+      "id": "playlists",
+      "name": "YouTube Playlists"
+    },
+    {
+      "id": "channels",
+      "name": "YouTube Channels"
+    }
+  ],
+  "description": "YouTube videos, playlists, channels, trending, and playable stream links.",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "hi"
+  ],
+  "categories": [
+    "Others"
+  ]
+}
