@@ -105,6 +105,27 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animetsu.sky"
   },
   {
+    "packageName": "com.igris.repo.animewave",
+    "name": "AnimeWave",
+    "version": 1,
+    "baseUrl": "https://animewave.to",
+    "domains": [
+      "animewave.to"
+    ],
+    "description": "A clone for hianime",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animewave.sky"
+  },
+  {
     "packageName": "com.igris.repo.castletv",
     "name": "Castle TV",
     "version": 8,
