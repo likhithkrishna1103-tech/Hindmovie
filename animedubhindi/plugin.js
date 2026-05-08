@@ -100,6 +100,9 @@
         "User-Agent": UA,
         "Accept": "*/*"
     };
+    var SESSION_COOKIES = {};
+    var WEBVIEW_FETCH_UNAVAILABLE = false;
+    var PAGE_FETCH_LOGGED = {};
     var HOME_SECTIONS = [
         { title: "Home", path: "/" },
         { title: "Movies", path: "/category/movie/" },
@@ -197,6 +200,12 @@
         return decodeHtml(String(text || "")).replace(/\s+/g, " ").trim();
     }
 
+    function logPageFetch(message) {
+        try {
+            if (typeof console !== "undefined" && console.log) console.log("[AnimeDubHindi] " + message);
+        } catch (_) {}
+    }
+
     function fixUrl(url, base) {
         url = String(url || "").trim();
         if (!url) return "";
@@ -204,6 +213,204 @@
         if (url.indexOf("//") === 0) return "https:" + url;
         if (url[0] === "/") return String(base || MAIN_URL).replace(/\/+$/, "") + url;
         return String(base || MAIN_URL).replace(/\/+$/, "") + "/" + url.replace(/^\/+/, "");
+    }
+
+    function originOf(url) {
+        var match = String(url || "").match(/^(https?:\/\/[^\/]+)/i);
+        return match ? match[1].replace(/\/+$/, "") : "";
+    }
+
+    function hostOf(url) {
+        return originOf(url).replace(/^https?:\/\//i, "").toLowerCase();
+    }
+
+    function isPageOrigin(url) {
+        var host = hostOf(url);
+        return host === hostOf(MAIN_URL) || host === hostOf(LINKS_URL);
+    }
+
+    function pageOriginFor(url) {
+        var host = hostOf(url);
+        if (host === hostOf(LINKS_URL)) return originOf(LINKS_URL);
+        return originOf(MAIN_URL);
+    }
+
+    function parseHeaders(headers) {
+        var out = {};
+        if (!headers) return out;
+        if (typeof headers.forEach === "function") {
+            try {
+                headers.forEach(function(value, key) { out[String(key || "").toLowerCase()] = value; });
+                return out;
+            } catch (_) {}
+        }
+        Object.keys(headers || {}).forEach(function(key) {
+            out[String(key || "").toLowerCase()] = headers[key];
+        });
+        return out;
+    }
+
+    function responseStatus(res) {
+        return parseInt(res && (res.status || res.statusCode || res.code), 10) || 0;
+    }
+
+    function normalizeResponse(res, url) {
+        return {
+            status: responseStatus(res) || 200,
+            body: res && typeof res.body !== "undefined" ? String(res.body || "") : "",
+            headers: parseHeaders(res && res.headers),
+            finalUrl: String(res && (res.finalUrl || res.url) || url)
+        };
+    }
+
+    function cookieHeaderFor(origin) {
+        var jar = SESSION_COOKIES[origin] || {};
+        return Object.keys(jar).map(function(name) { return name + "=" + jar[name]; }).join("; ");
+    }
+
+    function rememberCookies(origin, headers) {
+        headers = parseHeaders(headers);
+        var raw = headers["set-cookie"] || headers["set-cookie2"];
+        if (!raw) return;
+        var values = Array.isArray(raw) ? raw : String(raw).split(/,(?=\s*[^;,=\s]+=[^;,]+)/g);
+        var jar = SESSION_COOKIES[origin] || {};
+        values.forEach(function(item) {
+            var part = String(item || "").split(";")[0].trim();
+            var eq = part.indexOf("=");
+            if (eq <= 0) return;
+            jar[part.slice(0, eq)] = part.slice(eq + 1);
+        });
+        SESSION_COOKIES[origin] = jar;
+    }
+
+    function isCloudflareBlocked(res) {
+        var status = responseStatus(res);
+        var body = String(res && res.body || "");
+        return status === 403 || status === 503
+            || /just a moment/i.test(body)
+            || /checking if the site connection is secure/i.test(body)
+            || /cf-browser-verification/i.test(body)
+            || (/attention required/i.test(body) && /cloudflare/i.test(body));
+    }
+
+    function pageHeaders(url, options) {
+        options = options || {};
+        var headers = Object.assign({}, COMMON_HEADERS, {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        }, options.headers || {});
+        var origin = pageOriginFor(url);
+        var cookies = cookieHeaderFor(origin);
+        if (cookies && !headers.Cookie && !headers.cookie) headers.Cookie = cookies;
+        if (options.referer && !headers.Referer && !headers.referer) headers.Referer = options.referer;
+        if (hostOf(url) === hostOf(LINKS_URL) && !headers.Referer && !headers.referer) headers.Referer = MAIN_URL + "/";
+        if (hostOf(url) === hostOf(LINKS_URL) && !headers.Origin && !headers.origin) headers.Origin = MAIN_URL;
+        return headers;
+    }
+
+    async function callWebViewBackend(fn, url, headers, options) {
+        options = options || {};
+        var attempts = [
+            function() { return fn(url, { method: "GET", headers: headers, referer: headers.Referer || headers.referer || "", useWebView: true, webView: true, session: true, cloudflare: true }); },
+            function() { return fn(url, headers); }
+        ];
+        var lastError = null;
+        for (var i = 0; i < attempts.length; i++) {
+            try {
+                var value = await attempts[i]();
+                if (value) return value;
+            } catch (error) {
+                lastError = error;
+            }
+        }
+        throw lastError || new Error("WebView fetch returned no response");
+    }
+
+    async function tryWebViewFetch(url, headers, options) {
+        if (WEBVIEW_FETCH_UNAVAILABLE || !isPageOrigin(url)) return null;
+        var names = [
+            "webview_fetch",
+            "webViewFetch",
+            "fetchWithWebView",
+            "requestWithWebView",
+            "sessionFetch",
+            "session_fetch",
+            "http_get_webview"
+        ];
+        for (var i = 0; i < names.length; i++) {
+            var fn = globalThis[names[i]];
+            if (typeof fn !== "function") continue;
+            return normalizeResponse(await callWebViewBackend(fn, url, headers, options), url);
+        }
+        if (typeof http_get === "function") {
+            try {
+                return normalizeResponse(await http_get(url, {
+                    headers: headers,
+                    followRedirects: true,
+                    useWebView: true,
+                    webView: true,
+                    session: true,
+                    cloudflare: true
+                }), url);
+            } catch (error) {
+                if (!PAGE_FETCH_LOGGED.webviewHttpGet) {
+                    logPageFetch("WebView/session http_get path failed; falling back to normal HTTP.");
+                    PAGE_FETCH_LOGGED.webviewHttpGet = true;
+                }
+            }
+        }
+        WEBVIEW_FETCH_UNAVAILABLE = true;
+        if (!PAGE_FETCH_LOGGED.noWebView) {
+            logPageFetch("No WebView/session fetch backend is available; using normal HTTP.");
+            PAGE_FETCH_LOGGED.noWebView = true;
+        }
+        return null;
+    }
+
+    async function normalHttpGet(url, headers) {
+        var attempts = [
+            function() { return http_get(url, { headers: headers, followRedirects: true }); },
+            function() { return http_get(url, headers); }
+        ];
+        var lastError = null;
+        for (var i = 0; i < attempts.length; i++) {
+            try {
+                return normalizeResponse(await attempts[i](), url);
+            } catch (error) {
+                lastError = error;
+            }
+        }
+        throw lastError || new Error("HTTP GET failed: " + url);
+    }
+
+    async function fetchPage(url, options) {
+        options = options || {};
+        url = fixUrl(url, options.base || MAIN_URL);
+        var headers = pageHeaders(url, options);
+        var origin = pageOriginFor(url);
+        var webViewError = null;
+        try {
+            var webViewRes = await tryWebViewFetch(url, headers, options);
+            if (webViewRes && webViewRes.body && !isCloudflareBlocked(webViewRes)) {
+                rememberCookies(origin, webViewRes.headers);
+                return webViewRes;
+            }
+            if (webViewRes && isCloudflareBlocked(webViewRes)) {
+                webViewError = new Error("WebView/session fetch still returned Cloudflare block");
+            }
+        } catch (error) {
+            webViewError = error;
+        }
+        if (webViewError && !PAGE_FETCH_LOGGED.webviewFallback) {
+            logPageFetch("WebView/session fetch failed (" + String(webViewError && webViewError.message || webViewError) + "); falling back to normal HTTP.");
+            PAGE_FETCH_LOGGED.webviewFallback = true;
+        }
+        var normalRes = await normalHttpGet(url, headers);
+        rememberCookies(origin, normalRes.headers);
+        if (isCloudflareBlocked(normalRes) && !PAGE_FETCH_LOGGED.cloudflare) {
+            logPageFetch("Normal HTTP response appears Cloudflare-blocked for " + origin + ".");
+            PAGE_FETCH_LOGGED.cloudflare = true;
+        }
+        return normalRes;
     }
 
     function parseQuality(value) {
@@ -476,7 +683,7 @@
         try {
             var pairs = await Promise.all(HOME_SECTIONS.map(async function(section) {
                 try {
-                    var res = await http_get(MAIN_URL + section.path, COMMON_HEADERS);
+                    var res = await fetchPage(MAIN_URL + section.path, { referer: MAIN_URL + "/" });
                     var items = parseCards(res && res.body);
                     return [section.title, items];
                 } catch (_) {
@@ -495,7 +702,7 @@
 
     async function search(query, cb) {
         try {
-            var res = await http_get(MAIN_URL + "/?s=" + encodeURIComponent(query || ""), COMMON_HEADERS);
+            var res = await fetchPage(MAIN_URL + "/?s=" + encodeURIComponent(query || ""), { referer: MAIN_URL + "/" });
             cb({ success: true, data: parseCards(res && res.body) });
         } catch (error) {
             cb({ success: false, errorCode: "SEARCH_ERROR", message: String(error && error.message || error) });
@@ -504,7 +711,7 @@
 
     async function load(url, cb) {
         try {
-            var res = await http_get(url, COMMON_HEADERS);
+            var res = await fetchPage(url, { referer: MAIN_URL + "/" });
             var html = String(res && res.body || "");
             if (!html) return cb({ success: false, errorCode: "LOAD_ERROR", message: "Empty response" });
             var infoMap = parseInfoMap(html);
@@ -521,7 +728,7 @@
             if (!intermediate) return cb({ success: false, errorCode: "LOAD_ERROR", message: "Missing link page" });
 
             var isSeries = /\/episode\//i.test(intermediate) || /season/i.test(rawTitle) || !!infoMap["Total Episode"];
-            var linkRes = await http_get(intermediate, COMMON_HEADERS);
+            var linkRes = await fetchPage(intermediate, { referer: url, base: LINKS_URL });
             var linkHtml = String(linkRes && linkRes.body || "");
 
             if (!isSeries) {
@@ -666,7 +873,7 @@
             return url;
         }
         try {
-            var res = await http_get(url, COMMON_HEADERS);
+            var res = await fetchPage(url, { referer: LINKS_URL + "/", base: LINKS_URL });
             var html = String(res && res.body || "");
             var redirectBase64 = html.match(/var\s+redirectUrl\s*=\s*"([^"]+)"/i);
             if (redirectBase64 && redirectBase64[1]) {
