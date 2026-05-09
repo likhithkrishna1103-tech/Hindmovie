@@ -1514,10 +1514,25 @@
         });
     }
 
+    function hlsMasterPreamble(lines) {
+        var out = [];
+        (lines || []).forEach(function (line) {
+            line = String(line || "").trim();
+            if (!line) return;
+            if (/^#EXT-X-STREAM-INF:/i.test(line) || /^#EXT-X-I-FRAME-STREAM-INF:/i.test(line) || /^#EXT-X-MEDIA:/i.test(line)) return;
+            if (line.charAt(0) !== "#") return;
+            if (/^#EXT-X-DEFINE:/i.test(line)) return;
+            out.push(line);
+        });
+        if (!out.length || out[0] !== "#EXTM3U") out.unshift("#EXTM3U");
+        return out;
+    }
+
     function parseHlsVariants(masterText, masterUrl) {
         var lines = String(masterText || "").split(/\r?\n/);
         var variables = hlsDefineVariables(lines);
         var mediaLines = collectHlsMedia(lines, masterUrl, variables);
+        var preamble = hlsMasterPreamble(lines);
         var variants = [];
         var seenUrls = {};
         for (var i = 0; i < lines.length; i++) {
@@ -1545,6 +1560,8 @@
                 bandwidth: parseInt(hlsAttribute(line, "BANDWIDTH"), 10) || 0,
                 streamInf: line,
                 mediaLines: variantMediaLines,
+                fullMediaLines: variantMediaLines,
+                preamble: preamble,
                 standalone: hlsMustContainAudio(line, mediaLines)
             });
         }
@@ -1561,9 +1578,10 @@
         });
     }
 
-    function qualityMasterPlaylist(variant) {
-        var rows = ["#EXTM3U", "#EXT-X-INDEPENDENT-SEGMENTS"];
-        compactHlsMediaLines(variant.mediaLines || []).forEach(function (line) {
+    function qualityMasterPlaylist(variant, compactMedia) {
+        var rows = (variant && variant.preamble && variant.preamble.length ? variant.preamble : ["#EXTM3U", "#EXT-X-INDEPENDENT-SEGMENTS"]).slice();
+        var mediaLines = compactMedia === false ? (variant.fullMediaLines || variant.mediaLines || []) : compactHlsMediaLines(variant.mediaLines || []);
+        mediaLines.forEach(function (line) {
             if (rows.indexOf(line) === -1) rows.push(line);
         });
         rows.push(variant.streamInf);
@@ -1571,26 +1589,12 @@
         return rows.join("\n");
     }
 
-    function buildHlsStream(variant, subtitles) {
+    function buildHlsStream(variant, subtitles, compactMedia) {
         if (!variant || !variant.url) return null;
         var label = variant.quality ? ("YouTube " + variant.quality + "p") : "YouTube HLS";
         if (variant.codec) label += " " + variant.codec;
         var stream = new StreamResult({
-            url: magicM3u8(qualityMasterPlaylist(variant)),
-            source: label,
-            quality: variant.quality || undefined,
-            headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
-        });
-        if (subtitles && subtitles.length) stream.subtitles = subtitles;
-        return stream;
-    }
-
-    function buildRawHlsVariantStream(variant, subtitles) {
-        if (!variant || !variant.url) return null;
-        var label = variant.quality ? ("YouTube " + variant.quality + "p") : "YouTube HLS";
-        if (variant.codec) label += " " + variant.codec;
-        var stream = new StreamResult({
-            url: variant.url,
+            url: magicM3u8(qualityMasterPlaylist(variant, compactMedia)),
             source: label,
             quality: variant.quality || undefined,
             headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
@@ -1613,7 +1617,7 @@
             return parseHlsVariants(body, masterUrl).map(function (variant) {
                 return isH264HlsVariant(variant)
                     ? buildHlsStream(variant, subtitles)
-                    : buildRawHlsVariantStream(variant, subtitles);
+                    : buildHlsStream(variant, subtitles, false);
             }).filter(Boolean);
         } catch (_) {
             return [];
