@@ -472,7 +472,7 @@
   {
     "packageName": "com.igris.repo.youtube",
     "name": "YouTube",
-    "version": 16,
+    "version": 17,
     "baseUrl": "https://www.youtube.com",
     "providers": [
       {
