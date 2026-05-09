@@ -1753,7 +1753,6 @@
         var out = [];
         Object.keys(byType).forEach(function (type) {
             var lines = byType[type];
-            if (type === "SUBTITLES") return;
             var preferred = lines.filter(function (line) {
                 return typeof preferredOrder[preferredHlsLang(line)] !== "undefined";
             }).sort(function (a, b) {
@@ -1768,7 +1767,7 @@
                 });
             }
             if (!selected.length) selected = lines.slice(0, type === "AUDIO" ? 5 : 2);
-            selected.slice(0, type === "AUDIO" ? 1 : 2).forEach(function (line) {
+            selected.slice(0, type === "AUDIO" || type === "SUBTITLES" ? 5 : 2).forEach(function (line) {
                 if (out.indexOf(line) === -1) out.push(line);
             });
         });
@@ -1874,18 +1873,9 @@
         mediaLines.forEach(function (line) {
             if (rows.indexOf(line) === -1) rows.push(line);
         });
-        rows.push(sanitizeHlsStreamInf(variant.streamInf, mediaLines));
+        rows.push(variant.streamInf);
         rows.push(variant.url);
         return rows.join("\n");
-    }
-
-    function sanitizeHlsStreamInf(streamInf, mediaLines) {
-        var line = String(streamInf || "");
-        var hasSubtitleMedia = (mediaLines || []).some(function (mediaLine) {
-            return hlsAttribute(mediaLine, "TYPE").toUpperCase() === "SUBTITLES";
-        });
-        if (!hasSubtitleMedia) line = line.replace(/,SUBTITLES="[^"]*"/i, "");
-        return line;
     }
 
     function buildHlsStream(variant, subtitles, compactMedia) {
