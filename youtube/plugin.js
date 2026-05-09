@@ -84,6 +84,7 @@
     var PAGE_CACHE = {};
     var CACHE_TTL = 5 * 60 * 1000;
     var HISTORY_STORAGE_KEY = "skystream_youtube_search_history_v1";
+    var PROFILE_STORAGE_PREFIX = "skystream_youtube_profile_v1_";
 
     var SEARCH_FILTERS = {
         videos: "EgIQAQ%3D%3D",
@@ -685,8 +686,16 @@
         return "skystream_youtube_searches_" + String(provider || providerId());
     }
 
-    function storageGet(key) {
+    async function storageGet(key) {
+        key = String(key || "");
         try {
+            if (typeof get_storage === "function") {
+                var stored = await get_storage({ key: key });
+                if (stored == null) return null;
+                if (typeof stored === "string") return stored;
+                if (typeof stored.value !== "undefined") return stored.value;
+                if (typeof stored[key] !== "undefined") return stored[key];
+            }
             if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.getItem === "function") {
                 return localStorage.getItem(key);
             }
@@ -694,8 +703,14 @@
         return null;
     }
 
-    function storageSet(key, value) {
+    async function storageSet(key, value) {
+        key = String(key || "");
+        value = String(value == null ? "" : value);
         try {
+            if (typeof set_storage === "function") {
+                await set_storage({ key: key, value: value });
+                return;
+            }
             if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.setItem === "function") {
                 localStorage.setItem(key, value);
             }
@@ -706,8 +721,8 @@
         return cleanText(query).replace(/[^\w\s\u0900-\u097F\u0B80-\u0BFF\u0C00-\u0C7F\u0D00-\u0D7F-]/g, "").slice(0, 80);
     }
 
-    function readStoredHistory() {
-        var stored = storageGet(HISTORY_STORAGE_KEY);
+    async function readStoredHistory() {
+        var stored = await storageGet(HISTORY_STORAGE_KEY);
         try {
             var parsed = JSON.parse(stored || "[]");
             return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
@@ -716,18 +731,18 @@
         }
     }
 
-    function writeStoredHistory(value) {
-        storageSet(HISTORY_STORAGE_KEY, JSON.stringify(value || {}));
+    async function writeStoredHistory(value) {
+        await storageSet(HISTORY_STORAGE_KEY, JSON.stringify(value || {}));
     }
 
-    function readSearchHistory(provider) {
+    async function readSearchHistory(provider) {
         provider = provider || providerId();
         if (SEARCH_HISTORY[provider]) return SEARCH_HISTORY[provider];
-        var allHistory = readStoredHistory();
+        var allHistory = await readStoredHistory();
         var stored = allHistory[provider];
         if (!Array.isArray(stored)) {
             try {
-                stored = JSON.parse(storageGet(storageKey(provider)) || "[]");
+                stored = JSON.parse(await storageGet(storageKey(provider)) || "[]");
             } catch (_) {
                 stored = [];
             }
@@ -736,24 +751,111 @@
         return SEARCH_HISTORY[provider];
     }
 
-    function rememberSearch(query) {
+    function profileKey(provider) {
+        return PROFILE_STORAGE_PREFIX + String(provider || providerId());
+    }
+
+    function emptyProfile() {
+        return { version: 1, searches: [], opened: [], channels: [], topics: {} };
+    }
+
+    function sanitizeProfile(profile) {
+        profile = profile && typeof profile === "object" ? profile : {};
+        return {
+            version: 1,
+            searches: Array.isArray(profile.searches) ? profile.searches.filter(Boolean).slice(0, 30) : [],
+            opened: Array.isArray(profile.opened) ? profile.opened.filter(function (item) { return item && item.url; }).slice(0, 30) : [],
+            channels: Array.isArray(profile.channels) ? profile.channels.filter(function (item) { return item && item.url; }).slice(0, 20) : [],
+            topics: profile.topics && typeof profile.topics === "object" ? profile.topics : {}
+        };
+    }
+
+    async function readProfile(provider) {
+        provider = provider || providerId();
+        try {
+            return sanitizeProfile(JSON.parse(await storageGet(profileKey(provider)) || "{}"));
+        } catch (_) {
+            return emptyProfile();
+        }
+    }
+
+    async function writeProfile(provider, profile) {
+        await storageSet(profileKey(provider), JSON.stringify(sanitizeProfile(profile)));
+    }
+
+    function bumpTopics(profile, text, weight) {
+        var stop = {
+            latest: true, videos: true, video: true, youtube: true, official: true, full: true, hd: true, new: true, today: true, live: true,
+            you: true, your: true, yours: true, never: true, gonna: true, give: true, with: true, from: true, this: true, that: true,
+            what: true, when: true, where: true, have: true, has: true, are: true, the: true, and: true, for: true, not: true
+        };
+        cleanText(text).toLowerCase().split(/\s+/).forEach(function (word) {
+            word = word.replace(/[^\w\u0900-\u097F\u0B80-\u0BFF\u0C00-\u0C7F\u0D00-\u0D7F-]/g, "");
+            if (word.length < 3 || stop[word]) return;
+            profile.topics[word] = Math.min(99, (parseInt(profile.topics[word], 10) || 0) + (weight || 1));
+        });
+    }
+
+    function topTopics(profile, limit) {
+        return Object.keys(profile && profile.topics || {}).sort(function (a, b) {
+            return (profile.topics[b] || 0) - (profile.topics[a] || 0);
+        }).slice(0, limit || 3);
+    }
+
+    function rememberListItem(list, item, limit) {
+        if (!item || !item.url) return list || [];
+        list = (list || []).filter(function (existing) {
+            return existing && existing.url !== item.url;
+        });
+        list.unshift(item);
+        return list.slice(0, limit || 20);
+    }
+
+    async function rememberSearch(query) {
         var provider = providerId();
         var clean = normalizeSearchQuery(query);
         if (clean.length < 2) return;
-        var history = readSearchHistory(provider).filter(function (item) {
+        var history = (await readSearchHistory(provider)).filter(function (item) {
             return String(item || "").toLowerCase() !== clean.toLowerCase();
         });
         history.unshift(clean);
         history = history.slice(0, 20);
         SEARCH_HISTORY[provider] = history;
-        var allHistory = readStoredHistory();
+        var allHistory = await readStoredHistory();
         allHistory[provider] = history;
-        writeStoredHistory(allHistory);
-        storageSet(storageKey(provider), JSON.stringify(history));
+        await writeStoredHistory(allHistory);
+        await storageSet(storageKey(provider), JSON.stringify(history));
+        var profile = await readProfile(provider);
+        profile.searches = rememberListItem(profile.searches.map(function (text) {
+            return { url: text, title: text };
+        }), { url: clean, title: clean }, 30).map(function (item) { return item.title; });
+        bumpTopics(profile, clean, 3);
+        await writeProfile(provider, profile);
     }
 
-    function recentSearches(provider) {
-        return readSearchHistory(provider).slice(0, 3);
+    async function rememberOpenedItem(item) {
+        if (!item || !item.url) return;
+        var provider = providerId();
+        var profile = await readProfile(provider);
+        var entry = {
+            title: cleanText(item.title) || "YouTube",
+            url: item.url,
+            type: item.type || "movie",
+            posterUrl: item.posterUrl || item.bannerUrl || "",
+            description: item.description || "",
+            contentRating: item.contentRating || "",
+            time: now()
+        };
+        if (/youtube\.com\/(?:@|channel\/|c\/|user\/)/i.test(entry.url) || entry.type === "series" && !extractPlaylistId(entry.url)) {
+            profile.channels = rememberListItem(profile.channels, entry, 20);
+        }
+        profile.opened = rememberListItem(profile.opened, entry, 30);
+        bumpTopics(profile, entry.title + " " + entry.description + " " + entry.contentRating, 2);
+        await writeProfile(provider, profile);
+    }
+
+    async function recentSearches(provider) {
+        return (await readSearchHistory(provider)).slice(0, 3);
     }
 
     async function searchItemsForProvider(query) {
@@ -805,6 +907,22 @@
         var text = cleanText((item && item.title || "") + " " + (item && item.description || "") + " " + (item && item.contentRating || ""));
         if (!item || !item.posterUrl) return true;
         return HOME_JUNK_RE.test(text);
+    }
+
+    function storedHomeItem(entry) {
+        if (!entry || !entry.url || !entry.title) return null;
+        return new MultimediaItem({
+            title: entry.title,
+            url: entry.url,
+            posterUrl: entry.posterUrl || undefined,
+            type: entry.type || "movie",
+            description: entry.description || undefined,
+            contentRating: entry.contentRating || undefined
+        });
+    }
+
+    function storedHomeItems(entries, limit) {
+        return (entries || []).map(storedHomeItem).filter(Boolean).slice(0, limit || 16);
     }
 
     async function fetchHomeSections(sections, config, concurrency) {
@@ -1032,18 +1150,33 @@
             var data = {};
             var seen = {};
             var sections = config.sections || [];
+            var profile = await readProfile(providerId());
             if (sections.length) {
                 try {
                     var trendingItems = await resolveHomeSection(sections[0], config, seen);
                     if (trendingItems.length) data[sections[0].title] = trendingItems;
                 } catch (_) {}
             }
-            var searches = recentSearches(providerId());
+            var recentOpened = filterHomeItems(storedHomeItems(profile.opened, 12), seen, 12);
+            if (recentOpened.length) data["Recently Opened"] = recentOpened;
+            var recentChannels = filterHomeItems(storedHomeItems(profile.channels, 12), seen, 12);
+            if (recentChannels.length) data["More From Your Channels"] = recentChannels;
+            var searches = await recentSearches(providerId());
+            var topics = topTopics(profile, 2);
             var queuedSections = [];
             for (var h = 0; h < searches.length; h++) {
                 queuedSections.push({
                     title: "Because You Searched: " + searches[h],
                     query: searches[h],
+                    mixed: true,
+                    personalized: true,
+                    limit: 16
+                });
+            }
+            for (var t = 0; t < topics.length; t++) {
+                queuedSections.push({
+                    title: "Recommended For You: " + topics[t],
+                    query: topics[t],
                     mixed: true,
                     personalized: true,
                     limit: 16
@@ -1075,7 +1208,7 @@
         try {
             var config = providerConfig();
             applyLocale(config);
-            rememberSearch(query);
+            await rememberSearch(query);
             cb({ success: true, data: await searchItemsForProvider(query, config) });
         } catch (error) {
             cb({ success: false, errorCode: "SEARCH_ERROR", message: String(error && error.message || error) });
@@ -1086,9 +1219,15 @@
         try {
             applyLocale(providerConfig());
             var value = String(url || "");
-            if (extractPlaylistId(value)) return loadPlaylist(value, cb);
-            if (/youtube\.com\/(?:@|channel\/|c\/|user\/)/i.test(value)) return loadChannel(value, cb);
-            return loadVideo(value, cb);
+            var wrapped = function (result) {
+                if (result && result.success && result.data) {
+                    rememberOpenedItem(result.data).catch(function () {});
+                }
+                cb(result);
+            };
+            if (extractPlaylistId(value)) return loadPlaylist(value, wrapped);
+            if (/youtube\.com\/(?:@|channel\/|c\/|user\/)/i.test(value)) return loadChannel(value, wrapped);
+            return loadVideo(value, wrapped);
         } catch (error) {
             cb({ success: false, errorCode: "LOAD_ERROR", message: String(error && error.message || error) });
         }
