@@ -1320,10 +1320,52 @@
     }
 
     function hlsAttribute(line, name) {
-        var re = new RegExp(name + "=((?:\"[^\"]+\")|[^,]+)", "i");
-        var match = String(line || "").match(re);
-        if (!match) return "";
-        return String(match[1] || "").replace(/^"|"$/g, "");
+        return hlsAttributes(line)[String(name || "").toUpperCase()] || "";
+    }
+
+    function hlsAttributes(line) {
+        var attrs = {};
+        var text = String(line || "");
+        var colon = text.indexOf(":");
+        if (colon >= 0) text = text.slice(colon + 1);
+        var key = "";
+        var value = "";
+        var readingKey = true;
+        var quoted = false;
+        function flush() {
+            var cleanKey = key.trim().toUpperCase();
+            if (!cleanKey) return;
+            var cleanValue = value.trim();
+            if (cleanValue.charAt(0) === "\"" && cleanValue.charAt(cleanValue.length - 1) === "\"") {
+                cleanValue = cleanValue.slice(1, -1);
+            }
+            attrs[cleanKey] = cleanValue;
+            key = "";
+            value = "";
+            readingKey = true;
+            quoted = false;
+        }
+        for (var i = 0; i < text.length; i++) {
+            var ch = text.charAt(i);
+            if (readingKey) {
+                if (ch === "=") {
+                    readingKey = false;
+                } else if (ch !== ",") {
+                    key += ch;
+                }
+                continue;
+            }
+            if (ch === "\"") {
+                quoted = !quoted;
+                value += ch;
+            } else if (ch === "," && !quoted) {
+                flush();
+            } else {
+                value += ch;
+            }
+        }
+        flush();
+        return attrs;
     }
 
     function hlsQuality(line) {
@@ -1350,24 +1392,49 @@
         return "";
     }
 
-    function absolutizeHlsUri(line, masterUrl) {
-        return String(line || "").replace(/URI="([^"]+)"/i, function (_, uri) {
-            return 'URI="' + absoluteUrl(uri, masterUrl) + '"';
+    function isHlsTrickPlay(line) {
+        var text = String(line || "");
+        return /^#EXT-X-I-FRAME-STREAM-INF/i.test(text)
+            || /I-FRAMES-ONLY/i.test(text);
+    }
+
+    function hlsDefineVariables(lines) {
+        var variables = {};
+        (lines || []).forEach(function (line) {
+            line = String(line || "").trim();
+            if (!/^#EXT-X-DEFINE:/i.test(line)) return;
+            var attrs = hlsAttributes(line);
+            var name = attrs.NAME || "";
+            if (name) variables[name] = attrs.VALUE || "";
+        });
+        return variables;
+    }
+
+    function replaceHlsVariables(value, variables) {
+        value = String(value || "");
+        return value.replace(/\{\$([A-Za-z0-9_-]+)\}/g, function (_, name) {
+            return Object.prototype.hasOwnProperty.call(variables || {}, name) ? variables[name] : "";
         });
     }
 
-    function collectHlsMedia(lines, masterUrl) {
+    function absolutizeHlsUri(line, masterUrl, variables) {
+        return String(line || "").replace(/URI="([^"]+)"/i, function (_, uri) {
+            return 'URI="' + absoluteUrl(replaceHlsVariables(uri, variables), masterUrl) + '"';
+        });
+    }
+
+    function hlsMediaUrl(line) {
+        return hlsAttribute(line, "URI");
+    }
+
+    function collectHlsMedia(lines, masterUrl, variables) {
         return lines.map(function (line) {
             return String(line || "").trim();
         }).filter(function (line) {
             return /^#EXT-X-MEDIA:/i.test(line);
         }).map(function (line) {
-            return absolutizeHlsUri(line, masterUrl);
+            return absolutizeHlsUri(line, masterUrl, variables);
         });
-    }
-
-    function mediaGroup(line, name) {
-        return hlsAttribute(line, name);
     }
 
     function matchingMediaLines(mediaLines, variantLine) {
@@ -1375,42 +1442,101 @@
         var subtitlesGroup = hlsAttribute(variantLine, "SUBTITLES");
         return mediaLines.filter(function (line) {
             var type = hlsAttribute(line, "TYPE").toUpperCase();
-            var groupId = mediaGroup(line, "GROUP-ID");
-            if (type === "AUDIO") return !audioGroup || groupId === audioGroup;
-            if (type === "SUBTITLES") return !subtitlesGroup || groupId === subtitlesGroup;
+            var groupId = hlsAttribute(line, "GROUP-ID");
+            if (type === "AUDIO") return !!audioGroup && groupId === audioGroup;
+            if (type === "SUBTITLES") return !!subtitlesGroup && groupId === subtitlesGroup;
             return false;
+        });
+    }
+
+    function preferredHlsLang(line) {
+        return audioLangBase(hlsAttribute(line, "LANGUAGE") || hlsAttribute(line, "YT-EXT-AUDIO-CONTENT-ID") || hlsAttribute(line, "NAME"));
+    }
+
+    function compactHlsMediaLines(mediaLines) {
+        var preferredOrder = { hi: 0, en: 1, te: 2, ta: 3, ml: 4 };
+        var byType = {};
+        (mediaLines || []).forEach(function (line) {
+            var type = hlsAttribute(line, "TYPE").toUpperCase() || "OTHER";
+            if (!byType[type]) byType[type] = [];
+            byType[type].push(line);
+        });
+        var out = [];
+        Object.keys(byType).forEach(function (type) {
+            var lines = byType[type];
+            var preferred = lines.filter(function (line) {
+                return typeof preferredOrder[preferredHlsLang(line)] !== "undefined";
+            }).sort(function (a, b) {
+                return preferredOrder[preferredHlsLang(a)] - preferredOrder[preferredHlsLang(b)];
+            });
+            var selected = preferred.length ? preferred : lines.filter(function (line) {
+                return /YES/i.test(hlsAttribute(line, "DEFAULT")) || /YES/i.test(hlsAttribute(line, "AUTOSELECT"));
+            });
+            if (type === "AUDIO") {
+                lines.forEach(function (line) {
+                    if (/YES/i.test(hlsAttribute(line, "DEFAULT")) && selected.indexOf(line) === -1) selected.push(line);
+                });
+            }
+            if (!selected.length) selected = lines.slice(0, type === "AUDIO" ? 5 : 2);
+            selected.slice(0, type === "AUDIO" || type === "SUBTITLES" ? 5 : 2).forEach(function (line) {
+                if (out.indexOf(line) === -1) out.push(line);
+            });
+        });
+        return out;
+    }
+
+    function hlsMustContainAudio(variantLine, mediaLines) {
+        var audioGroup = hlsAttribute(variantLine, "AUDIO");
+        if (!audioGroup) return true;
+        var audio = (mediaLines || []).filter(function (line) {
+            return hlsAttribute(line, "TYPE").toUpperCase() === "AUDIO"
+                && hlsAttribute(line, "GROUP-ID") === audioGroup;
+        });
+        return audio.length > 0 && audio.every(function (line) {
+            return !hlsMediaUrl(line);
         });
     }
 
     function hasPlayableHlsAudio(variantLine, mediaLines) {
         var audioGroup = hlsAttribute(variantLine, "AUDIO");
         if (!audioGroup) return true;
+        var audioLines = (mediaLines || []).filter(function (line) {
+            return hlsAttribute(line, "TYPE").toUpperCase() === "AUDIO"
+                && hlsAttribute(line, "GROUP-ID") === audioGroup;
+        });
+        if (!audioLines.length) return false;
+        if (audioLines.some(function (line) { return !hlsMediaUrl(line); })) return true;
         return (mediaLines || []).some(function (line) {
             return hlsAttribute(line, "TYPE").toUpperCase() === "AUDIO"
-                && mediaGroup(line, "GROUP-ID") === audioGroup
-                && !!hlsAttribute(line, "URI")
-                && !isExpiredStreamUrl(hlsAttribute(line, "URI"));
+                && hlsAttribute(line, "GROUP-ID") === audioGroup
+                && !!hlsMediaUrl(line)
+                && !isExpiredStreamUrl(hlsMediaUrl(line));
         });
     }
 
     function parseHlsVariants(masterText, masterUrl) {
         var lines = String(masterText || "").split(/\r?\n/);
-        var mediaLines = collectHlsMedia(lines, masterUrl);
+        var variables = hlsDefineVariables(lines);
+        var mediaLines = collectHlsMedia(lines, masterUrl, variables);
         var variants = [];
+        var seenUrls = {};
         for (var i = 0; i < lines.length; i++) {
             var line = String(lines[i] || "").trim();
             if (!/^#EXT-X-STREAM-INF:/i.test(line)) continue;
+            if (isHlsTrickPlay(line)) continue;
             var variantUrl = "";
             for (var j = i + 1; j < lines.length; j++) {
                 var next = String(lines[j] || "").trim();
                 if (!next) continue;
                 if (next.charAt(0) === "#") continue;
-                variantUrl = absoluteUrl(next, masterUrl);
+                variantUrl = absoluteUrl(replaceHlsVariables(next, variables), masterUrl);
                 break;
             }
             if (!variantUrl) continue;
             var variantMediaLines = matchingMediaLines(mediaLines, line);
             if (!hasPlayableHlsAudio(line, variantMediaLines) || isExpiredStreamUrl(variantUrl)) continue;
+            if (seenUrls[variantUrl]) continue;
+            seenUrls[variantUrl] = true;
             variants.push({
                 url: variantUrl,
                 quality: hlsQuality(line),
@@ -1418,7 +1544,8 @@
                 rank: hlsCodecRank(line),
                 bandwidth: parseInt(hlsAttribute(line, "BANDWIDTH"), 10) || 0,
                 streamInf: line,
-                mediaLines: variantMediaLines
+                mediaLines: variantMediaLines,
+                standalone: hlsMustContainAudio(line, mediaLines)
             });
         }
         var byQuality = {};
@@ -1436,7 +1563,7 @@
 
     function qualityMasterPlaylist(variant) {
         var rows = ["#EXTM3U", "#EXT-X-INDEPENDENT-SEGMENTS"];
-        (variant.mediaLines || []).forEach(function (line) {
+        compactHlsMediaLines(variant.mediaLines || []).forEach(function (line) {
             if (rows.indexOf(line) === -1) rows.push(line);
         });
         rows.push(variant.streamInf);
@@ -1446,7 +1573,7 @@
 
     function buildHlsStream(variant, subtitles) {
         if (!variant || !variant.url) return null;
-        var label = variant.quality ? ("YouTube HLS " + variant.quality + "p") : "YouTube HLS";
+        var label = variant.quality ? ("YouTube " + variant.quality + "p") : "YouTube HLS";
         if (variant.codec) label += " " + variant.codec;
         var stream = new StreamResult({
             url: magicM3u8(qualityMasterPlaylist(variant)),
@@ -1601,10 +1728,12 @@
     function streamPriority(item) {
         var source = String(item && item.source || "");
         if (/^YouTube Live/i.test(source)) return 5000;
-        if (/^YouTube(?:\s|$)/i.test(source) && !/Video|HLS/i.test(source)) return 4500;
-        if (item && item.audioTracks && item.audioTracks.length) return 4000;
+        if (/^YouTube \d/i.test(source)) return 4800;
+        if (/^YouTube HLS \d/i.test(source)) return 4700;
         if (/HLS Auto/i.test(source)) return 3000;
-        if (/HLS/i.test(source)) return 1000;
+        if (/HLS/i.test(source)) return 2500;
+        if (/^YouTube(?:\s|$)/i.test(source) && !/Video|HLS/i.test(source)) return 2200;
+        if (item && item.audioTracks && item.audioTracks.length) return 1500;
         return 1000;
     }
 
@@ -1690,14 +1819,6 @@
                 results.push(stream);
             });
 
-            var audioTracks = audioTracksFromNewPipeFormats(webAdaptive, cpn);
-            webAdaptive.filter(function (format) {
-                return itagType(format) === "video-only" || isVideoOnly(format);
-            }).forEach(function (format) {
-                var stream = buildNewPipeVideoOnlyStream(format, audioTracks, cpn, subs);
-                if (stream) results.push(stream);
-            });
-
             var ios = null;
             try {
                 ios = await iosPlayer(id, generateContentPlaybackNonce());
@@ -1707,13 +1828,13 @@
                 var iosSubs = subs.length ? subs : compactSubtitleTracks(subtitleTracks(ios));
                 var hlsUrl = ios.streamingData.hlsManifestUrl;
                 if (hlsUrl && !isExpiredStreamUrl(hlsUrl)) {
+                    results = results.concat(await hlsVariantStreams(hlsUrl, iosSubs));
                     results.push(attachSubtitles(new StreamResult({
                         url: hlsUrl,
                         source: "YouTube HLS Auto",
                         quality: undefined,
                         headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
                     }), iosSubs));
-                    if (!results.length) results = results.concat(await hlsVariantStreams(hlsUrl, iosSubs));
                 }
             }
 
