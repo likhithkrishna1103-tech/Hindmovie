@@ -550,14 +550,27 @@
         if (!renderer || !renderer.videoId) return null;
         var title = cleanText(getText(renderer.title));
         if (!title || /private video|deleted video/i.test(title)) return null;
+        var duration = durationMinutes(getText(renderer.lengthText || renderer.thumbnailOverlays));
+        var live = isLiveRenderer(renderer) || (!duration && /\bLIVE\b/i.test(title));
         return new MultimediaItem({
             title: title,
             url: videoUrl(renderer.videoId),
             posterUrl: lastThumb(thumbsFrom(renderer)) || undefined,
-            type: "movie",
-            duration: durationMinutes(getText(renderer.lengthText || renderer.thumbnailOverlays)),
+            type: live ? "livestream" : "movie",
+            duration: duration,
             contentRating: cleanText(getText(renderer.ownerText || renderer.shortBylineText)) || undefined
         });
+    }
+
+    function isLiveRenderer(renderer) {
+        var text = cleanText([
+            getText(renderer && renderer.title),
+            getText(renderer && renderer.badges),
+            getText(renderer && renderer.thumbnailOverlays),
+            getText(renderer && renderer.viewCountText),
+            getText(renderer && renderer.shortViewCountText)
+        ].join(" "));
+        return /\bLIVE\b/i.test(text) || /watching now/i.test(text);
     }
 
     function playlistItem(renderer) {
@@ -672,12 +685,14 @@
         if (!renderer || !renderer.videoId) return null;
         var title = cleanText(getText(renderer.title));
         if (!title || /private video|deleted video/i.test(title)) return null;
+        var duration = durationMinutes(getText(renderer.lengthText || renderer.thumbnailOverlays));
+        var live = isLiveRenderer(renderer) || (!duration && /\bLIVE\b/i.test(title));
         return new MultimediaItem({
             title: title,
             url: videoUrl(renderer.videoId),
             posterUrl: lastThumb(thumbsFrom(renderer)) || undefined,
-            type: "movie",
-            duration: durationMinutes(getText(renderer.lengthText || renderer.thumbnailOverlays)) || undefined,
+            type: live ? "livestream" : "movie",
+            duration: duration || undefined,
             contentRating: cleanText(getText(renderer.shortBylineText || renderer.longBylineText || renderer.ownerText)) || undefined
         });
     }
@@ -1203,6 +1218,7 @@
         var title = cleanText(details.title || getText(microformat.title)) || "YouTube Video";
         var poster = lastThumb(details.thumbnail && details.thumbnail.thumbnails || microformat.thumbnail && microformat.thumbnail.thumbnails || []);
         var uploader = cleanText(details.author || microformat.ownerChannelName);
+        var live = isLivePlayer(page.player);
         cb({
             success: true,
             data: new MultimediaItem({
@@ -1211,7 +1227,7 @@
                 posterUrl: poster || undefined,
                 bannerUrl: poster || undefined,
                 description: cleanText(details.shortDescription || getText(microformat.description)) || undefined,
-                type: "movie",
+                type: live ? "livestream" : "movie",
                 duration: Math.round((parseInt(details.lengthSeconds, 10) || 0) / 60) || undefined,
                 contentRating: uploader || undefined,
                 episodes: [
@@ -1858,9 +1874,18 @@
         mediaLines.forEach(function (line) {
             if (rows.indexOf(line) === -1) rows.push(line);
         });
-        rows.push(variant.streamInf);
+        rows.push(sanitizeHlsStreamInf(variant.streamInf, mediaLines));
         rows.push(variant.url);
         return rows.join("\n");
+    }
+
+    function sanitizeHlsStreamInf(streamInf, mediaLines) {
+        var line = String(streamInf || "");
+        var hasSubtitleMedia = (mediaLines || []).some(function (mediaLine) {
+            return hlsAttribute(mediaLine, "TYPE").toUpperCase() === "SUBTITLES";
+        });
+        if (!hasSubtitleMedia) line = line.replace(/,SUBTITLES="[^"]*"/i, "");
+        return line;
     }
 
     function buildHlsStream(variant, subtitles, compactMedia) {
