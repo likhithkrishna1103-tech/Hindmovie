@@ -717,21 +717,39 @@
         return "skystream_youtube_searches_" + String(provider || providerId());
     }
 
+    function storedValueFromResponse(response, key) {
+        if (response == null || response === "") return null;
+        if (typeof response === "string") return response;
+        if (typeof response.value !== "undefined") return response.value;
+        if (typeof response[key] !== "undefined") return response[key];
+        return null;
+    }
+
     async function storageGet(key) {
         key = String(key || "");
         try {
+            if (typeof getPreference === "function") {
+                var preferred = await getPreference(key);
+                var preferredValue = storedValueFromResponse(preferred, key);
+                if (preferredValue != null) return preferredValue;
+            }
+        } catch (_) {}
+        try {
             if (typeof get_storage === "function") {
+                var stored = await get_storage(key);
+                var storedValue = storedValueFromResponse(stored, key);
+                if (storedValue != null) return storedValue;
+                stored = await get_storage({ key: key });
+                storedValue = storedValueFromResponse(stored, key);
+                if (storedValue != null) return storedValue;
                 var request = {};
                 request[key] = "";
-                var stored = await get_storage(request);
-                if (stored == null || stored === "") stored = await get_storage({ key: key });
-                if (stored == null) return null;
-                if (typeof stored === "string") return stored;
-                if (typeof stored.value !== "undefined") return stored.value;
-                if (typeof stored[key] !== "undefined") return stored[key];
-                var legacyPair = await get_storage({ key: "", value: "" });
-                if (legacyPair && legacyPair.key === key && typeof legacyPair.value !== "undefined") return legacyPair.value;
+                stored = await get_storage(request);
+                storedValue = storedValueFromResponse(stored, key);
+                if (storedValue != null) return storedValue;
             }
+        } catch (_) {}
+        try {
             if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.getItem === "function") {
                 return localStorage.getItem(key);
             }
@@ -742,17 +760,26 @@
     async function storageSet(key, value) {
         key = String(key || "");
         value = String(value == null ? "" : value);
+        var saved = false;
         try {
-            if (typeof set_storage === "function") {
-                var request = {};
-                request[key] = value;
-                await set_storage(request);
-                return;
-            }
-            if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.setItem === "function") {
-                localStorage.setItem(key, value);
+            if (typeof setPreference === "function") {
+                await setPreference(key, value);
+                saved = true;
             }
         } catch (_) {}
+        try {
+            if (typeof set_storage === "function") {
+                await set_storage(key, value);
+                saved = true;
+            }
+        } catch (_) {}
+        try {
+            if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.setItem === "function") {
+                localStorage.setItem(key, value);
+                saved = true;
+            }
+        } catch (_) {}
+        return saved;
     }
 
     function normalizeSearchQuery(query) {
