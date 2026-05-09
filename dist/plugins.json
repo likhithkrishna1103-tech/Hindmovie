@@ -472,7 +472,7 @@
   {
     "packageName": "com.igris.repo.youtube",
     "name": "YouTube",
-    "version": 12,
+    "version": 14,
     "baseUrl": "https://www.youtube.com",
     "providers": [
       {
@@ -490,6 +490,10 @@
       {
         "id": "youtube_malayalam",
         "name": "YouTube Malayalam"
+      },
+      {
+        "id": "youtube_kannada",
+        "name": "YouTube Kannada"
       }
     ],
     "description": "😉 No description needed",
@@ -501,6 +505,7 @@
       "ta",
       "hi",
       "ml",
+      "kn",
       "en"
     ],
     "categories": [
