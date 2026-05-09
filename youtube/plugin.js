@@ -1585,6 +1585,25 @@
         return stream;
     }
 
+    function buildRawHlsVariantStream(variant, subtitles) {
+        if (!variant || !variant.url) return null;
+        var label = variant.quality ? ("YouTube " + variant.quality + "p") : "YouTube HLS";
+        if (variant.codec) label += " " + variant.codec;
+        var stream = new StreamResult({
+            url: variant.url,
+            source: label,
+            quality: variant.quality || undefined,
+            headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
+        });
+        if (subtitles && subtitles.length) stream.subtitles = subtitles;
+        return stream;
+    }
+
+    function isH264HlsVariant(variant) {
+        return /H264/i.test(String(variant && variant.codec || ""))
+            || /avc1|h264/i.test(String(variant && variant.streamInf || ""));
+    }
+
     async function hlsVariantStreams(masterUrl, subtitles) {
         if (!masterUrl) return [];
         try {
@@ -1592,7 +1611,9 @@
                 "Accept": "application/vnd.apple.mpegurl,application/x-mpegURL,*/*"
             }), { noCache: true });
             return parseHlsVariants(body, masterUrl).map(function (variant) {
-                return buildHlsStream(variant, subtitles);
+                return isH264HlsVariant(variant)
+                    ? buildHlsStream(variant, subtitles)
+                    : buildRawHlsVariantStream(variant, subtitles);
             }).filter(Boolean);
         } catch (_) {
             return [];
@@ -1633,13 +1654,13 @@
         return "com.google.ios.youtube/" + IOS_CLIENT_VERSION + " (" + IOS_DEVICE_MODEL + "; U; CPU iOS " + IOS_USER_AGENT_VERSION + " like Mac OS X; " + LOCALE.gl + ")";
     }
 
-    async function androidReelPlayer(videoId, cpn) {
+    async function androidReelPlayer(videoId, cpn, withVisitor) {
         var h = mobileJsonHeaders("3", ANDROID_CLIENT_VERSION, androidUserAgent());
-        var visitor = await visitorDataForMobile("ANDROID", ANDROID_CLIENT_VERSION, h, {
+        var visitor = withVisitor ? await visitorDataForMobile("ANDROID", ANDROID_CLIENT_VERSION, h, {
             osName: "Android",
             osVersion: "13",
             androidSdkVersion: 33
-        });
+        }) : "";
         var payload = {
             context: mobileClientContext("ANDROID", ANDROID_CLIENT_VERSION, visitor, {
                 osName: "Android",
@@ -1658,15 +1679,15 @@
         return json && json.playerResponse || {};
     }
 
-    async function iosPlayer(videoId, cpn) {
+    async function iosPlayer(videoId, cpn, withVisitor) {
         var h = mobileJsonHeaders("5", IOS_CLIENT_VERSION, iosUserAgent());
-        var visitor = await visitorDataForMobile("IOS", IOS_CLIENT_VERSION, h, {
+        var visitor = withVisitor ? await visitorDataForMobile("IOS", IOS_CLIENT_VERSION, h, {
             deviceMake: "Apple",
             deviceModel: IOS_DEVICE_MODEL,
             osName: "iOS",
             osVersion: IOS_USER_AGENT_VERSION.replace(/_/g, ".")
-        });
-        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?prettyPrint=false&t=" + encodeURIComponent(generateTParameter()) + "&id=" + encodeURIComponent(videoId), {
+        }) : "";
+        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?prettyPrint=false&t=" + encodeURIComponent(generateTParameter()) + "&id=" + encodeURIComponent(videoId) + "&$fields=streamingData,captions,videoDetails,microformat", {
             context: mobileClientContext("IOS", IOS_CLIENT_VERSION, visitor, {
                 deviceMake: "Apple",
                 deviceModel: IOS_DEVICE_MODEL,
@@ -1778,22 +1799,81 @@
         return !isExpiredStreamUrl(item.url);
     }
 
+    function hasStreamingData(player) {
+        return !!(player && player.streamingData);
+    }
+
+    function hlsUrlFromPlayer(player) {
+        var streaming = player && player.streamingData || {};
+        var url = streaming.hlsManifestUrl || "";
+        return url && !isExpiredStreamUrl(url) ? url : "";
+    }
+
+    async function hlsStreamsFromPlayer(player, subtitles) {
+        var hlsUrl = hlsUrlFromPlayer(player);
+        if (!hlsUrl) return [];
+        var streams = await hlsVariantStreams(hlsUrl, subtitles);
+        streams.push(attachSubtitles(new StreamResult({
+            url: hlsUrl,
+            source: "YouTube HLS Auto",
+            quality: undefined,
+            headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
+        }), subtitles));
+        return streams;
+    }
+
     async function loadStreams(url, cb) {
         try {
             applyLocale(providerConfig());
             var id = extractVideoId(url);
             if (!id) return cb({ success: false, errorCode: "INVALID_URL", message: "Invalid YouTube video URL" });
             var cpn = generateContentPlaybackNonce();
-            var player = {};
-            try {
-                player = await androidReelPlayer(id, cpn);
-            } catch (_) {}
-            if (!player || !player.streamingData) {
+            var androidPromise = androidReelPlayer(id, cpn, false).catch(function () { return {}; });
+            var iosPromise = iosPlayer(id, generateContentPlaybackNonce(), false).catch(function () { return null; });
+            var hlsBundlePromise = iosPromise.then(async function (iosPlayerResult) {
+                var iosSubs = compactSubtitleTracks(subtitleTracks(iosPlayerResult));
+                return {
+                    ios: iosPlayerResult || null,
+                    subtitles: iosSubs,
+                    streams: await hlsStreamsFromPlayer(iosPlayerResult, iosSubs)
+                };
+            }).catch(function () {
+                return { ios: null, subtitles: [], streams: [] };
+            });
+
+            var player = await androidPromise;
+            var hlsBundle = await hlsBundlePromise;
+            var ios = hlsBundle.ios;
+
+            if (!hasStreamingData(player) && hasStreamingData(ios)) player = ios;
+
+            if (!hasStreamingData(player) && !hasStreamingData(ios)) {
+                try {
+                    var retried = await Promise.all([
+                        androidReelPlayer(id, cpn, true).catch(function () { return {}; }),
+                        iosPlayer(id, generateContentPlaybackNonce(), true).catch(function () { return null; })
+                    ]);
+                    if (hasStreamingData(retried[0])) player = retried[0];
+                    ios = retried[1] || ios;
+                    if (!hlsBundle.streams.length && hasStreamingData(ios)) {
+                        var retrySubs = compactSubtitleTracks(subtitleTracks(ios));
+                        hlsBundle = {
+                            ios: ios,
+                            subtitles: retrySubs,
+                            streams: await hlsStreamsFromPlayer(ios, retrySubs)
+                        };
+                    }
+                    if (!hasStreamingData(player) && hasStreamingData(ios)) player = ios;
+                } catch (_) {}
+            }
+
+            if (!hasStreamingData(player)) {
                 var page = await videoPage(id);
                 player = page.player || {};
             }
             var streaming = player.streamingData || {};
             var subs = compactSubtitleTracks(subtitleTracks(player));
+            if (!subs.length && hlsBundle.subtitles.length) subs = hlsBundle.subtitles;
             var results = [];
 
             if (isLivePlayer(player) && streaming.hlsManifestUrl && !isExpiredStreamUrl(streaming.hlsManifestUrl)) {
@@ -1819,24 +1899,7 @@
                 results.push(stream);
             });
 
-            var ios = null;
-            try {
-                ios = await iosPlayer(id, generateContentPlaybackNonce());
-            } catch (_) {}
-
-            if (ios && ios.streamingData) {
-                var iosSubs = subs.length ? subs : compactSubtitleTracks(subtitleTracks(ios));
-                var hlsUrl = ios.streamingData.hlsManifestUrl;
-                if (hlsUrl && !isExpiredStreamUrl(hlsUrl)) {
-                    results = results.concat(await hlsVariantStreams(hlsUrl, iosSubs));
-                    results.push(attachSubtitles(new StreamResult({
-                        url: hlsUrl,
-                        source: "YouTube HLS Auto",
-                        quality: undefined,
-                        headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
-                    }), iosSubs));
-                }
-            }
+            results = results.concat(hlsBundle.streams || []);
 
             var seen = {};
             results = results.filter(function (item) {
