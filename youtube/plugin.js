@@ -1300,11 +1300,11 @@
         try {
             applyLocale(providerConfig());
             var value = String(url || "");
-            var wrapped = async function (result) {
-                if (result && result.success && result.data) {
-                    await rememberOpenedItem(result.data).catch(function () {});
-                }
+            var wrapped = function (result) {
                 cb(result);
+                if (result && result.success && result.data) {
+                    rememberOpenedItem(result.data).catch(function () {});
+                }
             };
             if (extractPlaylistId(value)) return loadPlaylist(value, wrapped);
             if (/youtube\.com\/(?:@|channel\/|c\/|user\/)/i.test(value)) return loadChannel(value, wrapped);
