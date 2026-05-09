@@ -77,6 +77,22 @@
                 { title: "News", query: "malayalam news today", type: "videos" },
                 { title: "Playlists", query: "malayalam playlists", type: "playlists" }
             ]
+        },
+        youtube_kannada: {
+            name: "Kannada",
+            hl: "kn",
+            gl: "IN",
+            language: "kannada",
+            sections: [
+                { title: "Trending", source: "trending", fallbackQuery: "kannada latest popular videos", type: "videos" },
+                { title: "Latest Videos", query: "latest kannada videos", type: "videos" },
+                { title: "Popular Channels", query: "popular kannada youtube channels", type: "channels" },
+                { title: "Music", query: "latest kannada songs", type: "videos" },
+                { title: "Movies & Trailers", query: "kannada movie trailers", type: "videos" },
+                { title: "Comedy", query: "kannada comedy", type: "videos" },
+                { title: "News", query: "kannada news today", type: "videos" },
+                { title: "Playlists", query: "kannada playlists", type: "playlists" }
+            ]
         }
     };
     var CONFIG_CACHE = null;
@@ -652,6 +668,20 @@
         });
     }
 
+    function compactVideoItem(renderer) {
+        if (!renderer || !renderer.videoId) return null;
+        var title = cleanText(getText(renderer.title));
+        if (!title || /private video|deleted video/i.test(title)) return null;
+        return new MultimediaItem({
+            title: title,
+            url: videoUrl(renderer.videoId),
+            posterUrl: lastThumb(thumbsFrom(renderer)) || undefined,
+            type: "movie",
+            duration: durationMinutes(getText(renderer.lengthText || renderer.thumbnailOverlays)) || undefined,
+            contentRating: cleanText(getText(renderer.shortBylineText || renderer.longBylineText || renderer.ownerText)) || undefined
+        });
+    }
+
     function parseItems(data, wantedProvider) {
         var out = [];
         var seen = {};
@@ -661,6 +691,7 @@
             out.push(item);
         }
         if (!wantedProvider || wantedProvider === "videos") collectRenderers(data, "videoRenderer").forEach(function (r) { add(videoItem(r)); });
+        if (!wantedProvider || wantedProvider === "videos") collectRenderers(data, "compactVideoRenderer").forEach(function (r) { add(compactVideoItem(r)); });
         if (!wantedProvider || wantedProvider === "playlists") collectRenderers(data, "playlistRenderer").forEach(function (r) { add(playlistItem(r)); });
         if (!wantedProvider || wantedProvider === "channels") collectRenderers(data, "channelRenderer").forEach(function (r) { add(channelItem(r)); });
         if (!wantedProvider || wantedProvider === "videos") collectRenderers(data, "lockupViewModel").forEach(function (r) { add(lockupVideoItem(r)); });
@@ -690,11 +721,16 @@
         key = String(key || "");
         try {
             if (typeof get_storage === "function") {
-                var stored = await get_storage({ key: key });
+                var request = {};
+                request[key] = "";
+                var stored = await get_storage(request);
+                if (stored == null || stored === "") stored = await get_storage({ key: key });
                 if (stored == null) return null;
                 if (typeof stored === "string") return stored;
                 if (typeof stored.value !== "undefined") return stored.value;
                 if (typeof stored[key] !== "undefined") return stored[key];
+                var legacyPair = await get_storage({ key: "", value: "" });
+                if (legacyPair && legacyPair.key === key && typeof legacyPair.value !== "undefined") return legacyPair.value;
             }
             if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.getItem === "function") {
                 return localStorage.getItem(key);
@@ -708,7 +744,9 @@
         value = String(value == null ? "" : value);
         try {
             if (typeof set_storage === "function") {
-                await set_storage({ key: key, value: value });
+                var request = {};
+                request[key] = value;
+                await set_storage(request);
                 return;
             }
             if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.setItem === "function") {
@@ -869,6 +907,51 @@
             mixed = parseItems(extractBalancedJson(html, "ytInitialData"), "");
         }
         return mixed;
+    }
+
+    async function relatedItemsFromVideo(url, limit) {
+        var id = extractVideoId(url);
+        if (!id) return [];
+        try {
+            var page = await videoPage(id);
+            return parseItems(page.initialData, "videos").filter(function (item) {
+                return item && extractVideoId(item.url) !== id;
+            }).slice(0, limit || 20);
+        } catch (_) {
+            return [];
+        }
+    }
+
+    async function channelVideoItems(url, limit) {
+        try {
+            var pageUrl = absoluteUrl(url, BASE_URL).replace(/\/$/, "") + "/videos?hl=" + LOCALE.hl + "&gl=" + LOCALE.gl;
+            pageUrl = pageUrl.replace(/\/videos\/videos\?/, "/videos?");
+            var html = await requestText(pageUrl, headers());
+            return parseItems(parseInitialData(html), "videos").slice(0, limit || 20);
+        } catch (_) {
+            return [];
+        }
+    }
+
+    async function relatedItemsFromSearchSeed(query, config, limit) {
+        var seedQuery = normalizeSearchQuery(query);
+        if (!seedQuery) return [];
+        try {
+            var seeds = await searchItemsForProvider(seedQuery);
+            for (var i = 0; i < seeds.length; i++) {
+                if (extractVideoId(seeds[i].url)) {
+                    var related = await relatedItemsFromVideo(seeds[i].url, limit || 20);
+                    if (related.length) return related;
+                }
+                if (/youtube\.com\/(?:@|channel\/|c\/|user\/)/i.test(seeds[i].url)) {
+                    var channelItems = await channelVideoItems(seeds[i].url, limit || 20);
+                    if (channelItems.length) return channelItems;
+                }
+            }
+        } catch (_) {}
+        return searchItemsForProvider(seedQuery + " recommended " + (config && config.language || "")).then(function (items) {
+            return items.slice(0, limit || 20);
+        }).catch(function () { return []; });
     }
 
     async function homeSearch(section, config) {
@@ -1159,28 +1242,26 @@
             }
             var recentOpened = filterHomeItems(storedHomeItems(profile.opened, 12), seen, 12);
             if (recentOpened.length) data["Recently Opened"] = recentOpened;
-            var recentChannels = filterHomeItems(storedHomeItems(profile.channels, 12), seen, 12);
-            if (recentChannels.length) data["More From Your Channels"] = recentChannels;
+            if (profile.channels && profile.channels.length) {
+                var channelItems = await channelVideoItems(profile.channels[0].url, 16);
+                var filteredChannelItems = filterHomeItems(channelItems, seen, 16);
+                if (filteredChannelItems.length) data["More From Your Channels"] = filteredChannelItems;
+            }
+            for (var o = 0; o < Math.min(2, profile.opened.length); o++) {
+                if (!extractVideoId(profile.opened[o].url)) continue;
+                var watchedItems = filterHomeItems(await relatedItemsFromVideo(profile.opened[o].url, 16), seen, 16);
+                if (watchedItems.length) data["Because You Watched: " + profile.opened[o].title] = watchedItems;
+            }
             var searches = await recentSearches(providerId());
             var topics = topTopics(profile, 2);
             var queuedSections = [];
             for (var h = 0; h < searches.length; h++) {
-                queuedSections.push({
-                    title: "Because You Searched: " + searches[h],
-                    query: searches[h],
-                    mixed: true,
-                    personalized: true,
-                    limit: 16
-                });
+                var inspired = filterHomeItems(await relatedItemsFromSearchSeed(searches[h], config, 16), seen, 16);
+                if (inspired.length) data["Inspired By Your Search: " + searches[h]] = inspired;
             }
             for (var t = 0; t < topics.length; t++) {
-                queuedSections.push({
-                    title: "Recommended For You: " + topics[t],
-                    query: topics[t],
-                    mixed: true,
-                    personalized: true,
-                    limit: 16
-                });
+                var recommended = filterHomeItems(await relatedItemsFromSearchSeed(topics[t], config, 16), seen, 16);
+                if (recommended.length) data["Recommended For You: " + topics[t]] = recommended;
             }
             for (var i = 1; i < sections.length; i++) {
                 queuedSections.push(sections[i]);
@@ -1219,9 +1300,9 @@
         try {
             applyLocale(providerConfig());
             var value = String(url || "");
-            var wrapped = function (result) {
+            var wrapped = async function (result) {
                 if (result && result.success && result.data) {
-                    rememberOpenedItem(result.data).catch(function () {});
+                    await rememberOpenedItem(result.data).catch(function () {});
                 }
                 cb(result);
             };
