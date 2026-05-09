@@ -725,26 +725,55 @@
         return null;
     }
 
+    function storageNamespaceKey(key) {
+        var pkg = String(typeof manifest !== "undefined" && manifest && manifest.packageName || "");
+        return pkg ? pkg + ":" + key : key;
+    }
+
+    async function bridgeStorageGet(key) {
+        if (typeof _dartAsyncCall === "function") {
+            var value = await _dartAsyncCall("get_storage", { key: key });
+            if (value == null || value === "") value = await _dartAsyncCall("get_storage", { key: storageNamespaceKey(key) });
+            return value;
+        }
+        if (typeof getPreference === "function") {
+            return getPreference(key);
+        }
+        return null;
+    }
+
+    function bridgeStorageSet(key, value) {
+        var saved = false;
+        if (typeof sendMessage === "function") {
+            sendMessage("set_storage", JSON.stringify({ key: key, value: value }));
+            sendMessage("set_storage", JSON.stringify({ key: storageNamespaceKey(key), value: value }));
+            saved = true;
+        }
+        if (typeof setPreference === "function") {
+            setPreference(key, value);
+            saved = true;
+        }
+        return saved;
+    }
+
     async function storageGet(key) {
         key = String(key || "");
         try {
-            if (typeof getPreference === "function") {
-                var preferred = await getPreference(key);
-                var preferredValue = storedValueFromResponse(preferred, key);
-                if (preferredValue != null) return preferredValue;
-            }
+            var preferred = await bridgeStorageGet(key);
+            var preferredValue = storedValueFromResponse(preferred, key);
+            if (preferredValue != null) return preferredValue;
         } catch (_) {}
         try {
             if (typeof get_storage === "function") {
-                var stored = await get_storage(key);
+                var stored = await get_storage({ key: key });
                 var storedValue = storedValueFromResponse(stored, key);
-                if (storedValue != null) return storedValue;
-                stored = await get_storage({ key: key });
-                storedValue = storedValueFromResponse(stored, key);
                 if (storedValue != null) return storedValue;
                 var request = {};
                 request[key] = "";
                 stored = await get_storage(request);
+                storedValue = storedValueFromResponse(stored, key);
+                if (storedValue != null) return storedValue;
+                stored = await get_storage(key);
                 storedValue = storedValueFromResponse(stored, key);
                 if (storedValue != null) return storedValue;
             }
@@ -762,14 +791,11 @@
         value = String(value == null ? "" : value);
         var saved = false;
         try {
-            if (typeof setPreference === "function") {
-                await setPreference(key, value);
-                saved = true;
-            }
+            saved = bridgeStorageSet(key, value) || saved;
         } catch (_) {}
         try {
             if (typeof set_storage === "function") {
-                await set_storage(key, value);
+                await set_storage({ key: key, value: value });
                 saved = true;
             }
         } catch (_) {}
@@ -1701,7 +1727,7 @@
     }
 
     function compactHlsMediaLines(mediaLines) {
-        var preferredOrder = { hi: 0, en: 1, te: 2, ta: 3, ml: 4 };
+        var preferredOrder = { hi: 0, en: 1, te: 2, ta: 3, ml: 4, kn: 5 };
         var byType = {};
         (mediaLines || []).forEach(function (line) {
             var type = hlsAttribute(line, "TYPE").toUpperCase() || "OTHER";
@@ -1711,6 +1737,7 @@
         var out = [];
         Object.keys(byType).forEach(function (type) {
             var lines = byType[type];
+            if (type === "SUBTITLES") return;
             var preferred = lines.filter(function (line) {
                 return typeof preferredOrder[preferredHlsLang(line)] !== "undefined";
             }).sort(function (a, b) {
@@ -1725,7 +1752,7 @@
                 });
             }
             if (!selected.length) selected = lines.slice(0, type === "AUDIO" ? 5 : 2);
-            selected.slice(0, type === "AUDIO" || type === "SUBTITLES" ? 5 : 2).forEach(function (line) {
+            selected.slice(0, type === "AUDIO" ? 1 : 2).forEach(function (line) {
                 if (out.indexOf(line) === -1) out.push(line);
             });
         });
