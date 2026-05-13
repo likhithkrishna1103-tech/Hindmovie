@@ -24,6 +24,7 @@
     const PLAYZ_PRIMARY_AES_IV = "MTRuTWs4bU41S2w1S0w3bA==";
     const PLAYZ_SUBSTITUTION_FROM = "aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ";
     const PLAYZ_SUBSTITUTION_TO = "fFgGjJkKaApPbBmMoOzZeEnNcCdDrRqQtTvVuUxXhHiIwWyYlLsS";
+    const PLAYZ_SUBSTITUTION_REVERSE = {};
     const PLAYZ_TRUSTED_HOSTS = [
         "a201aivottlinear-a.akamaihd.net",
         "otte.live.cf.ww.aiv-cdn.net",
@@ -45,6 +46,10 @@
 
     let activeBaseUrl = null;
     let remoteBaseUrlsPromise = null;
+
+    for (let index = 0; index < PLAYZ_SUBSTITUTION_TO.length; index++) {
+        PLAYZ_SUBSTITUTION_REVERSE[PLAYZ_SUBSTITUTION_TO[index]] = PLAYZ_SUBSTITUTION_FROM[index];
+    }
 
     function trimToString(value) {
         return typeof value === "string" ? value.trim() : String(value || "").trim();
@@ -95,16 +100,37 @@
     }
 
     function decodePlayzSubstitutionPayload(value) {
-        const reverseMap = {};
-        for (let index = 0; index < PLAYZ_SUBSTITUTION_TO.length; index++) {
-            reverseMap[PLAYZ_SUBSTITUTION_TO[index]] = PLAYZ_SUBSTITUTION_FROM[index];
-        }
-
         let restored = "";
         for (const char of String(value || "")) {
-            restored += reverseMap[char] || char;
+            restored += PLAYZ_SUBSTITUTION_REVERSE[char] || char;
         }
         return base64DecodeText(restored);
+    }
+
+    async function mapWithConcurrency(items, limit, worker) {
+        const source = Array.isArray(items) ? items : [];
+        const results = new Array(source.length);
+        const maxWorkers = Math.max(1, Math.min(parseInt(limit, 10) || 1, source.length || 1));
+        let nextIndex = 0;
+
+        async function runWorker() {
+            while (nextIndex < source.length) {
+                const currentIndex = nextIndex++;
+                try {
+                    results[currentIndex] = await worker(source[currentIndex], currentIndex);
+                } catch (error) {
+                    console.error("Stream entry failed: " + (error && error.message ? error.message : String(error)));
+                    results[currentIndex] = [];
+                }
+            }
+        }
+
+        const workers = [];
+        for (let index = 0; index < maxWorkers; index++) {
+            workers.push(runWorker());
+        }
+        await Promise.all(workers);
+        return results;
     }
 
     function decryptAesCbcWithNode(dataB64, keyB64, ivB64) {
@@ -1210,6 +1236,35 @@
         return parsed;
     }
 
+    async function processStreamEntry(entry, index) {
+        const resolved = await buildResolvedStream(entry);
+        if (!resolved || !resolved.url) return [];
+
+        const rawApi = trimToString(entry && entry.api);
+        const sourceLabel = trimToString(entry && entry.name) || `Server ${index + 1}`;
+        const drmInfo = await resolveStreamDrm(rawApi, resolved, resolved.url, resolved.headers || {});
+        const rankedStreams = [
+            createRankedStream(sourceLabel, resolved, drmInfo, 0, index * 100, false)
+        ];
+
+        const variants = await expandHlsStreams(sourceLabel, resolved, drmInfo);
+        variants.forEach((variant, variantIndex) => {
+            rankedStreams.push(createRankedStream(
+                trimToString(variant && variant.source) || sourceLabel,
+                {
+                    url: trimToString(variant && variant.url),
+                    headers: variant && variant.headers ? variant.headers : (drmInfo.headers || resolved.headers || {})
+                },
+                drmInfo,
+                typeof (variant && variant.quality) === "number" ? variant.quality : 0,
+                (index * 100) + variantIndex + 1,
+                true
+            ));
+        });
+
+        return rankedStreams;
+    }
+
     async function getHome(cb) {
         try {
             const [events, categoryMeta] = await Promise.all([
@@ -1323,32 +1378,8 @@
                 return cb({ success: false, errorCode: "EMPTY_RESULT", message: "No streams found for this event" });
             }
 
-            const rankedStreams = [];
-            for (let index = 0; index < response.length; index++) {
-                const entry = response[index];
-                const resolved = await buildResolvedStream(entry);
-                if (!resolved || !resolved.url) continue;
-
-                const rawApi = trimToString(entry && entry.api);
-                const sourceLabel = trimToString(entry && entry.name) || `Server ${index + 1}`;
-                const drmInfo = await resolveStreamDrm(rawApi, resolved, resolved.url, resolved.headers || {});
-                rankedStreams.push(createRankedStream(sourceLabel, resolved, drmInfo, 0, index * 100, false));
-
-                const variants = await expandHlsStreams(sourceLabel, resolved, drmInfo);
-                variants.forEach((variant, variantIndex) => {
-                    rankedStreams.push(createRankedStream(
-                        trimToString(variant && variant.source) || sourceLabel,
-                        {
-                            url: trimToString(variant && variant.url),
-                            headers: variant && variant.headers ? variant.headers : (drmInfo.headers || resolved.headers || {})
-                        },
-                        drmInfo,
-                        typeof (variant && variant.quality) === "number" ? variant.quality : 0,
-                        (index * 100) + variantIndex + 1,
-                        true
-                    ));
-                });
-            }
+            const rankedStreams = (await mapWithConcurrency(response, 6, processStreamEntry))
+                .reduce((allStreams, entryStreams) => allStreams.concat(entryStreams || []), []);
 
             if (!rankedStreams.length) {
                 return cb({ success: false, errorCode: "EMPTY_RESULT", message: "No playable streams resolved for this event" });
