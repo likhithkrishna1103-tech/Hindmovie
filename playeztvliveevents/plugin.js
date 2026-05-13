@@ -20,6 +20,10 @@
     ];
     const PLAYZ_AES_KEY = "bTVLbDVuazR4SzFrTjdwTg==";
     const PLAYZ_AES_IV = "azVLNG5NOG1LbE5MN2wxNQ==";
+    const PLAYZ_PRIMARY_AES_KEY = "Yi8xam1sNW5rNHg1azdwTg==";
+    const PLAYZ_PRIMARY_AES_IV = "MTRuTWs4bU41S2w1S0w3bA==";
+    const PLAYZ_SUBSTITUTION_FROM = "aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ";
+    const PLAYZ_SUBSTITUTION_TO = "fFgGjJkKaApPbBmMoOzZeEnNcCdDrRqQtTvVuUxXhHiIwWyYlLsS";
     const PLAYZ_TRUSTED_HOSTS = [
         "a201aivottlinear-a.akamaihd.net",
         "otte.live.cf.ww.aiv-cdn.net",
@@ -76,6 +80,51 @@
             return JSON.parse(String(text || ""));
         } catch (_) {
             return null;
+        }
+    }
+
+    function base64DecodeText(value) {
+        const normalized = String(value || "");
+        if (typeof atob === "function") {
+            return atob(normalized);
+        }
+        if (typeof Buffer !== "undefined") {
+            return Buffer.from(normalized, "base64").toString("utf8");
+        }
+        return "";
+    }
+
+    function decodePlayzSubstitutionPayload(value) {
+        const reverseMap = {};
+        for (let index = 0; index < PLAYZ_SUBSTITUTION_TO.length; index++) {
+            reverseMap[PLAYZ_SUBSTITUTION_TO[index]] = PLAYZ_SUBSTITUTION_FROM[index];
+        }
+
+        let restored = "";
+        for (const char of String(value || "")) {
+            restored += reverseMap[char] || char;
+        }
+        return base64DecodeText(restored);
+    }
+
+    function decryptAesCbcWithNode(dataB64, keyB64, ivB64) {
+        if (typeof Buffer === "undefined" || typeof __crypto__ === "undefined" || !__crypto__.createDecipheriv) {
+            return "";
+        }
+
+        const key = Buffer.from(keyB64, "base64");
+        const iv = Buffer.from(ivB64, "base64");
+        const data = Buffer.from(dataB64, "base64");
+        const algorithm = key.length <= 16 ? "aes-128-cbc" : (key.length <= 24 ? "aes-192-cbc" : "aes-256-cbc");
+        const decipher = __crypto__.createDecipheriv(algorithm, key, iv);
+        return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
+    }
+
+    async function decryptAesCbc(dataB64, keyB64, ivB64) {
+        try {
+            return await crypto.decryptAES(dataB64, keyB64, ivB64);
+        } catch (_) {
+            return decryptAesCbcWithNode(dataB64, keyB64, ivB64);
         }
     }
 
@@ -231,8 +280,18 @@
         const raw = trimToString(body);
         if (!raw) return "";
         if (raw.startsWith("{") || raw.startsWith("[") || raw.startsWith("<")) return raw;
+
         try {
-            const decrypted = await crypto.decryptAES(raw.replace(/\s/g, ""), PLAYZ_AES_KEY, PLAYZ_AES_IV);
+            const primaryPayload = decodePlayzSubstitutionPayload(raw.replace(/\s/g, ""));
+            const decrypted = await decryptAesCbc(primaryPayload, PLAYZ_PRIMARY_AES_KEY, PLAYZ_PRIMARY_AES_IV);
+            const normalized = trimToString(decrypted);
+            if (normalized) return normalized;
+        } catch (_) {
+            // Fall back to the older PlayZTV payload format below.
+        }
+
+        try {
+            const decrypted = await decryptAesCbc(raw.replace(/\s/g, ""), PLAYZ_AES_KEY, PLAYZ_AES_IV);
             return trimToString(decrypted);
         } catch (_) {
             return "";
