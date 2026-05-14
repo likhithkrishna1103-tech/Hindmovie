@@ -4,6 +4,6 @@
   "description": "One stopfor all plugins ",
   "manifestVersion": 2,
   "pluginLists": [
-    "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/plugins.json"
+    "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/plugins.json"
   ]
 }
