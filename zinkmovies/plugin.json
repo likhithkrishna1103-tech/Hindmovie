@@ -1,0 +1,25 @@
+{
+  "packageName": "com.igris.repo.zinkmovies",
+  "name": "Zinkmovies",
+  "version": 1,
+  "baseUrl": "https://new7.zinkmovies.biz",
+  "description": "Zinkmovies movies, series, anime, and KDrama with HubCloud mirror resolution.",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "hi",
+    "en",
+    "ta",
+    "te",
+    "ml",
+    "kn",
+    "ko",
+    "ja"
+  ],
+  "categories": [
+    "Movies",
+    "Series",
+    "Anime"
+  ]
+}
