@@ -22,6 +22,7 @@
     const PLAYZ_AES_IV = "azVLNG5NOG1LbE5MN2wxNQ==";
     const PLAYZ_PRIMARY_AES_KEY = "Yi8xam1sNW5rNHg1azdwTg==";
     const PLAYZ_PRIMARY_AES_IV = "MTRuTWs4bU41S2w1S0w3bA==";
+    const AES_JS_URL = "https://cdnjs.cloudflare.com/ajax/libs/aes-js/3.1.2/index.min.js";
     const PLAYZ_SUBSTITUTION_FROM = "aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ";
     const PLAYZ_SUBSTITUTION_TO = "fFgGjJkKaApPbBmMoOzZeEnNcCdDrRqQtTvVuUxXhHiIwWyYlLsS";
     const PLAYZ_SUBSTITUTION_REVERSE = {};
@@ -46,6 +47,7 @@
 
     let activeBaseUrl = null;
     let remoteBaseUrlsPromise = null;
+    let aesJsPromise = null;
 
     for (let index = 0; index < PLAYZ_SUBSTITUTION_TO.length; index++) {
         PLAYZ_SUBSTITUTION_REVERSE[PLAYZ_SUBSTITUTION_TO[index]] = PLAYZ_SUBSTITUTION_FROM[index];
@@ -99,6 +101,46 @@
         return "";
     }
 
+    function base64DecodeBytes(value) {
+        let normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+        while (normalized.length % 4) normalized += "=";
+        try {
+            if (typeof Buffer !== "undefined") return new Uint8Array(Buffer.from(normalized, "base64"));
+        } catch (_) {}
+        const decoded = typeof atob === "function" ? atob(normalized) : "";
+        const bytes = new Uint8Array(decoded.length);
+        for (let index = 0; index < decoded.length; index++) {
+            bytes[index] = decoded.charCodeAt(index) & 255;
+        }
+        return bytes;
+    }
+
+    function bytesToUtf8(bytes) {
+        if (!bytes || !bytes.length) return "";
+        if (typeof TextDecoder !== "undefined") {
+            return new TextDecoder().decode(bytes);
+        }
+        let out = "";
+        for (let index = 0; index < bytes.length; index++) {
+            out += String.fromCharCode(bytes[index]);
+        }
+        try {
+            return decodeURIComponent(escape(out));
+        } catch (_) {
+            return out;
+        }
+    }
+
+    function stripPkcs7(bytes) {
+        if (!bytes || !bytes.length) return bytes || new Uint8Array(0);
+        const pad = bytes[bytes.length - 1];
+        if (!pad || pad > 16 || pad > bytes.length) return bytes;
+        for (let index = bytes.length - pad; index < bytes.length; index++) {
+            if (bytes[index] !== pad) return bytes;
+        }
+        return bytes.slice(0, bytes.length - pad);
+    }
+
     function decodePlayzSubstitutionPayload(value) {
         let restored = "";
         for (const char of String(value || "")) {
@@ -146,12 +188,71 @@
         return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
     }
 
+    async function getAesJs() {
+        if (globalThis.aesjs) return globalThis.aesjs;
+        if (!aesJsPromise) {
+            aesJsPromise = (async () => {
+                const response = await fetchText(AES_JS_URL, {
+                    "User-Agent": "Mozilla/5.0",
+                    "Referer": "https://adsflw.xyz/"
+                });
+                const source = extractResponseBody(response);
+                if (!trimToString(source)) throw new Error("Failed to load AES runtime");
+                Function(String(source || ""))();
+                if (!globalThis.aesjs) throw new Error("AES runtime unavailable");
+                return globalThis.aesjs;
+            })();
+        }
+        return aesJsPromise;
+    }
+
+    async function decryptAesCbcWithWebCrypto(dataB64, keyB64, ivB64) {
+        if (!globalThis.crypto || !globalThis.crypto.subtle || typeof globalThis.crypto.subtle.importKey !== "function") {
+            return "";
+        }
+        const keyBytes = base64DecodeBytes(keyB64);
+        const ivBytes = base64DecodeBytes(ivB64);
+        const dataBytes = base64DecodeBytes(dataB64);
+        const imported = await globalThis.crypto.subtle.importKey("raw", keyBytes, { name: "AES-CBC" }, false, ["decrypt"]);
+        const plain = new Uint8Array(await globalThis.crypto.subtle.decrypt({ name: "AES-CBC", iv: ivBytes }, imported, dataBytes));
+        return trimToString(bytesToUtf8(stripPkcs7(plain)));
+    }
+
+    async function decryptAesCbcWithAesJs(dataB64, keyB64, ivB64) {
+        const aesjs = await getAesJs();
+        const keyBytes = base64DecodeBytes(keyB64);
+        const ivBytes = base64DecodeBytes(ivB64);
+        const dataBytes = base64DecodeBytes(dataB64);
+        const cipher = new aesjs.ModeOfOperation.cbc(keyBytes, ivBytes);
+        return trimToString(bytesToUtf8(stripPkcs7(cipher.decrypt(dataBytes))));
+    }
+
     async function decryptAesCbc(dataB64, keyB64, ivB64) {
         try {
-            return await crypto.decryptAES(dataB64, keyB64, ivB64);
+            if (globalThis.crypto && typeof globalThis.crypto.decryptAES === "function") {
+                const decrypted = await globalThis.crypto.decryptAES(dataB64, keyB64, ivB64);
+                if (trimToString(decrypted)) return trimToString(decrypted);
+            }
         } catch (_) {
-            return decryptAesCbcWithNode(dataB64, keyB64, ivB64);
+            // Continue through the runtime fallbacks below.
         }
+
+        try {
+            const decrypted = await decryptAesCbcWithWebCrypto(dataB64, keyB64, ivB64);
+            if (trimToString(decrypted)) return decrypted;
+        } catch (_) {}
+
+        try {
+            const decrypted = decryptAesCbcWithNode(dataB64, keyB64, ivB64);
+            if (trimToString(decrypted)) return trimToString(decrypted);
+        } catch (_) {}
+
+        try {
+            const decrypted = await decryptAesCbcWithAesJs(dataB64, keyB64, ivB64);
+            if (trimToString(decrypted)) return decrypted;
+        } catch (_) {}
+
+        return "";
     }
 
     async function postJson(url, payload, headers) {

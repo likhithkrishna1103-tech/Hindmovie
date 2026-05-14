@@ -326,7 +326,7 @@
   {
     "packageName": "com.igris.repo.playeztvliveevents",
     "name": "PlayEZTV Live Events",
-    "version": 6,
+    "version": 7,
     "baseUrl": "https://adsflw.xyz",
     "description": "Live sports from the PlayEZTV feed.",
     "authors": [
@@ -516,7 +516,7 @@
   {
     "packageName": "com.igris.repo.zinkmovies",
     "name": "Zinkmovies",
-    "version": 1,
+    "version": 2,
     "baseUrl": "https://new7.zinkmovies.biz",
     "description": "Zinkmovies movies, series, anime, and KDrama with HubCloud mirror resolution.",
     "authors": [

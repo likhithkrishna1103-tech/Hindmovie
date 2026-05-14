@@ -22,6 +22,8 @@
     ];
 
     let cachedDomains = null;
+    const pageCache = Object.create(null);
+    const zinkLinkCache = Object.create(null);
 
     function cleanBase(url) {
         return String(url || "").replace(/\/+$/, "");
@@ -84,6 +86,22 @@
         return decodeHtml(String(html || "").replace(/<[^>]+>/g, " "));
     }
 
+    function cleanBrokenText(value) {
+        return decodeHtml(String(value || "")
+            .replace(/<img\b[\s\S]*?alt=["']([^"']+)["'][\s\S]*?>/ig, "$1")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s*\/\s*/g, "/")
+            .replace(/https?:\/\s+/ig, function (m) { return m.replace(/\s+/g, ""); })
+            .replace(/\s+/g, " ")
+            .trim());
+    }
+
+    function attrFromHtml(block, name) {
+        const re = new RegExp("\\s" + name + "\\s*=\\s*([\"'])([\\s\\S]*?)\\1", "i");
+        const match = String(block || "").match(re);
+        return match ? decodeHtml(match[2]) : "";
+    }
+
     function firstMatch(value, patterns) {
         for (let i = 0; i < patterns.length; i++) {
             const match = String(value || "").match(patterns[i]);
@@ -130,8 +148,57 @@
         return String(res && res.body || "");
     }
 
-    async function getDocument(url, headers) {
+    function cacheKey(url, headers) {
+        return String(url || "") + "|" + JSON.stringify(headers || {});
+    }
+
+    async function getTextCached(url, headers) {
+        const key = cacheKey(url, headers);
+        if (Object.prototype.hasOwnProperty.call(pageCache, key)) return pageCache[key];
         const html = await getText(url, headers, true);
+        pageCache[key] = html;
+        return html;
+    }
+
+    async function parallelGetText(requests, limit) {
+        const items = Array.isArray(requests) ? requests.filter(function (item) { return item && item.url; }) : [];
+        if (!items.length) return [];
+
+        const uncached = [];
+        const out = new Array(items.length);
+        items.forEach(function (item, index) {
+            const key = cacheKey(item.url, item.headers);
+            if (Object.prototype.hasOwnProperty.call(pageCache, key)) {
+                out[index] = pageCache[key];
+            } else {
+                uncached.push({ item: item, index: index, key: key });
+            }
+        });
+
+        if (uncached.length && typeof http_parallel === "function") {
+            try {
+                const responses = await http_parallel(uncached.map(function (row) {
+                    return { method: "GET", url: row.item.url, headers: mergeHeaders(row.item.headers || {}) };
+                }));
+                uncached.forEach(function (row, i) {
+                    const body = String(responses && responses[i] && responses[i].body || "");
+                    pageCache[row.key] = body;
+                    out[row.index] = body;
+                });
+                return out;
+            } catch (_) {}
+        }
+
+        await mapConcurrent(uncached, limit || 6, async function (row) {
+            const body = await getText(row.item.url, row.item.headers || {}, true).catch(function () { return ""; });
+            pageCache[row.key] = body;
+            out[row.index] = body;
+        });
+        return out;
+    }
+
+    async function getDocument(url, headers) {
+        const html = await getTextCached(url, headers);
         return { html: html, document: await parseHtml(stripScripts(html)) };
     }
 
@@ -170,7 +237,7 @@
     }
 
     function cleanTitle(raw) {
-        const source = String(raw || "");
+        const source = cleanBrokenText(raw);
         let name = source.split("(")[0].trim().replace(/\s+/g, " ");
         if (name) name = name.charAt(0).toUpperCase() + name.slice(1);
         const season = (source.match(/Season\s*\d+/i) || [])[0];
@@ -179,6 +246,12 @@
         if (season) suffix += " (" + season.charAt(0).toUpperCase() + season.slice(1) + ")";
         if (year) suffix += " (" + year + ")";
         return (name || source.trim()) + suffix;
+    }
+
+    function usableTitle(value) {
+        const cleaned = cleanTitle(value);
+        if (!cleaned || /<\s*img|src\s*=|data-lazy-src/i.test(cleaned)) return "";
+        return cleaned;
     }
 
     function qualityFromText(value) {
@@ -202,9 +275,10 @@
     }
 
     function parseCard(article, base) {
-        const anchor = qs(article, "h3 a") || qs(article, ".title a") || qs(article, "a[href]");
+        const anchor = qs(article, "h3 a") || qs(article, ".title a");
         const href = absoluteUrl(base, attrOf(anchor, "href"));
-        const title = cleanTitle(textOf(anchor));
+        let title = usableTitle(textOf(anchor));
+        if (!title) title = usableTitle(attrOf(qs(article, "img"), "alt"));
         if (!href || !title) return null;
         return new MultimediaItem({
             title: title,
@@ -228,11 +302,12 @@
                 /<div\b[^>]*class=["'][^"']*title[^"']*["'][^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i,
                 /<a\b[^>]*href=["']([^"']+)["'][^>]*>/i
             ]));
-            const title = cleanTitle(stripTags(firstMatch(block, [
+            let title = usableTitle(stripTags(firstMatch(block, [
                 /<h3\b[^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i,
                 /<div\b[^>]*class=["'][^"']*title[^"']*["'][^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i,
                 /<img\b[^>]*alt=["']([^"']+)["']/i
             ])));
+            if (!title) title = usableTitle(attrFromHtml(firstMatch(block, [/<img\b([\s\S]*?)>/i]), "alt"));
             if (!href || !title) continue;
             const poster = absoluteUrl(base, firstMatch(block, [
                 /<img\b[^>]*data-lazy-src=["']([^"']+)["']/i,
@@ -366,17 +441,27 @@
     async function getHome(cb) {
         try {
             const mainUrl = await getMainUrl();
-            const entries = await mapConcurrent(HOME_SECTIONS, 4, async function (section) {
-                const url = mainUrl + "/" + section.path + "page/1/";
-                const page = await getDocument(url, { Referer: mainUrl + "/" });
-                let items = qsa(page.document, "article")
-                    .filter(function (node) {
-                        return !(node.closest && (node.closest(".animation-1") || node.closest(".items.featured")));
-                    })
-                    .map(function (article) { return parseCard(article, mainUrl); })
-                    .filter(Boolean);
-                if (!items.length) items = parseCardsFromHtml(page.html, mainUrl);
-                return { title: section.title, items: items };
+            const requests = HOME_SECTIONS.map(function (section) {
+                return {
+                    section: section,
+                    url: mainUrl + "/" + section.path + "page/1/",
+                    headers: { Referer: mainUrl + "/" }
+                };
+            });
+            const bodies = await parallelGetText(requests, 8);
+            const entries = await mapConcurrent(requests, 8, async function (request, index) {
+                const html = bodies[index] || "";
+                let items = parseCardsFromHtml(html, mainUrl);
+                if (!items.length) {
+                    const doc = await parseHtml(stripScripts(html));
+                    items = qsa(doc, "article")
+                        .filter(function (node) {
+                            return !(node.closest && (node.closest(".animation-1") || node.closest(".items.featured")));
+                        })
+                        .map(function (article) { return parseCard(article, mainUrl); })
+                        .filter(Boolean);
+                }
+                return { title: request.section.title, items: items };
             });
             const data = {};
             entries.forEach(function (entry) {
@@ -391,9 +476,12 @@
     async function search(query, cb) {
         try {
             const mainUrl = await getMainUrl();
-            const page = await getDocument(mainUrl + "/page/1/?s=" + encodeURIComponent(String(query || "")), { Referer: mainUrl + "/" });
-            let items = qsa(page.document, "article").map(function (article) { return parseCard(article, mainUrl); }).filter(Boolean);
-            if (!items.length) items = parseCardsFromHtml(page.html, mainUrl);
+            const html = await getTextCached(mainUrl + "/page/1/?s=" + encodeURIComponent(String(query || "")), { Referer: mainUrl + "/" });
+            let items = parseCardsFromHtml(html, mainUrl);
+            if (!items.length) {
+                const doc = await parseHtml(stripScripts(html));
+                items = qsa(doc, "article").map(function (article) { return parseCard(article, mainUrl); }).filter(Boolean);
+            }
             cb({ success: true, data: items });
         } catch (error) {
             cb({ success: false, errorCode: "SEARCH_ERROR", message: String(error && error.message || error) });
@@ -425,11 +513,12 @@
 
     function parseRecommendations(doc, base) {
         return qsa(doc, "#single_relacionados article").map(function (article) {
-            const anchor = qs(article, "a[href]");
+            const anchor = qs(article, "h3 a") || qs(article, ".title a") || qs(article, "a[href]");
             const href = absoluteUrl(base, attrOf(anchor, "href"));
-            if (!href) return null;
+            const title = usableTitle(textOf(anchor)) || usableTitle(attrOf(qs(article, "img"), "alt"));
+            if (!href || !title) return null;
             return new MultimediaItem({
-                title: textOf(qs(article, "h3 a")) || "",
+                title: title,
                 url: href,
                 posterUrl: posterFrom(article, base),
                 type: itemTypeFromUrl(href)
@@ -569,14 +658,33 @@
         }).join("&");
     }
 
+    function parseAnchorsFromHtml(html, base, selectorHint) {
+        const out = [];
+        const text = String(html || "");
+        const regex = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+        let match;
+        while ((match = regex.exec(text))) {
+            const attrs = match[1] || "";
+            const body = match[2] || "";
+            if (selectorHint === "btn" && !/\bclass\s*=\s*["'][^"']*\bbtn\b/i.test(attrs)) continue;
+            const href = absoluteUrl(base, attrFromHtml(attrs, "href"));
+            if (!href) continue;
+            out.push({ href: href, text: cleanBrokenText(body), attrs: attrs, html: match[0] });
+        }
+        return out;
+    }
+
     async function generateZinkLinks(url) {
+        if (Object.prototype.hasOwnProperty.call(zinkLinkCache, url)) return zinkLinkCache[url];
         try {
-            const page = await getDocument(url, { Referer: originOf(url) + "/" });
-            const html = page.html;
+            const html = await getTextCached(url, { Referer: originOf(url) + "/" });
             const randomId = (html.match(/generateDownloadLink\(['"]([^'"]+)/i) || [])[1];
             const ajaxEndpoint = (html.match(/https:\/\/[^"'\\\s]+ajax_generate_token\.php/i) || [])[0];
             const downloadBase = (html.match(/https:\/\/[^"'\\\s]+\/dl\//i) || [])[0];
-            if (!randomId || !ajaxEndpoint || !downloadBase) return [];
+            if (!randomId || !ajaxEndpoint || !downloadBase) {
+                zinkLinkCache[url] = [];
+                return [];
+            }
             const token = await retry(3, 1000, async function () {
                 const json = safeJson(await postText(
                     ajaxEndpoint + "?random_id=" + encodeURIComponent(randomId),
@@ -589,17 +697,22 @@
                 ), {});
                 return json && json.token;
             });
-            if (!token) return [];
+            if (!token) {
+                zinkLinkCache[url] = [];
+                return [];
+            }
             const generatedUrl = downloadBase + token;
-            const generated = await getDocument(generatedUrl, { Referer: url });
-            const links = qsa(generated.document, "#mirror-buttons a[href]").map(function (a) {
-                const href = absoluteUrl(generatedUrl, attrOf(a, "href"));
-                const name = textOf(a).replace(/generate/ig, "").trim() || hostOf(href);
-                return href ? { name: name, url: href } : null;
-            }).filter(Boolean);
-            const workerBtn = qs(generated.document, "#worker-btn");
-            const workerId = (attrOf(workerBtn, "onclick").match(/handleServerRequest\(['"]worker['"]\s*,\s*['"]([^'"]+)/i) || [])[1];
-            const serverHandler = (generated.html.match(/SERVER_HANDLER_URL\s*=\s*["']([^"']+)/i) || [])[1];
+            const generatedHtml = await getTextCached(generatedUrl, { Referer: url });
+            const mirrorBlock = firstMatch(generatedHtml, [/<[^>]*id=["']mirror-buttons["'][^>]*>([\s\S]*?)(?:<\/div>|<[^>]*id=["']worker-btn["'])/i]) || generatedHtml;
+            const links = parseAnchorsFromHtml(mirrorBlock, generatedUrl).map(function (a) {
+                return {
+                    name: a.text.replace(/generate/ig, "").trim() || hostOf(a.href),
+                    url: a.href
+                };
+            });
+            const workerButtonHtml = (generatedHtml.match(/<[^>]*id=["']worker-btn["'][^>]*>/i) || [""])[0];
+            const workerId = (workerButtonHtml.match(/handleServerRequest\(['"]worker['"]\s*,\s*['"]([^'"]+)/i) || [])[1];
+            const serverHandler = (generatedHtml.match(/SERVER_HANDLER_URL\s*=\s*["']([^"']+)/i) || [])[1];
             if (workerId && serverHandler) {
                 try {
                     const workerJson = safeJson(await postText(
@@ -616,8 +729,10 @@
                     if (workerUrl) links.push({ name: "WORKER", url: workerUrl });
                 } catch (_) {}
             }
-            return dedupeBy(links, function (item) { return item.url; });
+            zinkLinkCache[url] = dedupeBy(links, function (item) { return item.url; });
+            return zinkLinkCache[url];
         } catch (_) {
+            zinkLinkCache[url] = [];
             return [];
         }
     }
@@ -659,23 +774,24 @@
         const base = originOf(realUrl) || await getHubCloudUrl();
         let href = realUrl;
         if (!/hubcloud\.php/i.test(realUrl)) {
-            const page = await getDocument(realUrl, { Referer: base + "/" }).catch(function () { return null; });
-            const raw = page && attrOf(qs(page.document, "#download"), "href");
+            const html = await getTextCached(realUrl, { Referer: base + "/" }).catch(function () { return ""; });
+            const downloadTag = (html.match(/<a\b[^>]*id=["']download["'][^>]*>/i) || [""])[0];
+            const raw = attrFromHtml(downloadTag, "href");
             href = absoluteUrl(base, raw);
         }
         if (!href) return [];
-        const page = await getDocument(href, { Referer: realUrl }).catch(function () { return null; });
-        if (!page) return [];
-        const size = textOf(qs(page.document, "i#size"));
-        const header = textOf(qs(page.document, "div.card-header"));
+        const html = await getTextCached(href, { Referer: realUrl }).catch(function () { return ""; });
+        if (!html) return [];
+        const size = cleanBrokenText(firstMatch(html, [/<i\b[^>]*id=["']size["'][^>]*>([\s\S]*?)<\/i>/i]));
+        const header = cleanBrokenText(firstMatch(html, [/<div\b[^>]*class=["'][^"']*card-header[^"']*["'][^>]*>([\s\S]*?)<\/div>/i]));
         const details = cleanReleaseTags(header);
         const quality = qualityFromText(header) || 2160;
         const extras = (details ? "[" + details + "]" : "") + (size ? "[" + size + "]" : "");
         const out = [];
-        const buttons = qsa(page.document, "a.btn[href]");
+        const buttons = parseAnchorsFromHtml(html, href, "btn");
         for (let i = 0; i < buttons.length; i++) {
-            const link = absoluteUrl(href, attrOf(buttons[i], "href"));
-            const label = textOf(buttons[i]).toLowerCase();
+            const link = buttons[i].href;
+            const label = String(buttons[i].text || "").toLowerCase();
             const ref = refererLabel || "HubCloud";
             if (!link) continue;
             if (/fsl server/i.test(label)) out.push(streamResult(link, ref + " [FSL Server] " + extras, {}, quality));
@@ -696,8 +812,9 @@
     }
 
     async function resolveHubDrive(url) {
-        const page = await getDocument(url, { Referer: originOf(url) + "/" }).catch(function () { return null; });
-        const href = page && absoluteUrl(url, attrOf(qs(page.document, ".btn.btn-primary.btn-user.btn-success1.m-1"), "href"));
+        const html = await getTextCached(url, { Referer: originOf(url) + "/" }).catch(function () { return ""; });
+        const button = (html.match(/<a\b[^>]*class=["'][^"']*btn-primary[^"']*btn-user[^"']*btn-success1[^"']*["'][^>]*>/i) || [""])[0];
+        const href = absoluteUrl(url, attrFromHtml(button, "href"));
         if (!href) return [streamResult(url, "Hubdrive", { Referer: originOf(url) + "/" }, qualityFromText(url))];
         if (/hubcloud/i.test(href)) return resolveHubCloud(href, "HubDrive");
         const extracted = await resolveWithBuiltin(href, "HubDrive", url);
@@ -705,8 +822,7 @@
     }
 
     async function resolveHubCdn(url) {
-        const page = await getDocument(url, { Referer: originOf(url) + "/" }).catch(function () { return null; });
-        const script = page && textOf(qs(page.document, "script")) + "\n" + page.html || "";
+        const script = await getTextCached(url, { Referer: originOf(url) + "/" }).catch(function () { return ""; });
         const encoded = ((script.match(/reurl\s*=\s*"([^"]+)"/i) || [])[1] || "").split("?r=").pop();
         if (!encoded) return [];
         let decoded = "";
@@ -749,10 +865,10 @@
             const parsed = parsePayload(data);
             const links = dedupeBy((parsed.links || []).map(String).filter(Boolean), function (item) { return item; });
             if (!links.length) return cb({ success: true, data: [] });
-            const batches = await mapConcurrent(links, 4, async function (pageUrl) {
+            const batches = await mapConcurrent(links, 6, async function (pageUrl) {
                 const zinks = await generateZinkLinks(pageUrl);
                 if (!zinks.length) return resolveFinalLink(pageUrl, "Zinkmovies", parsed.sourceUrl || "");
-                const resolved = await mapConcurrent(zinks, 4, async function (link) {
+                const resolved = await mapConcurrent(zinks, 6, async function (link) {
                     if (/worker/i.test(link.name)) {
                         return [streamResult(link.url, "Zink Worker", {}, qualityFromText(link.url))];
                     }
