@@ -9,7 +9,7 @@
 
     const MAIN_URL = "https://animetsu.net";
     const API_BASE = MAIN_URL + "/v2/api/anime";
-    const PROXY_BASE = "https://mega-cloud.top/proxy";
+    const PROXY_BASE = "https://swiftstream.top/proxy";
     const NEXT_AIRING_CACHE = {};
 
     const HEADERS = {
