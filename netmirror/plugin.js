@@ -7,7 +7,10 @@
     var USER_AGENT = "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.132 Safari/537.36 /OS.Gatu v3.0";
     var NEWTV_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0 /OS.GatuNewTV v1.0";
     var HOME_TITLE_CONCURRENCY = 48;
-    var HOME_CACHE_TTL_MS = 180000;
+    var HOME_TITLE_HYDRATE_LIMIT = 12;
+    var HOME_CACHE_TTL_MS = 600000;
+    var LOAD_CACHE_TTL_MS = 300000;
+    var EPISODE_PAGE_CONCURRENCY = 24;
 
     var PROVIDERS = {
         netflix: {
@@ -129,6 +132,7 @@
     var resolvedApiUrl = "";
     var titleCache = {};
     var homeCache = {};
+    var loadCache = {};
     var LANGUAGE_NAMES = {
         ar: "Arabic", ara: "Arabic",
         bn: "Bengali", ben: "Bengali",
@@ -432,11 +436,23 @@
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
         };
         var body = "g-recaptcha-response=" + encodeURIComponent(randomUuid());
-        var candidates = await requestPostFormCandidates(MAIN_URL + "/verify.php", body, headers);
         var cookie = "";
-        for (var i = 0; i < candidates.length; i++) {
-            cookie = extractCookie(candidates[i].headers, "t_hash_t");
-            if (cookie) break;
+        if (typeof http_post === "function") {
+            try {
+                cookie = extractCookie(normalizeResponse(await http_post(MAIN_URL + "/verify.php", headers, body), MAIN_URL + "/verify.php").headers, "t_hash_t");
+            } catch (_) {}
+            if (!cookie) {
+                try {
+                    cookie = extractCookie(normalizeResponse(await http_post(MAIN_URL + "/verify.php", body, headers), MAIN_URL + "/verify.php").headers, "t_hash_t");
+                } catch (_) {}
+            }
+        }
+        if (!cookie) {
+            var candidates = await requestPostFormCandidates(MAIN_URL + "/verify.php", body, headers);
+            for (var i = 0; i < candidates.length; i++) {
+                cookie = extractCookie(candidates[i].headers, "t_hash_t");
+                if (cookie) break;
+            }
         }
         if (!cookie) throw new Error("CNCVerse bypass failed: missing t_hash_t cookie");
         cookieCache = { value: cookie, time: Date.now() };
@@ -875,6 +891,33 @@
         return buildItem(config, row.id, row.t, "series", config.poster(row.id));
     }
 
+    function stripTags(value) {
+        return decodeHtml(String(value || "").replace(/<[^>]*>/g, " "));
+    }
+
+    function parseHomeSectionsFast(config, html) {
+        var text = String(html || "");
+        var sections = {};
+        var chunks = text.split(/<div[^>]+class=["']tray-container["'][^>]*>/i);
+        for (var chunkIndex = 1; chunkIndex < chunks.length; chunkIndex++) {
+            var block = chunks[chunkIndex] || "";
+            var titleMatch = block.match(/<h2[^>]*class=["'][^"']*\btray-title\b[^"']*["'][^>]*>([\s\S]*?)<\/h2>/i);
+            var title = stripTags(titleMatch && titleMatch[1]) || "Home";
+            var seen = {};
+            var items = [];
+            var idMatch;
+            var idRe = /data-post=["']([^"']+)["']/gi;
+            while ((idMatch = idRe.exec(block)) !== null) {
+                var id = String(idMatch[1] || "").trim();
+                if (!id || seen[id]) continue;
+                seen[id] = true;
+                items.push(buildItem(config, id, "", "series", config.poster(id)));
+            }
+            if (items.length) sections[title] = items;
+        }
+        return sections;
+    }
+
     function buildActor(name) {
         return new Actor({ name: trim(name) });
     }
@@ -902,6 +945,42 @@
             });
             if (Number(json.nextPageShow || 0) === 0) break;
             pg++;
+        }
+        return episodes;
+    }
+
+    function episodePageRequest(config, token, seriesId, seasonId, page) {
+        return {
+            seasonId: seasonId,
+            page: page || 1,
+            url: MAIN_URL + "/mobile" + config.prefix + "/episodes.php?s=" + encodeURIComponent(seasonId) + "&series=" + encodeURIComponent(seriesId) + "&t=" + unixTime() + "&page=" + (page || 1),
+            headers: pageHeaders(config, token, MAIN_URL + "/home")
+        };
+    }
+
+    async function fetchEpisodePagesFast(config, token, title, seriesId, tasks) {
+        var episodes = [];
+        var pending = (tasks || []).filter(function (task) { return task && task.seasonId; });
+        var seen = {};
+        while (pending.length) {
+            var batch = pending.splice(0, EPISODE_PAGE_CONCURRENCY);
+            var requests = batch.map(function (task) {
+                var key = String(task.seasonId) + ":" + String(task.page || 1);
+                seen[key] = true;
+                return episodePageRequest(config, token, seriesId, task.seasonId, task.page || 1);
+            });
+            var responses = await httpParallelGet(requests, EPISODE_PAGE_CONCURRENCY);
+            requests.forEach(function (req, index) {
+                var json = parseJsonSafe(responses[index] && responses[index].body, {});
+                (json.episodes || []).forEach(function (row) {
+                    if (row && row.id) episodes.push(buildEpisode(config, title, row));
+                });
+                if (Number(json.nextPageShow || 0) !== 0) {
+                    var nextTask = { seasonId: req.seasonId, page: (req.page || 1) + 1 };
+                    var nextKey = String(nextTask.seasonId) + ":" + String(nextTask.page);
+                    if (!seen[nextKey]) pending.push(nextTask);
+                }
+            });
         }
         return episodes;
     }
@@ -949,6 +1028,10 @@
                 headers: pageHeaders(config, token, MAIN_URL + "/home")
             });
         });
+        if (HOME_TITLE_HYDRATE_LIMIT <= 0) return;
+        if (requests.length > HOME_TITLE_HYDRATE_LIMIT) {
+            requests = requests.slice(0, HOME_TITLE_HYDRATE_LIMIT);
+        }
         var responses = await httpParallelGet(requests, HOME_TITLE_CONCURRENCY);
         requests.forEach(function (req, index) {
             var json = parseJsonSafe(responses[index] && responses[index].body, {});
@@ -1005,15 +1088,17 @@
             var token = await bypass();
             var url = MAIN_URL + "/mobile/home?app=1";
             var res = await requestGet(url, pageHeaders(config, token, url));
-            var doc = await parseDocument(res.body);
-            var sections = {};
-            qsa(doc, ".tray-container, #top10").forEach(function (section) {
-                var title = nodeText(qs(section, "h2, span")) || "Home";
-                var items = qsa(section, "article, .top10-post").map(function (node) {
-                    return mapHomeCard(config, node);
-                }).filter(Boolean);
-                if (items.length) sections[title] = items;
-            });
+            var sections = parseHomeSectionsFast(config, res.body);
+            if (!Object.keys(sections).length) {
+                var doc = await parseDocument(res.body);
+                qsa(doc, ".tray-container, #top10").forEach(function (section) {
+                    var title = nodeText(qs(section, "h2, span")) || "Home";
+                    var items = qsa(section, "article, .top10-post").map(function (node) {
+                        return mapHomeCard(config, node);
+                    }).filter(Boolean);
+                    if (items.length) sections[title] = items;
+                });
+            }
             await hydrateHomeTitles(config, token, sections);
             homeCache[config.id] = { time: Date.now(), data: sections };
             cb({ success: true, data: sections });
@@ -1044,6 +1129,11 @@
             var input = parsePayload(url);
             var config = PROVIDERS[String(input.providerId || "").toLowerCase()] || selectedProvider();
             var id = String(input.id || "");
+            var loadKey = config.id + ":" + id;
+            var cached = loadCache[loadKey];
+            if (cached && Date.now() - cached.time < LOAD_CACHE_TTL_MS) {
+                return cb({ success: true, data: cached.data });
+            }
             var token = await bypass();
             var detailUrl = MAIN_URL + "/mobile" + config.prefix + "/post.php?id=" + encodeURIComponent(id) + "&t=" + unixTime();
             var res = await requestGet(detailUrl, pageHeaders(config, token, MAIN_URL + "/home"));
@@ -1074,11 +1164,9 @@
                 (data.season || []).slice(0, Math.max(0, (data.season || []).length - 1)).forEach(function (season) {
                     if (season && season.id) tasks.push({ seasonId: season.id, page: 1 });
                 });
-                var extra = await mapConcurrent(tasks, 4, function (task) {
-                    return fetchEpisodes(config, token, title, id, task.seasonId, task.page);
-                });
-                extra.forEach(function (rows) {
-                    (rows || []).forEach(function (ep) { episodes.push(ep); });
+                var extra = await fetchEpisodePagesFast(config, token, title, id, tasks);
+                extra.forEach(function (ep) {
+                    if (ep) episodes.push(ep);
                 });
             }
 
@@ -1088,9 +1176,7 @@
                 return row && row.id ? buildItem(config, row.id, "", "series", config.suggestPoster(row.id)) : null;
             }).filter(Boolean);
 
-            cb({
-                success: true,
-                data: new MultimediaItem({
+            var item = new MultimediaItem({
                     title: title,
                     url: payload({ providerId: config.id, id: id, title: title }),
                     posterUrl: config.poster(id),
@@ -1105,8 +1191,9 @@
                     tags: genres,
                     recommendations: recommendations,
                     episodes: episodes
-                })
-            });
+                });
+            loadCache[loadKey] = { time: Date.now(), data: item };
+            cb({ success: true, data: item });
         } catch (e) {
             cb({ success: false, errorCode: "CNCVERSE_LOAD_FAILED", message: String(e && e.message || e) });
         }
@@ -1131,9 +1218,9 @@
             var streams = await expandNewTvHlsStreams(json.video_link, config.name, streamHeaders, referer);
             var maxQuality = maxStreamQuality(streams);
             var adaptiveLabel = maxQuality ? (config.name + " Auto [" + maxQuality + "p]") : (config.name + " Auto");
-            cb({ success: true, data: [
+            cb({ success: true, data: streams.concat([
                 buildDirectHlsStream(json.video_link, adaptiveLabel, maxQuality, streamHeaders)
-            ].concat(streams) });
+            ]) });
         } catch (e) {
             cb({ success: false, errorCode: "CNCVERSE_STREAMS_FAILED", message: String(e && e.message || e) });
         }
