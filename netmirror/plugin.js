@@ -129,6 +129,50 @@
     var resolvedApiUrl = "";
     var titleCache = {};
     var homeCache = {};
+    var LANGUAGE_NAMES = {
+        ar: "Arabic", ara: "Arabic",
+        bn: "Bengali", ben: "Bengali",
+        cs: "Czech", ces: "Czech", cze: "Czech",
+        da: "Danish", dan: "Danish",
+        de: "German", deu: "German", ger: "German",
+        el: "Greek", ell: "Greek", gre: "Greek",
+        en: "English", eng: "English",
+        es: "Spanish", spa: "Spanish",
+        "es-es": "European Spanish",
+        fi: "Finnish", fin: "Finnish",
+        fr: "French", fra: "French", fre: "French",
+        gu: "Gujarati", guj: "Gujarati",
+        he: "Hebrew", heb: "Hebrew",
+        hi: "Hindi", hin: "Hindi",
+        hr: "Croatian", hrv: "Croatian",
+        hu: "Hungarian", hun: "Hungarian",
+        id: "Indonesian", ind: "Indonesian",
+        it: "Italian", ita: "Italian",
+        ja: "Japanese", jpn: "Japanese",
+        kn: "Kannada", kan: "Kannada",
+        ko: "Korean", kor: "Korean",
+        ml: "Malayalam", mal: "Malayalam",
+        mr: "Marathi", mar: "Marathi",
+        ms: "Malay", msa: "Malay", may: "Malay",
+        nb: "Norwegian", nob: "Norwegian", no: "Norwegian", nor: "Norwegian",
+        nl: "Dutch", nld: "Dutch", dut: "Dutch",
+        pa: "Punjabi", pan: "Punjabi",
+        pl: "Polish", pol: "Polish",
+        pt: "Portuguese", por: "Portuguese",
+        "pt-br": "Brazilian Portuguese",
+        ro: "Romanian", ron: "Romanian", rum: "Romanian",
+        ru: "Russian", rus: "Russian",
+        sv: "Swedish", swe: "Swedish",
+        ta: "Tamil", tam: "Tamil",
+        te: "Telugu", tel: "Telugu",
+        th: "Thai", tha: "Thai",
+        tr: "Turkish", tur: "Turkish",
+        ur: "Urdu", urd: "Urdu",
+        vi: "Vietnamese", vie: "Vietnamese",
+        "zh-hans": "Chinese (Simplified)",
+        "zh-hant": "Chinese (Traditional)",
+        zh: "Chinese", zho: "Chinese", chi: "Chinese"
+    };
 
     function trim(value) {
         return String(value || "").replace(/\s+/g, " ").trim();
@@ -548,45 +592,86 @@
             var url = attrs.URI;
             if (!url || seen[url]) continue;
             seen[url] = true;
+            var langCode = languageCodeFromAttrs(attrs) || "en";
             out.push({
                 url: proxifyUrl(url, headers, referer),
                 label: trim(attrs.NAME || attrs.LANGUAGE || "Subtitle"),
-                lang: trim(attrs.LANGUAGE || "en").toLowerCase()
+                lang: langCode
             });
         }
         return out;
     }
 
-    function buildVariantMiniMaster(variant, media, headers, referer) {
+    function buildVariantMiniMaster(variant, media, headers, referer, audioTrack) {
         var lines = ["#EXTM3U", "#EXT-X-VERSION:3"];
         var audioGroup = variant.attrs.AUDIO;
-        var audios = mediaByGroup(media, "AUDIO", audioGroup);
+        var audios = audioTrack ? [audioTrack] : mediaByGroup(media, "AUDIO", audioGroup);
         for (var i = 0; i < audios.length; i++) {
-            lines.push(serializeMediaLine(audios[i], audios[i].URI));
+            var attrs = Object.assign({}, audios[i]);
+            attrs.DEFAULT = "YES";
+            attrs.AUTOSELECT = "YES";
+            lines.push(serializeMediaLine(attrs, attrs.URI));
         }
         lines.push(String(variant.raw || "").replace(/,?SUBTITLES="[^"]*"/i, ""));
         lines.push(variant.url);
         return "magic_m3u8:" + encodeBase64String(lines.join("\n"));
     }
 
-    function buildExpandedHlsStream(variant, media, source, headers, referer) {
-        var hasSeparateAudio = !!variant.attrs.AUDIO && mediaByGroup(media, "AUDIO", variant.attrs.AUDIO).length > 0;
-        var streamUrl = hasSeparateAudio
-            ? buildVariantMiniMaster(variant, media, headers, referer)
-            : variant.url;
+    function createHlsStream(url, source, headers, quality, subtitles, languageCode, languageName) {
         var stream = new StreamResult({
-            url: streamUrl,
-            source: variant.quality ? (source + " [" + variant.quality + "p]") : source,
+            url: url,
+            source: source,
             headers: headers || {},
-            quality: variant.quality || 0
+            quality: quality || 0
         });
-        stream.quality = variant.quality || 0;
+        stream.quality = quality || 0;
         stream.type = "hls";
-        if (variant.attrs.SUBTITLES) {
-            var subs = subtitlesFromMedia(media, variant.attrs.SUBTITLES, headers, referer);
-            if (subs.length) stream.subtitles = subs;
-        }
+        if (subtitles && subtitles.length) stream.subtitles = subtitles;
+        if (languageCode) stream.language = languageCode;
+        if (languageName) stream.languageName = languageName;
         return stream;
+    }
+
+    function buildExpandedHlsStreams(variant, media, source, headers, referer) {
+        var quality = variant.quality || 0;
+        var audios = variant.attrs.AUDIO ? mediaByGroup(media, "AUDIO", variant.attrs.AUDIO) : [];
+        if (!audios.length) {
+            var subtitles = variant.attrs.SUBTITLES ? subtitlesFromMedia(media, variant.attrs.SUBTITLES, headers, referer) : [];
+            return [createHlsStream(
+                variant.url,
+                quality ? (source + " [" + quality + "p]") : source,
+                headers,
+                quality,
+                subtitles
+            )];
+        }
+        var out = [];
+        var usedLabels = {};
+        for (var i = 0; i < audios.length; i++) {
+            var audio = audios[i];
+            if (!audio.URI) continue;
+            var languageName = languageNameFromAttrs(audio);
+            var languageCode = languageCodeFromAttrs(audio);
+            var labelKey = languageName.toLowerCase();
+            usedLabels[labelKey] = (usedLabels[labelKey] || 0) + 1;
+            var displayName = usedLabels[labelKey] > 1 ? (languageName + " " + usedLabels[labelKey]) : languageName;
+            out.push(createHlsStream(
+                buildVariantMiniMaster(variant, media, headers, referer, audio),
+                quality ? (source + " " + displayName + " [" + quality + "p]") : (source + " " + displayName),
+                headers,
+                quality,
+                [],
+                languageCode,
+                displayName
+            ));
+        }
+        return out.length ? out : [createHlsStream(
+            buildVariantMiniMaster(variant, media, headers, referer),
+            quality ? (source + " [" + quality + "p]") : source,
+            headers,
+            quality,
+            subtitles
+        )];
     }
 
     async function expandNewTvHlsStreams(masterUrl, source, headers, referer) {
@@ -594,10 +679,14 @@
             var res = await requestGet(masterUrl, headers);
             var parsed = parseHlsMaster(masterUrl, res.body);
             if (!parsed) return [];
-            return parsed.variants.map(function (variant) {
-                return buildExpandedHlsStream(variant, parsed.media, source, headers, referer);
-            }).sort(function (a, b) {
-                return (Number(b.quality || 0) - Number(a.quality || 0));
+            var streams = [];
+            parsed.variants.forEach(function (variant) {
+                streams.push.apply(streams, buildExpandedHlsStreams(variant, parsed.media, source, headers, referer));
+            });
+            return streams.sort(function (a, b) {
+                var q = Number(b.quality || 0) - Number(a.quality || 0);
+                if (q) return q;
+                return String(a.source || "").localeCompare(String(b.source || ""));
             });
         } catch (_) {
             return [];
@@ -650,6 +739,79 @@
             .replace(/&gt;/gi, ">")
             .replace(/\s+/g, " ")
             .trim();
+    }
+
+    function normalizeLanguageCode(value) {
+        var code = String(value || "").toLowerCase().trim();
+        code = code.replace(/_/g, "-").replace(/\.\[cc\]|\[cc\]/g, "");
+        code = code.replace(/[^a-z0-9-]/g, "");
+        if (code === "ger") return "de";
+        if (code === "eng") return "en";
+        if (code === "deu") return "de";
+        if (code === "ara") return "ar";
+        if (code === "ben") return "bn";
+        if (code === "ces" || code === "cze") return "cs";
+        if (code === "dan") return "da";
+        if (code === "ell") return "el";
+        if (code === "fre") return "fr";
+        if (code === "fra") return "fr";
+        if (code === "gre") return "el";
+        if (code === "guj") return "gu";
+        if (code === "heb") return "he";
+        if (code === "hin") return "hi";
+        if (code === "hrv") return "hr";
+        if (code === "hun") return "hu";
+        if (code === "ind") return "id";
+        if (code === "ita") return "it";
+        if (code === "jpn") return "ja";
+        if (code === "kan") return "kn";
+        if (code === "kor") return "ko";
+        if (code === "mal") return "ml";
+        if (code === "mar") return "mr";
+        if (code === "may") return "ms";
+        if (code === "msa") return "ms";
+        if (code === "nob" || code === "nor") return "nb";
+        if (code === "dut") return "nl";
+        if (code === "nld") return "nl";
+        if (code === "pan") return "pa";
+        if (code === "pol") return "pl";
+        if (code === "por") return "pt";
+        if (code === "ron") return "ro";
+        if (code === "rum") return "ro";
+        if (code === "rus") return "ru";
+        if (code === "spa") return "es";
+        if (code === "swe") return "sv";
+        if (code === "tam") return "ta";
+        if (code === "tel") return "te";
+        if (code === "tha") return "th";
+        if (code === "tur") return "tr";
+        if (code === "urd") return "ur";
+        if (code === "vie") return "vi";
+        if (code === "chi") return "zh";
+        if (code === "zho") return "zh";
+        return code;
+    }
+
+    function languageNameFromAttrs(attrs) {
+        attrs = attrs || {};
+        var code = normalizeLanguageCode(attrs.LANGUAGE);
+        var cleanName = trim(String(attrs.NAME || "").replace(/^\d+\.\s*/, "").replace(/\s*\[cc\]\s*/ig, ""));
+        var fromCode = LANGUAGE_NAMES[code] || LANGUAGE_NAMES[code.split("-")[0]];
+        if (fromCode) return fromCode;
+        if (cleanName && !/^\d+$/i.test(cleanName)) return cleanName;
+        return code ? code.toUpperCase() : "Audio";
+    }
+
+    function languageCodeFromAttrs(attrs) {
+        attrs = attrs || {};
+        var code = normalizeLanguageCode(attrs.LANGUAGE);
+        if (code) return code;
+        var name = trim(String(attrs.NAME || "").replace(/^\d+\.\s*/, "")).toLowerCase();
+        var keys = Object.keys(LANGUAGE_NAMES);
+        for (var i = 0; i < keys.length; i++) {
+            if (LANGUAGE_NAMES[keys[i]].toLowerCase() === name) return normalizeLanguageCode(keys[i]);
+        }
+        return "";
     }
 
     function nodeText(node) {
