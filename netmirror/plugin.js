@@ -562,10 +562,10 @@
         var audioGroup = variant.attrs.AUDIO;
         var audios = mediaByGroup(media, "AUDIO", audioGroup);
         for (var i = 0; i < audios.length; i++) {
-            lines.push(serializeMediaLine(audios[i], proxifyUrl(audios[i].URI, headers, referer)));
+            lines.push(serializeMediaLine(audios[i], audios[i].URI));
         }
-        lines.push(variant.raw);
-        lines.push(proxifyUrl(variant.url, headers, referer));
+        lines.push(String(variant.raw || "").replace(/,?SUBTITLES="[^"]*"/i, ""));
+        lines.push(variant.url);
         return "magic_m3u8:" + encodeBase64String(lines.join("\n"));
     }
 
@@ -573,11 +573,11 @@
         var hasSeparateAudio = !!variant.attrs.AUDIO && mediaByGroup(media, "AUDIO", variant.attrs.AUDIO).length > 0;
         var streamUrl = hasSeparateAudio
             ? buildVariantMiniMaster(variant, media, headers, referer)
-            : proxifyUrl(variant.url, headers, referer);
+            : variant.url;
         var stream = new StreamResult({
             url: streamUrl,
             source: variant.quality ? (source + " [" + variant.quality + "p]") : source,
-            headers: {},
+            headers: headers || {},
             quality: variant.quality || 0
         });
         stream.quality = variant.quality || 0;
