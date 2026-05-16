@@ -6,8 +6,8 @@
     var COOKIE_TTL_MS = 54000000;
     var USER_AGENT = "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.132 Safari/537.36 /OS.Gatu v3.0";
     var NEWTV_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0 /OS.GatuNewTV v1.0";
-    var EXOPLAYER_USER_AGENT = "Mozilla/5.0 (Android) ExoPlayer";
-    var HOME_TITLE_CONCURRENCY = 24;
+    var HOME_TITLE_CONCURRENCY = 48;
+    var HOME_CACHE_TTL_MS = 180000;
 
     var PROVIDERS = {
         netflix: {
@@ -128,6 +128,7 @@
     var cookieCache = { value: "", time: 0 };
     var resolvedApiUrl = "";
     var titleCache = {};
+    var homeCache = {};
 
     function trim(value) {
         return String(value || "").replace(/\s+/g, " ").trim();
@@ -562,33 +563,30 @@
         return out;
     }
 
-    async function getPostTitle(config, token, id) {
-        var key = config.id + ":" + id;
-        if (Object.prototype.hasOwnProperty.call(titleCache, key)) return titleCache[key];
-        var url = MAIN_URL + "/mobile" + config.prefix + "/post.php?id=" + encodeURIComponent(id) + "&t=" + unixTime();
-        var res = await requestGet(url, pageHeaders(config, token, MAIN_URL + "/home"));
-        var json = parseJsonSafe(res.body, {});
-        titleCache[key] = trim(json.title);
-        return titleCache[key];
-    }
-
     async function hydrateHomeTitles(config, token, sections) {
         var items = [];
+        var rowsById = {};
         Object.keys(sections || {}).forEach(function (section) {
             (sections[section] || []).forEach(function (item) {
                 if (!item || !item.url || item.title !== config.name) return;
                 var row = parsePayload(item.url);
-                if (row && row.id) items.push({ item: item, id: row.id });
+                if (row && row.id) {
+                    var id = String(row.id);
+                    var entry = { item: item, id: id };
+                    items.push(entry);
+                    if (!rowsById[id]) rowsById[id] = [];
+                    rowsById[id].push(entry);
+                }
             });
         });
         var requests = [];
-        items.forEach(function (row) {
-            var key = config.id + ":" + row.id;
+        Object.keys(rowsById).forEach(function (id) {
+            var key = config.id + ":" + id;
             if (Object.prototype.hasOwnProperty.call(titleCache, key)) return;
             requests.push({
-                id: row.id,
+                id: id,
                 key: key,
-                url: MAIN_URL + "/mobile" + config.prefix + "/post.php?id=" + encodeURIComponent(row.id) + "&t=" + unixTime(),
+                url: MAIN_URL + "/mobile" + config.prefix + "/post.php?id=" + encodeURIComponent(id) + "&t=" + unixTime(),
                 headers: pageHeaders(config, token, MAIN_URL + "/home")
             });
         });
@@ -597,8 +595,8 @@
             var json = parseJsonSafe(responses[index] && responses[index].body, {});
             titleCache[req.key] = trim(json.title);
         });
-        await mapConcurrent(items, HOME_TITLE_CONCURRENCY, async function (row) {
-            var title = await getPostTitle(config, token, row.id);
+        items.forEach(function (row) {
+            var title = titleCache[config.id + ":" + row.id] || "";
             if (title) {
                 row.item.title = title;
                 row.item.url = payload({ providerId: config.id, id: String(row.id), title: title });
@@ -627,167 +625,6 @@
         throw new Error("Failed to resolve NewTV API base URL");
     }
 
-    function proxifyUrl(url, headers, referer) {
-        return "MAGIC_PROXY_v2" + encodeBase64String(JSON.stringify({
-            url: url,
-            headers: headers || {},
-            options: {
-                referer: referer || "",
-                mirrorHosts: hostOf(url) ? [hostOf(url)] : []
-            }
-        }));
-    }
-
-    function hostOf(url) {
-        try {
-            return new URL(String(url)).hostname;
-        } catch (_) {
-            return "";
-        }
-    }
-
-    function parseAttributeList(value) {
-        var out = {};
-        var text = String(value || "");
-        var re = /([A-Z0-9-]+)=("[^"]*"|[^,]*)/gi;
-        var match;
-        while ((match = re.exec(text)) !== null) {
-            out[match[1].toUpperCase()] = String(match[2] || "").replace(/^"|"$/g, "");
-        }
-        return out;
-    }
-
-    function qualityFromInf(line, uri) {
-        var attrs = parseAttributeList(String(line || "").replace(/^#EXT-X-STREAM-INF:/i, ""));
-        var res = String(attrs.RESOLUTION || "").match(/x(\d+)/i);
-        if (res) return parseInt(res[1], 10) || 0;
-        var bw = parseInt(attrs["AVERAGE-BANDWIDTH"] || attrs.BANDWIDTH || "0", 10);
-        if (bw >= 7000000) return 2160;
-        if (bw >= 3500000) return 1080;
-        if (bw >= 1500000) return 720;
-        if (bw >= 800000) return 480;
-        if (bw >= 400000) return 360;
-        var text = String(uri || "");
-        var match = text.match(/(\d{3,4})p/i);
-        return match ? parseInt(match[1], 10) || 0 : 0;
-    }
-
-    function qualityFromLabel(label, uri, body) {
-        var match = String(label || "").match(/(\d{3,4})\s*p/i) || String(uri || "").match(/(\d{3,4})\s*p/i);
-        if (match) return parseInt(match[1], 10) || 0;
-        var streamInf = String(body || "").match(/#EXT-X-STREAM-INF:([^\n\r]+)/i);
-        return streamInf ? qualityFromInf("#EXT-X-STREAM-INF:" + streamInf[1], uri) : 0;
-    }
-
-    function audioGroupLines(lines, streamAttrs) {
-        var groups = {};
-        if (streamAttrs.AUDIO && streamAttrs.AUDIO !== "NONE") groups.AUDIO = streamAttrs.AUDIO;
-        return lines.filter(function (line) {
-            if (!/^#EXT-X-MEDIA:/i.test(line)) return false;
-            var attrs = parseAttributeList(line.replace(/^#EXT-X-MEDIA:/i, ""));
-            var type = String(attrs.TYPE || "").toUpperCase();
-            return groups[type] && attrs["GROUP-ID"] === groups[type];
-        });
-    }
-
-    function rewriteMediaLine(line, masterUrl, headers, referer) {
-        return line.replace(/URI="([^"]+)"/i, function (_, uri) {
-            return 'URI="' + proxifyUrl(absoluteUrl(masterUrl, uri), headers, referer) + '"';
-        });
-    }
-
-    function buildVariantMaster(masterUrl, mediaLines, streamInfLine, variantUrl, headers, referer) {
-        var rewritten = ["#EXTM3U", "#EXT-X-VERSION:3"];
-        mediaLines.forEach(function (line) {
-            rewritten.push(rewriteMediaLine(line, masterUrl, headers, referer));
-        });
-        rewritten.push(streamInfLine);
-        rewritten.push(proxifyUrl(variantUrl, headers, referer));
-        return "magic_m3u8:" + encodeBase64String(rewritten.join("\n"));
-    }
-
-    function absoluteMediaLine(line, masterUrl) {
-        return line.replace(/URI="([^"]+)"/i, function (_, uri) {
-            return 'URI="' + absoluteUrl(masterUrl, uri) + '"';
-        });
-    }
-
-    function buildDirectVariantMaster(masterUrl, mediaLines, streamInfLine, variantUrl) {
-        var rewritten = ["#EXTM3U", "#EXT-X-VERSION:3"];
-        mediaLines.forEach(function (line) {
-            rewritten.push(absoluteMediaLine(line, masterUrl));
-        });
-        rewritten.push(streamInfLine);
-        rewritten.push(variantUrl);
-        return "magic_m3u8:" + encodeBase64String(rewritten.join("\n"));
-    }
-
-    function wantedQualityFromLabel(label) {
-        var text = String(label || "").toLowerCase();
-        var match = text.match(/(\d{3,4})\s*p/);
-        if (match) return parseInt(match[1], 10) || 0;
-        if (text.indexOf("full hd") !== -1 || text === "fhd") return 1080;
-        if (text.indexOf("mid hd") !== -1 || text.indexOf("medium") !== -1) return 720;
-        if (text.indexOf("low hd") !== -1 || text.indexOf("low") !== -1) return 480;
-        return 0;
-    }
-
-    function parseHlsVariants(masterUrl, body) {
-        var text = String(body || "");
-        if (text.indexOf("#EXT-X-STREAM-INF") === -1) return [];
-        var lines = text.split(/\r?\n/).map(function (line) { return String(line || "").trim(); }).filter(Boolean);
-        var variants = [];
-        for (var i = 0; i < lines.length; i++) {
-            var line = lines[i];
-            if (!/^#EXT-X-STREAM-INF:/i.test(line)) continue;
-            var uri = "";
-            for (var j = i + 1; j < lines.length; j++) {
-                if (lines[j] && lines[j].charAt(0) !== "#") {
-                    uri = lines[j];
-                    break;
-                }
-            }
-            if (!uri) continue;
-            var attrs = parseAttributeList(line.replace(/^#EXT-X-STREAM-INF:/i, ""));
-            variants.push({
-                line: line,
-                uri: uri,
-                url: absoluteUrl(masterUrl, uri),
-                quality: qualityFromInf(line, uri),
-                mediaLines: audioGroupLines(lines, attrs)
-            });
-        }
-        return variants;
-    }
-
-    function selectVariant(variants, wantedQuality) {
-        if (!variants.length) return null;
-        var sorted = variants.slice().sort(function (a, b) {
-            return Number(b.quality || 0) - Number(a.quality || 0);
-        });
-        if (!wantedQuality) return sorted[0];
-        for (var i = 0; i < sorted.length; i++) {
-            if (Number(sorted[i].quality || 0) === wantedQuality) return sorted[i];
-        }
-        for (var j = 0; j < sorted.length; j++) {
-            if (Number(sorted[j].quality || 0) <= wantedQuality) return sorted[j];
-        }
-        return sorted[sorted.length - 1];
-    }
-
-    function buildStream(url, source, quality) {
-        var stream = new StreamResult({
-            url: url,
-            source: source,
-            quality: quality || 0,
-            type: "hls",
-            headers: {}
-        });
-        stream.quality = quality || 0;
-        stream.type = "hls";
-        return stream;
-    }
-
     function buildDirectHlsStream(url, source, quality, headers) {
         var stream = new StreamResult({
             url: url,
@@ -799,183 +636,13 @@
         return stream;
     }
 
-    function playlistStreamHeaders() {
-        return {
-            "User-Agent": EXOPLAYER_USER_AGENT,
-            "Accept": "*/*",
-            "Accept-Encoding": "identity",
-            "Connection": "keep-alive",
-            "Cookie": "hd=on",
-            "Referer": MAIN_URL + "/"
-        };
-    }
-
-    function cleanMediaUrl(value) {
-        return absoluteUrl(MAIN_URL, String(value || "").replace(/\\/g, "").trim());
-    }
-
-    function trackToSubtitle(track) {
-        if (!track || String(track.kind || "").toLowerCase() !== "captions" || !track.file) return null;
-        return {
-            url: cleanMediaUrl(track.file),
-            label: trim(track.label) || "Subtitle",
-            lang: trim(track.srclang || track.language || track.label) || undefined,
-            headers: { "Referer": MAIN_URL + "/" }
-        };
-    }
-
-    function attachSubtitles(stream, subtitles) {
-        if (subtitles && subtitles.length) stream.subtitles = subtitles;
-        return stream;
-    }
-
-    function parsePlaylistRows(value) {
-        var parsed = parseJsonSafe(value, []);
-        if (Array.isArray(parsed)) return parsed;
-        if (parsed && Array.isArray(parsed.playlist)) return parsed.playlist;
-        if (parsed && Array.isArray(parsed.sources)) return [parsed];
-        return [];
-    }
-
-    async function loadPlaylistStreams(config, token, input) {
-        var id = String(input.id || "");
-        var title = trim(input.title || "");
-        if (!id) return [];
-        var playlistUrl = MAIN_URL + "/mobile" + config.prefix + "/playlist.php?id=" + encodeURIComponent(id) + "&t=" + encodeURIComponent(title) + "&tm=" + unixTime();
-        var res = await requestGet(playlistUrl, pageHeaders(config, token, MAIN_URL + "/"));
-        var rows = parsePlaylistRows(res.body);
-        var subtitles = [];
-        var candidates = [];
-
-        rows.forEach(function (row) {
-            (row && row.tracks || []).forEach(function (track) {
-                var subtitle = trackToSubtitle(track);
-                if (subtitle) subtitles.push(subtitle);
-            });
-            (row && row.sources || []).forEach(function (source) {
-                if (!source || !source.file) return;
-                candidates.push({
-                    label: trim(source.label || source.name || ""),
-                    url: cleanMediaUrl(source.file),
-                    headers: playlistStreamHeaders()
-                });
-            });
-        });
-
-        var seenSubtitle = {};
-        subtitles = subtitles.filter(function (subtitle) {
-            var key = subtitle.url + "|" + subtitle.label;
-            if (seenSubtitle[key]) return false;
-            seenSubtitle[key] = true;
-            return true;
-        });
-
-        var seen = {};
-        candidates = candidates.filter(function (candidate) {
-            if (!candidate.url || seen[candidate.url]) return false;
-            seen[candidate.url] = true;
-            return true;
-        });
-        if (!candidates.length) return [];
-
-        var responses = await httpParallelGet(candidates, HOME_TITLE_CONCURRENCY);
-        var selected = [];
-        candidates.forEach(function (candidate, index) {
-            var body = String(responses[index] && responses[index].body || "");
-            if (!/#EXTM3U/i.test(body)) return;
-            var wantedQuality = wantedQualityFromLabel(candidate.label);
-            var variants = parseHlsVariants(candidate.url, body);
-            var variant = wantedQuality ? selectVariant(variants, wantedQuality) : null;
-            var quality = variant ? variant.quality : qualityFromLabel(candidate.label, candidate.url, body);
-            var streamUrl = candidate.url;
-            var streamHeaders = candidate.headers;
-            var useMagic = false;
-
-            if (variant) {
-                streamUrl = variant.mediaLines.length
-                    ? buildDirectVariantMaster(candidate.url, variant.mediaLines, variant.line, variant.url)
-                    : variant.url;
-                streamHeaders = variant.mediaLines.length ? {} : candidate.headers;
-                useMagic = variant.mediaLines.length > 0;
-            }
-
-            selected.push({
-                candidate: candidate,
-                url: streamUrl,
-                validateUrl: variant ? variant.url : candidate.url,
-                source: config.name + (candidate.label ? " [" + candidate.label + "]" : (quality ? " [" + quality + "p]" : " [HLS]")),
-                quality: quality,
-                headers: streamHeaders,
-                useMagic: useMagic,
-                body: variant ? "" : body
-            });
-        });
-
-        var validateRequests = selected.map(function (row) {
-            return { url: row.validateUrl, headers: row.headers || {} };
-        });
-        var validation = await httpParallelGet(validateRequests, HOME_TITLE_CONCURRENCY);
-        var streams = [];
-        selected.forEach(function (row, index) {
-            var body = row.body || String(validation[index] && validation[index].body || "");
-            if (!/#EXTM3U/i.test(body)) return;
-            var stream = row.useMagic
-                ? buildStream(row.url, row.source, row.quality)
-                : buildDirectHlsStream(row.url, row.source, row.quality, row.headers);
-            streams.push(attachSubtitles(stream, subtitles));
-        });
-        return streams.sort(function (a, b) {
-            return Number(b.quality || 0) - Number(a.quality || 0);
-        });
-    }
-
-    async function expandHls(masterUrl, headers, source, referer) {
-        var streams = [
-            buildDirectHlsStream(masterUrl, source + " [Adaptive]", 0, headers)
-        ];
-        var res = await requestGet(masterUrl, headers).catch(function () { return null; });
-        var text = String(res && res.body || "");
-        if (!/#EXTM3U/i.test(text)) return streams.concat([buildStream(proxifyUrl(masterUrl, headers, referer), source + " [Proxy Fallback]", 0)]);
-        if (text.indexOf("#EXT-X-STREAM-INF") === -1) return streams;
-
-        var lines = text.split(/\r?\n/).map(function (line) { return String(line || "").trim(); }).filter(Boolean);
-        var seen = {};
-        for (var i = 0; i < lines.length; i++) {
-            var line = lines[i];
-            if (!/^#EXT-X-STREAM-INF:/i.test(line)) continue;
-            var uri = "";
-            for (var j = i + 1; j < lines.length; j++) {
-                if (lines[j] && lines[j].charAt(0) !== "#") {
-                    uri = lines[j];
-                    break;
-                }
-            }
-            if (!uri) continue;
-            var variantUrl = absoluteUrl(masterUrl, uri);
-            var quality = qualityFromInf(line, uri);
-            var streamAttrs = parseAttributeList(line.replace(/^#EXT-X-STREAM-INF:/i, ""));
-            var groups = audioGroupLines(lines, streamAttrs);
-            var playable = groups.length
-                ? buildVariantMaster(masterUrl, groups, line, variantUrl, headers, referer)
-                : variantUrl;
-            var key = playable + "|" + quality;
-            if (seen[key]) continue;
-            seen[key] = true;
-            streams.push(groups.length
-                ? buildStream(playable, source + (quality ? " [" + quality + "p]" : " [HLS]"), quality)
-                : buildDirectHlsStream(playable, source + (quality ? " [" + quality + "p]" : " [HLS]"), quality, headers));
-        }
-        var adaptive = streams.slice(0, 1);
-        var qualities = streams.slice(1).sort(function (a, b) {
-            return Number(b.quality || 0) - Number(a.quality || 0);
-        });
-        streams = adaptive.concat(qualities);
-        return streams;
-    }
-
     async function getHome(cb) {
         try {
             var config = selectedProvider();
+            var cached = homeCache[config.id];
+            if (cached && Date.now() - cached.time < HOME_CACHE_TTL_MS) {
+                return cb({ success: true, data: cached.data });
+            }
             var token = await bypass();
             var url = MAIN_URL + "/mobile/home?app=1";
             var res = await requestGet(url, pageHeaders(config, token, url));
@@ -989,6 +656,7 @@
                 if (items.length) sections[title] = items;
             });
             await hydrateHomeTitles(config, token, sections);
+            homeCache[config.id] = { time: Date.now(), data: sections };
             cb({ success: true, data: sections });
         } catch (e) {
             cb({ success: false, errorCode: "CNCVERSE_HOME_FAILED", message: String(e && e.message || e) });
@@ -1090,10 +758,6 @@
             var input = parsePayload(url);
             var config = PROVIDERS[String(input.providerId || "").toLowerCase()] || selectedProvider();
             var id = String(input.id || "");
-            var token = await bypass();
-            var playlistStreams = await loadPlaylistStreams(config, token, input).catch(function () { return []; });
-            if (playlistStreams.length) return cb({ success: true, data: playlistStreams });
-
             var apiBase = await resolveApiUrl();
             var res = await requestGet(apiBase + "/newtv/player.php?id=" + encodeURIComponent(id), buildNewTvHeaders(config.playerOtt, { "Usertoken": "" }));
             var json = parseJsonSafe(res.body, {});
@@ -1105,8 +769,9 @@
                 "Referer": referer,
                 "Cookie": "hd=on"
             };
-            var streams = await expandHls(json.video_link, streamHeaders, config.name, referer);
-            cb({ success: true, data: streams });
+            cb({ success: true, data: [
+                buildDirectHlsStream(json.video_link, config.name, 0, streamHeaders)
+            ] });
         } catch (e) {
             cb({ success: false, errorCode: "CNCVERSE_STREAMS_FAILED", message: String(e && e.message || e) });
         }
