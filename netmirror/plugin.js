@@ -604,6 +604,14 @@
         }
     }
 
+    function maxStreamQuality(streams) {
+        var max = 0;
+        for (var i = 0; i < (streams || []).length; i++) {
+            max = Math.max(max, Number(streams[i] && streams[i].quality || 0) || 0);
+        }
+        return max;
+    }
+
     function numberFrom(value) {
         var n = parseInt(String(value || "").replace(/[^0-9]/g, ""), 10);
         return isNaN(n) ? undefined : n;
@@ -959,8 +967,11 @@
                 "Cookie": "hd=on"
             };
             var streams = await expandNewTvHlsStreams(json.video_link, config.name, streamHeaders, referer);
-            streams.push(buildDirectHlsStream(json.video_link, config.name + " Adaptive", 0, streamHeaders));
-            cb({ success: true, data: streams });
+            var maxQuality = maxStreamQuality(streams);
+            var adaptiveLabel = maxQuality ? (config.name + " Auto [" + maxQuality + "p]") : (config.name + " Auto");
+            cb({ success: true, data: [
+                buildDirectHlsStream(json.video_link, adaptiveLabel, maxQuality, streamHeaders)
+            ].concat(streams) });
         } catch (e) {
             cb({ success: false, errorCode: "CNCVERSE_STREAMS_FAILED", message: String(e && e.message || e) });
         }
