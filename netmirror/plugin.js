@@ -415,6 +415,195 @@
         }
     }
 
+    function streamHost(url) {
+        try {
+            return new URL(String(url || "")).hostname;
+        } catch (_) {
+            return "";
+        }
+    }
+
+    function proxifyUrl(url, headers, referer) {
+        var hosts = [];
+        var host = streamHost(url);
+        if (host) hosts.push(host);
+        var payload = {
+            url: url,
+            headers: headers || {},
+            options: {
+                referer: referer || "",
+                mirrorHosts: hosts
+            }
+        };
+        return "MAGIC_PROXY_v2" + encodeBase64String(JSON.stringify(payload));
+    }
+
+    function parseHlsAttributes(line) {
+        var attrs = {};
+        var regex = /([A-Z0-9-]+)=("[^"]*"|[^,]*)/ig;
+        var match;
+        while ((match = regex.exec(String(line || ""))) !== null) {
+            attrs[String(match[1] || "").toUpperCase()] = String(match[2] || "").replace(/^"|"$/g, "");
+        }
+        return attrs;
+    }
+
+    function quoteHlsAttr(value) {
+        return "\"" + String(value || "").replace(/"/g, "\\\"") + "\"";
+    }
+
+    function serializeMediaLine(attrs, url) {
+        var out = [];
+        var keys = ["TYPE", "GROUP-ID", "LANGUAGE", "NAME", "DEFAULT", "AUTOSELECT", "FORCED", "CHANNELS", "CHARACTERISTICS"];
+        for (var i = 0; i < keys.length; i++) {
+            var key = keys[i];
+            if (typeof attrs[key] === "undefined" || attrs[key] === "") continue;
+            if (/^(TYPE|DEFAULT|AUTOSELECT|FORCED)$/i.test(key)) {
+                out.push(key + "=" + attrs[key]);
+            } else {
+                out.push(key + "=" + quoteHlsAttr(attrs[key]));
+            }
+        }
+        out.push("URI=" + quoteHlsAttr(url));
+        return "#EXT-X-MEDIA:" + out.join(",");
+    }
+
+    function qualityFromVariant(attrs) {
+        var resolution = String(attrs.RESOLUTION || "");
+        var match = resolution.match(/x(\d+)/i);
+        if (match) return parseInt(match[1], 10) || 0;
+        var bandwidth = parseInt(String(attrs.BANDWIDTH || attrs["AVERAGE-BANDWIDTH"] || "0").replace(/[^0-9]/g, ""), 10) || 0;
+        if (bandwidth >= 12000000) return 2160;
+        if (bandwidth >= 5000000) return 1080;
+        if (bandwidth >= 2500000) return 720;
+        if (bandwidth >= 1200000) return 480;
+        if (bandwidth) return 360;
+        return 0;
+    }
+
+    function parseHlsMaster(masterUrl, body) {
+        var text = String(body || "");
+        if (!/^#EXTM3U/i.test(text) || text.indexOf("#EXT-X-STREAM-INF") === -1) return null;
+        var lines = text.split(/\r?\n/);
+        var variants = [];
+        var media = [];
+        var pending = null;
+        var seen = {};
+        for (var i = 0; i < lines.length; i++) {
+            var raw = String(lines[i] || "").trim();
+            if (!raw) continue;
+            if (raw.indexOf("#EXT-X-MEDIA:") === 0) {
+                var mediaAttrs = parseHlsAttributes(raw.slice("#EXT-X-MEDIA:".length));
+                if (mediaAttrs.URI) {
+                    mediaAttrs.URI = absoluteUrl(masterUrl, mediaAttrs.URI);
+                    media.push({ attrs: mediaAttrs });
+                }
+                continue;
+            }
+            if (raw.indexOf("#EXT-X-I-FRAME-STREAM-INF:") === 0) {
+                pending = null;
+                continue;
+            }
+            if (raw.indexOf("#EXT-X-STREAM-INF:") === 0) {
+                pending = {
+                    attrs: parseHlsAttributes(raw.slice("#EXT-X-STREAM-INF:".length)),
+                    raw: raw
+                };
+                continue;
+            }
+            if (raw.charAt(0) === "#") continue;
+            if (!pending) continue;
+            var variantUrl = absoluteUrl(masterUrl, raw);
+            if (variantUrl && !seen[variantUrl]) {
+                seen[variantUrl] = true;
+                variants.push({
+                    url: variantUrl,
+                    attrs: pending.attrs,
+                    raw: pending.raw,
+                    quality: qualityFromVariant(pending.attrs)
+                });
+            }
+            pending = null;
+        }
+        return variants.length ? { variants: variants, media: media } : null;
+    }
+
+    function mediaByGroup(media, type, groupId) {
+        var out = [];
+        for (var i = 0; i < (media || []).length; i++) {
+            var attrs = media[i].attrs || {};
+            if (String(attrs.TYPE || "").toUpperCase() === type && String(attrs["GROUP-ID"] || "") === String(groupId || "")) {
+                out.push(attrs);
+            }
+        }
+        return out;
+    }
+
+    function subtitlesFromMedia(media, groupId, headers, referer) {
+        var rows = mediaByGroup(media, "SUBTITLES", groupId);
+        var out = [];
+        var seen = {};
+        for (var i = 0; i < rows.length; i++) {
+            var attrs = rows[i];
+            var url = attrs.URI;
+            if (!url || seen[url]) continue;
+            seen[url] = true;
+            out.push({
+                url: proxifyUrl(url, headers, referer),
+                label: trim(attrs.NAME || attrs.LANGUAGE || "Subtitle"),
+                lang: trim(attrs.LANGUAGE || "en").toLowerCase()
+            });
+        }
+        return out;
+    }
+
+    function buildVariantMiniMaster(variant, media, headers, referer) {
+        var lines = ["#EXTM3U", "#EXT-X-VERSION:3"];
+        var audioGroup = variant.attrs.AUDIO;
+        var audios = mediaByGroup(media, "AUDIO", audioGroup);
+        for (var i = 0; i < audios.length; i++) {
+            lines.push(serializeMediaLine(audios[i], proxifyUrl(audios[i].URI, headers, referer)));
+        }
+        lines.push(variant.raw);
+        lines.push(proxifyUrl(variant.url, headers, referer));
+        return "magic_m3u8:" + encodeBase64String(lines.join("\n"));
+    }
+
+    function buildExpandedHlsStream(variant, media, source, headers, referer) {
+        var hasSeparateAudio = !!variant.attrs.AUDIO && mediaByGroup(media, "AUDIO", variant.attrs.AUDIO).length > 0;
+        var streamUrl = hasSeparateAudio
+            ? buildVariantMiniMaster(variant, media, headers, referer)
+            : proxifyUrl(variant.url, headers, referer);
+        var stream = new StreamResult({
+            url: streamUrl,
+            source: variant.quality ? (source + " [" + variant.quality + "p]") : source,
+            headers: {},
+            quality: variant.quality || 0
+        });
+        stream.quality = variant.quality || 0;
+        stream.type = "hls";
+        if (variant.attrs.SUBTITLES) {
+            var subs = subtitlesFromMedia(media, variant.attrs.SUBTITLES, headers, referer);
+            if (subs.length) stream.subtitles = subs;
+        }
+        return stream;
+    }
+
+    async function expandNewTvHlsStreams(masterUrl, source, headers, referer) {
+        try {
+            var res = await requestGet(masterUrl, headers);
+            var parsed = parseHlsMaster(masterUrl, res.body);
+            if (!parsed) return [];
+            return parsed.variants.map(function (variant) {
+                return buildExpandedHlsStream(variant, parsed.media, source, headers, referer);
+            }).sort(function (a, b) {
+                return (Number(b.quality || 0) - Number(a.quality || 0));
+            });
+        } catch (_) {
+            return [];
+        }
+    }
+
     function numberFrom(value) {
         var n = parseInt(String(value || "").replace(/[^0-9]/g, ""), 10);
         return isNaN(n) ? undefined : n;
@@ -769,9 +958,9 @@
                 "Referer": referer,
                 "Cookie": "hd=on"
             };
-            cb({ success: true, data: [
-                buildDirectHlsStream(json.video_link, config.name, 0, streamHeaders)
-            ] });
+            var streams = await expandNewTvHlsStreams(json.video_link, config.name, streamHeaders, referer);
+            streams.push(buildDirectHlsStream(json.video_link, config.name + " Adaptive", 0, streamHeaders));
+            cb({ success: true, data: streams });
         } catch (e) {
             cb({ success: false, errorCode: "CNCVERSE_STREAMS_FAILED", message: String(e && e.message || e) });
         }
