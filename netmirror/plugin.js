@@ -6,6 +6,8 @@
     var COOKIE_TTL_MS = 54000000;
     var USER_AGENT = "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.132 Safari/537.36 /OS.Gatu v3.0";
     var NEWTV_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0 /OS.GatuNewTV v1.0";
+    var EXOPLAYER_USER_AGENT = "Mozilla/5.0 (Android) ExoPlayer";
+    var HOME_TITLE_CONCURRENCY = 24;
 
     var PROVIDERS = {
         netflix: {
@@ -245,6 +247,30 @@
             res.headers.forEach(function (value, key) { headersOut[key] = value; });
         }
         return { status: res.status, body: body, headers: headersOut, url: res.url || url };
+    }
+
+    async function httpParallelGet(requests, fallbackLimit) {
+        var items = Array.isArray(requests) ? requests.filter(function (item) { return item && item.url; }) : [];
+        if (!items.length) return [];
+        if (typeof http_parallel === "function") {
+            try {
+                var responses = await http_parallel(items.map(function (item) {
+                    return {
+                        method: "GET",
+                        url: item.url,
+                        headers: item.headers || {}
+                    };
+                }));
+                return items.map(function (item, index) {
+                    return normalizeResponse(responses && responses[index], item.url);
+                });
+            } catch (_) {}
+        }
+        return await mapConcurrent(items, fallbackLimit || HOME_TITLE_CONCURRENCY, function (item) {
+            return requestGet(item.url, item.headers || {}).catch(function () {
+                return { status: 599, body: "", headers: {}, url: item.url };
+            });
+        });
     }
 
     async function requestPostForm(url, body, headers) {
@@ -555,7 +581,23 @@
                 if (row && row.id) items.push({ item: item, id: row.id });
             });
         });
-        await mapConcurrent(items, 4, async function (row) {
+        var requests = [];
+        items.forEach(function (row) {
+            var key = config.id + ":" + row.id;
+            if (Object.prototype.hasOwnProperty.call(titleCache, key)) return;
+            requests.push({
+                id: row.id,
+                key: key,
+                url: MAIN_URL + "/mobile" + config.prefix + "/post.php?id=" + encodeURIComponent(row.id) + "&t=" + unixTime(),
+                headers: pageHeaders(config, token, MAIN_URL + "/home")
+            });
+        });
+        var responses = await httpParallelGet(requests, HOME_TITLE_CONCURRENCY);
+        requests.forEach(function (req, index) {
+            var json = parseJsonSafe(responses[index] && responses[index].body, {});
+            titleCache[req.key] = trim(json.title);
+        });
+        await mapConcurrent(items, HOME_TITLE_CONCURRENCY, async function (row) {
             var title = await getPostTitle(config, token, row.id);
             if (title) {
                 row.item.title = title;
@@ -630,6 +672,13 @@
         return match ? parseInt(match[1], 10) || 0 : 0;
     }
 
+    function qualityFromLabel(label, uri, body) {
+        var match = String(label || "").match(/(\d{3,4})\s*p/i) || String(uri || "").match(/(\d{3,4})\s*p/i);
+        if (match) return parseInt(match[1], 10) || 0;
+        var streamInf = String(body || "").match(/#EXT-X-STREAM-INF:([^\n\r]+)/i);
+        return streamInf ? qualityFromInf("#EXT-X-STREAM-INF:" + streamInf[1], uri) : 0;
+    }
+
     function audioGroupLines(lines, streamAttrs) {
         var groups = {};
         if (streamAttrs.AUDIO && streamAttrs.AUDIO !== "NONE") groups.AUDIO = streamAttrs.AUDIO;
@@ -657,6 +706,75 @@
         return "magic_m3u8:" + encodeBase64String(rewritten.join("\n"));
     }
 
+    function absoluteMediaLine(line, masterUrl) {
+        return line.replace(/URI="([^"]+)"/i, function (_, uri) {
+            return 'URI="' + absoluteUrl(masterUrl, uri) + '"';
+        });
+    }
+
+    function buildDirectVariantMaster(masterUrl, mediaLines, streamInfLine, variantUrl) {
+        var rewritten = ["#EXTM3U", "#EXT-X-VERSION:3"];
+        mediaLines.forEach(function (line) {
+            rewritten.push(absoluteMediaLine(line, masterUrl));
+        });
+        rewritten.push(streamInfLine);
+        rewritten.push(variantUrl);
+        return "magic_m3u8:" + encodeBase64String(rewritten.join("\n"));
+    }
+
+    function wantedQualityFromLabel(label) {
+        var text = String(label || "").toLowerCase();
+        var match = text.match(/(\d{3,4})\s*p/);
+        if (match) return parseInt(match[1], 10) || 0;
+        if (text.indexOf("full hd") !== -1 || text === "fhd") return 1080;
+        if (text.indexOf("mid hd") !== -1 || text.indexOf("medium") !== -1) return 720;
+        if (text.indexOf("low hd") !== -1 || text.indexOf("low") !== -1) return 480;
+        return 0;
+    }
+
+    function parseHlsVariants(masterUrl, body) {
+        var text = String(body || "");
+        if (text.indexOf("#EXT-X-STREAM-INF") === -1) return [];
+        var lines = text.split(/\r?\n/).map(function (line) { return String(line || "").trim(); }).filter(Boolean);
+        var variants = [];
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (!/^#EXT-X-STREAM-INF:/i.test(line)) continue;
+            var uri = "";
+            for (var j = i + 1; j < lines.length; j++) {
+                if (lines[j] && lines[j].charAt(0) !== "#") {
+                    uri = lines[j];
+                    break;
+                }
+            }
+            if (!uri) continue;
+            var attrs = parseAttributeList(line.replace(/^#EXT-X-STREAM-INF:/i, ""));
+            variants.push({
+                line: line,
+                uri: uri,
+                url: absoluteUrl(masterUrl, uri),
+                quality: qualityFromInf(line, uri),
+                mediaLines: audioGroupLines(lines, attrs)
+            });
+        }
+        return variants;
+    }
+
+    function selectVariant(variants, wantedQuality) {
+        if (!variants.length) return null;
+        var sorted = variants.slice().sort(function (a, b) {
+            return Number(b.quality || 0) - Number(a.quality || 0);
+        });
+        if (!wantedQuality) return sorted[0];
+        for (var i = 0; i < sorted.length; i++) {
+            if (Number(sorted[i].quality || 0) === wantedQuality) return sorted[i];
+        }
+        for (var j = 0; j < sorted.length; j++) {
+            if (Number(sorted[j].quality || 0) <= wantedQuality) return sorted[j];
+        }
+        return sorted[sorted.length - 1];
+    }
+
     function buildStream(url, source, quality) {
         var stream = new StreamResult({
             url: url,
@@ -681,14 +799,144 @@
         return stream;
     }
 
+    function playlistStreamHeaders() {
+        return {
+            "User-Agent": EXOPLAYER_USER_AGENT,
+            "Accept": "*/*",
+            "Accept-Encoding": "identity",
+            "Connection": "keep-alive",
+            "Cookie": "hd=on",
+            "Referer": MAIN_URL + "/"
+        };
+    }
+
+    function cleanMediaUrl(value) {
+        return absoluteUrl(MAIN_URL, String(value || "").replace(/\\/g, "").trim());
+    }
+
+    function trackToSubtitle(track) {
+        if (!track || String(track.kind || "").toLowerCase() !== "captions" || !track.file) return null;
+        return {
+            url: cleanMediaUrl(track.file),
+            label: trim(track.label) || "Subtitle",
+            lang: trim(track.srclang || track.language || track.label) || undefined,
+            headers: { "Referer": MAIN_URL + "/" }
+        };
+    }
+
+    function attachSubtitles(stream, subtitles) {
+        if (subtitles && subtitles.length) stream.subtitles = subtitles;
+        return stream;
+    }
+
+    function parsePlaylistRows(value) {
+        var parsed = parseJsonSafe(value, []);
+        if (Array.isArray(parsed)) return parsed;
+        if (parsed && Array.isArray(parsed.playlist)) return parsed.playlist;
+        if (parsed && Array.isArray(parsed.sources)) return [parsed];
+        return [];
+    }
+
+    async function loadPlaylistStreams(config, token, input) {
+        var id = String(input.id || "");
+        var title = trim(input.title || "");
+        if (!id) return [];
+        var playlistUrl = MAIN_URL + "/mobile" + config.prefix + "/playlist.php?id=" + encodeURIComponent(id) + "&t=" + encodeURIComponent(title) + "&tm=" + unixTime();
+        var res = await requestGet(playlistUrl, pageHeaders(config, token, MAIN_URL + "/"));
+        var rows = parsePlaylistRows(res.body);
+        var subtitles = [];
+        var candidates = [];
+
+        rows.forEach(function (row) {
+            (row && row.tracks || []).forEach(function (track) {
+                var subtitle = trackToSubtitle(track);
+                if (subtitle) subtitles.push(subtitle);
+            });
+            (row && row.sources || []).forEach(function (source) {
+                if (!source || !source.file) return;
+                candidates.push({
+                    label: trim(source.label || source.name || ""),
+                    url: cleanMediaUrl(source.file),
+                    headers: playlistStreamHeaders()
+                });
+            });
+        });
+
+        var seenSubtitle = {};
+        subtitles = subtitles.filter(function (subtitle) {
+            var key = subtitle.url + "|" + subtitle.label;
+            if (seenSubtitle[key]) return false;
+            seenSubtitle[key] = true;
+            return true;
+        });
+
+        var seen = {};
+        candidates = candidates.filter(function (candidate) {
+            if (!candidate.url || seen[candidate.url]) return false;
+            seen[candidate.url] = true;
+            return true;
+        });
+        if (!candidates.length) return [];
+
+        var responses = await httpParallelGet(candidates, HOME_TITLE_CONCURRENCY);
+        var selected = [];
+        candidates.forEach(function (candidate, index) {
+            var body = String(responses[index] && responses[index].body || "");
+            if (!/#EXTM3U/i.test(body)) return;
+            var wantedQuality = wantedQualityFromLabel(candidate.label);
+            var variants = parseHlsVariants(candidate.url, body);
+            var variant = wantedQuality ? selectVariant(variants, wantedQuality) : null;
+            var quality = variant ? variant.quality : qualityFromLabel(candidate.label, candidate.url, body);
+            var streamUrl = candidate.url;
+            var streamHeaders = candidate.headers;
+            var useMagic = false;
+
+            if (variant) {
+                streamUrl = variant.mediaLines.length
+                    ? buildDirectVariantMaster(candidate.url, variant.mediaLines, variant.line, variant.url)
+                    : variant.url;
+                streamHeaders = variant.mediaLines.length ? {} : candidate.headers;
+                useMagic = variant.mediaLines.length > 0;
+            }
+
+            selected.push({
+                candidate: candidate,
+                url: streamUrl,
+                validateUrl: variant ? variant.url : candidate.url,
+                source: config.name + (candidate.label ? " [" + candidate.label + "]" : (quality ? " [" + quality + "p]" : " [HLS]")),
+                quality: quality,
+                headers: streamHeaders,
+                useMagic: useMagic,
+                body: variant ? "" : body
+            });
+        });
+
+        var validateRequests = selected.map(function (row) {
+            return { url: row.validateUrl, headers: row.headers || {} };
+        });
+        var validation = await httpParallelGet(validateRequests, HOME_TITLE_CONCURRENCY);
+        var streams = [];
+        selected.forEach(function (row, index) {
+            var body = row.body || String(validation[index] && validation[index].body || "");
+            if (!/#EXTM3U/i.test(body)) return;
+            var stream = row.useMagic
+                ? buildStream(row.url, row.source, row.quality)
+                : buildDirectHlsStream(row.url, row.source, row.quality, row.headers);
+            streams.push(attachSubtitles(stream, subtitles));
+        });
+        return streams.sort(function (a, b) {
+            return Number(b.quality || 0) - Number(a.quality || 0);
+        });
+    }
+
     async function expandHls(masterUrl, headers, source, referer) {
         var streams = [
-            buildDirectHlsStream(masterUrl, source + " [Adaptive]", 0, headers),
-            buildStream(proxifyUrl(masterUrl, headers, referer), source + " [Adaptive Proxy]", 0)
+            buildDirectHlsStream(masterUrl, source + " [Adaptive]", 0, headers)
         ];
         var res = await requestGet(masterUrl, headers).catch(function () { return null; });
         var text = String(res && res.body || "");
-        if (!/#EXTM3U/i.test(text) || text.indexOf("#EXT-X-STREAM-INF") === -1) return streams;
+        if (!/#EXTM3U/i.test(text)) return streams.concat([buildStream(proxifyUrl(masterUrl, headers, referer), source + " [Proxy Fallback]", 0)]);
+        if (text.indexOf("#EXT-X-STREAM-INF") === -1) return streams;
 
         var lines = text.split(/\r?\n/).map(function (line) { return String(line || "").trim(); }).filter(Boolean);
         var seen = {};
@@ -717,8 +965,8 @@
                 ? buildStream(playable, source + (quality ? " [" + quality + "p]" : " [HLS]"), quality)
                 : buildDirectHlsStream(playable, source + (quality ? " [" + quality + "p]" : " [HLS]"), quality, headers));
         }
-        var adaptive = streams.slice(0, 2);
-        var qualities = streams.slice(2).sort(function (a, b) {
+        var adaptive = streams.slice(0, 1);
+        var qualities = streams.slice(1).sort(function (a, b) {
             return Number(b.quality || 0) - Number(a.quality || 0);
         });
         streams = adaptive.concat(qualities);
@@ -841,8 +1089,12 @@
         try {
             var input = parsePayload(url);
             var config = PROVIDERS[String(input.providerId || "").toLowerCase()] || selectedProvider();
-            var apiBase = await resolveApiUrl();
             var id = String(input.id || "");
+            var token = await bypass();
+            var playlistStreams = await loadPlaylistStreams(config, token, input).catch(function () { return []; });
+            if (playlistStreams.length) return cb({ success: true, data: playlistStreams });
+
+            var apiBase = await resolveApiUrl();
             var res = await requestGet(apiBase + "/newtv/player.php?id=" + encodeURIComponent(id), buildNewTvHeaders(config.playerOtt, { "Usertoken": "" }));
             var json = parseJsonSafe(res.body, {});
             if (json.status !== "ok" || !json.video_link) return cb({ success: true, data: [] });
