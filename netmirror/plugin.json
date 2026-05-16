@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.netmirror",
   "name": "NetMirror",
-  "version": 1,
+  "version": 2,
   "baseUrl": "https://net52.cc",
   "providers": [
     {
@@ -35,8 +35,7 @@
   ],
   "description": "NetMirror providers ported from the CNCVerse Cloudstream extension with fast NewTV HLS stream resolution.",
   "authors": [
-    "IGRIS",
-    "NivinCNC"
+    "IGRIS"
   ],
   "languages": [
     "ta"

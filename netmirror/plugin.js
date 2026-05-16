@@ -125,6 +125,7 @@
 
     var cookieCache = { value: "", time: 0 };
     var resolvedApiUrl = "";
+    var titleCache = {};
 
     function trim(value) {
         return String(value || "").replace(/\s+/g, " ").trim();
@@ -535,6 +536,34 @@
         return out;
     }
 
+    async function getPostTitle(config, token, id) {
+        var key = config.id + ":" + id;
+        if (Object.prototype.hasOwnProperty.call(titleCache, key)) return titleCache[key];
+        var url = MAIN_URL + "/mobile" + config.prefix + "/post.php?id=" + encodeURIComponent(id) + "&t=" + unixTime();
+        var res = await requestGet(url, pageHeaders(config, token, MAIN_URL + "/home"));
+        var json = parseJsonSafe(res.body, {});
+        titleCache[key] = trim(json.title);
+        return titleCache[key];
+    }
+
+    async function hydrateHomeTitles(config, token, sections) {
+        var items = [];
+        Object.keys(sections || {}).forEach(function (section) {
+            (sections[section] || []).forEach(function (item) {
+                if (!item || !item.url || item.title !== config.name) return;
+                var row = parsePayload(item.url);
+                if (row && row.id) items.push({ item: item, id: row.id });
+            });
+        });
+        await mapConcurrent(items, 4, async function (row) {
+            var title = await getPostTitle(config, token, row.id);
+            if (title) {
+                row.item.title = title;
+                row.item.url = payload({ providerId: config.id, id: String(row.id), title: title });
+            }
+        });
+    }
+
     function buildNewTvHeaders(ott, extra) {
         return withHeaders(NEWTV_BASE_HEADERS, withHeaders({ "Ott": ott }, extra || {}));
     }
@@ -601,11 +630,9 @@
         return match ? parseInt(match[1], 10) || 0 : 0;
     }
 
-    function mediaGroupLines(lines, streamAttrs) {
+    function audioGroupLines(lines, streamAttrs) {
         var groups = {};
-        ["AUDIO", "SUBTITLES", "CLOSED-CAPTIONS"].forEach(function (key) {
-            if (streamAttrs[key] && streamAttrs[key] !== "NONE") groups[key] = streamAttrs[key];
-        });
+        if (streamAttrs.AUDIO && streamAttrs.AUDIO !== "NONE") groups.AUDIO = streamAttrs.AUDIO;
         return lines.filter(function (line) {
             if (!/^#EXT-X-MEDIA:/i.test(line)) return false;
             var attrs = parseAttributeList(line.replace(/^#EXT-X-MEDIA:/i, ""));
@@ -643,9 +670,21 @@
         return stream;
     }
 
+    function buildDirectHlsStream(url, source, quality, headers) {
+        var stream = new StreamResult({
+            url: url,
+            source: source,
+            headers: headers || {}
+        });
+        stream.quality = quality || 0;
+        stream.type = "hls";
+        return stream;
+    }
+
     async function expandHls(masterUrl, headers, source, referer) {
         var streams = [
-            buildStream(proxifyUrl(masterUrl, headers, referer), source + " [Adaptive]", 0)
+            buildDirectHlsStream(masterUrl, source + " [Adaptive]", 0, headers),
+            buildStream(proxifyUrl(masterUrl, headers, referer), source + " [Adaptive Proxy]", 0)
         ];
         var res = await requestGet(masterUrl, headers).catch(function () { return null; });
         var text = String(res && res.body || "");
@@ -667,18 +706,22 @@
             var variantUrl = absoluteUrl(masterUrl, uri);
             var quality = qualityFromInf(line, uri);
             var streamAttrs = parseAttributeList(line.replace(/^#EXT-X-STREAM-INF:/i, ""));
-            var groups = mediaGroupLines(lines, streamAttrs);
+            var groups = audioGroupLines(lines, streamAttrs);
             var playable = groups.length
                 ? buildVariantMaster(masterUrl, groups, line, variantUrl, headers, referer)
-                : proxifyUrl(variantUrl, headers, referer);
+                : variantUrl;
             var key = playable + "|" + quality;
             if (seen[key]) continue;
             seen[key] = true;
-            streams.push(buildStream(playable, source + (quality ? " [" + quality + "p]" : " [HLS]"), quality));
+            streams.push(groups.length
+                ? buildStream(playable, source + (quality ? " [" + quality + "p]" : " [HLS]"), quality)
+                : buildDirectHlsStream(playable, source + (quality ? " [" + quality + "p]" : " [HLS]"), quality, headers));
         }
-        streams.sort(function (a, b) {
+        var adaptive = streams.slice(0, 2);
+        var qualities = streams.slice(2).sort(function (a, b) {
             return Number(b.quality || 0) - Number(a.quality || 0);
         });
+        streams = adaptive.concat(qualities);
         return streams;
     }
 
@@ -697,6 +740,7 @@
                 }).filter(Boolean);
                 if (items.length) sections[title] = items;
             });
+            await hydrateHomeTitles(config, token, sections);
             cb({ success: true, data: sections });
         } catch (e) {
             cb({ success: false, errorCode: "CNCVERSE_HOME_FAILED", message: String(e && e.message || e) });
