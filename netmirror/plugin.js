@@ -7,7 +7,7 @@
     var USER_AGENT = "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.132 Safari/537.36 /OS.Gatu v3.0";
     var NEWTV_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0 /OS.GatuNewTV v1.0";
     var HOME_TITLE_CONCURRENCY = 48;
-    var HOME_TITLE_HYDRATE_LIMIT = 12;
+    var HOME_TITLE_HYDRATE_LIMIT = 0;
     var HOME_CACHE_TTL_MS = 600000;
     var LOAD_CACHE_TTL_MS = 300000;
     var EPISODE_PAGE_CONCURRENCY = 24;
@@ -130,7 +130,6 @@
 
     var cookieCache = { value: "", time: 0 };
     var resolvedApiUrl = "";
-    var titleCache = {};
     var homeCache = {};
     var loadCache = {};
     var LANGUAGE_NAMES = {
@@ -870,7 +869,7 @@
             cleanTitle = alt ? decodeHtml(alt[1]) : "";
         }
         return new MultimediaItem({
-            title: cleanTitle || config.name,
+            title: cleanTitle || "",
             url: payload({ providerId: config.id, id: String(id || ""), title: cleanTitle || "" }),
             posterUrl: posterUrl || config.poster(id),
             type: type || "series"
@@ -1001,51 +1000,6 @@
         return out;
     }
 
-    async function hydrateHomeTitles(config, token, sections) {
-        var items = [];
-        var rowsById = {};
-        Object.keys(sections || {}).forEach(function (section) {
-            (sections[section] || []).forEach(function (item) {
-                if (!item || !item.url || item.title !== config.name) return;
-                var row = parsePayload(item.url);
-                if (row && row.id) {
-                    var id = String(row.id);
-                    var entry = { item: item, id: id };
-                    items.push(entry);
-                    if (!rowsById[id]) rowsById[id] = [];
-                    rowsById[id].push(entry);
-                }
-            });
-        });
-        var requests = [];
-        Object.keys(rowsById).forEach(function (id) {
-            var key = config.id + ":" + id;
-            if (Object.prototype.hasOwnProperty.call(titleCache, key)) return;
-            requests.push({
-                id: id,
-                key: key,
-                url: MAIN_URL + "/mobile" + config.prefix + "/post.php?id=" + encodeURIComponent(id) + "&t=" + unixTime(),
-                headers: pageHeaders(config, token, MAIN_URL + "/home")
-            });
-        });
-        if (HOME_TITLE_HYDRATE_LIMIT <= 0) return;
-        if (requests.length > HOME_TITLE_HYDRATE_LIMIT) {
-            requests = requests.slice(0, HOME_TITLE_HYDRATE_LIMIT);
-        }
-        var responses = await httpParallelGet(requests, HOME_TITLE_CONCURRENCY);
-        requests.forEach(function (req, index) {
-            var json = parseJsonSafe(responses[index] && responses[index].body, {});
-            titleCache[req.key] = trim(json.title);
-        });
-        items.forEach(function (row) {
-            var title = titleCache[config.id + ":" + row.id] || "";
-            if (title) {
-                row.item.title = title;
-                row.item.url = payload({ providerId: config.id, id: String(row.id), title: title });
-            }
-        });
-    }
-
     function buildNewTvHeaders(ott, extra) {
         return withHeaders(NEWTV_BASE_HEADERS, withHeaders({ "Ott": ott }, extra || {}));
     }
@@ -1099,7 +1053,6 @@
                     if (items.length) sections[title] = items;
                 });
             }
-            await hydrateHomeTitles(config, token, sections);
             homeCache[config.id] = { time: Date.now(), data: sections };
             cb({ success: true, data: sections });
         } catch (e) {
