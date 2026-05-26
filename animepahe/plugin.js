@@ -790,7 +790,11 @@
             var cached = cacheGet(kwikCache, kwikUrl, CACHE_TTL);
             if (cached) return cached;
             console.log("[Kwik] Fetching embed: " + kwikUrl);
-            var res = await http_get(kwikUrl, { ...HEADERS, "Referer": kwikUrl });
+            var res = await http_get(kwikUrl, {
+                ...HEADERS,
+                "Referer": MAIN_URL + "/",
+                "Origin": MAIN_URL
+            });
             var html = res.body;
 
             var scriptMatch = html.match(/<script[^>]*>\s*(eval\(function\(p,a,c,k,e[,d]*\)[\s\S]*?)<\/script>/);
@@ -1081,7 +1085,7 @@
             var html = res.body;
 
             var streams = [];
-            var buttonRegex = /<button[^>]*data-src="(https:\/\/kwik\.cx\/e\/[^"]+)"([^>]*)>([\s\S]*?)<\/button>/g;
+            var buttonRegex = /<button[^>]*data-src="(https?:\/\/[^"]*kwik[^"]+)"([^>]*)>([\s\S]*?)<\/button>/gi;
             var attrRegex = /([:@\w-]+)="([^"]*)"/g;
             var match;
             var wantDub = (data.dubStatus === "dub");
@@ -1112,7 +1116,7 @@
             }
 
             if (!buttons.length) {
-                var currentUrl = (html.match(/let\s+url\s*=\s*"(https:\/\/kwik\.cx\/e\/[^"]+)"/i) || [])[1] || "";
+                var currentUrl = (html.match(/let\s+url\s*=\s*"(https?:\/\/[^"]*kwik[^"]+)"/i) || [])[1] || "";
                 if (currentUrl) {
                     buttons.push({
                         kwikHref: currentUrl,
