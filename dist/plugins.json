@@ -439,31 +439,6 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.tokyoinsider.sky"
   },
   {
-    "packageName": "com.igris.repo.vegamovies",
-    "name": "VegaMovies",
-    "version": 83,
-    "baseUrl": "https://vegamovies.vodka",
-    "description": "VegaMovies catalog with Nexdrive, G-Direct, FileBee, and V-Cloud stream resolution.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "hi",
-      "en",
-      "ta",
-      "te",
-      "ml",
-      "kn",
-      "ja"
-    ],
-    "categories": [
-      "Movies",
-      "Series",
-      "Anime"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.vegamovies.sky"
-  },
-  {
     "packageName": "com.igris.repo.youtube",
     "name": "YouTube",
     "version": 20,
