@@ -171,6 +171,10 @@
         return stringOrEmpty(data.cover_image.large || data.cover_image.medium || data.cover_image.small || "");
     }
 
+    function episodePosterUrl(ep, info) {
+        return proxiedUrl(ep && ep.img) || coverUrl(info);
+    }
+
     function normalizeTag(tag) {
         if (tag == null) return "";
         if (typeof tag === "string" || typeof tag === "number" || typeof tag === "boolean") {
@@ -355,13 +359,16 @@
 
             var episodes = ((eps || [])).map(function (ep) {
                 var episodeNumber = integerOrUndefined(ep && ep.ep_num);
+                var posterUrl = episodePosterUrl(ep, info);
                 return new Episode({
                     name: stringOrEmpty(ep.name || ("Episode " + stringOrEmpty(episodeNumber || ep.ep_num))),
                     url: MAIN_URL + "/watch/" + animeId + "?ep=" + encodeURIComponent(stringOrEmpty(episodeNumber || ep.ep_num)) + "&server=default&source_type=sub",
                     season: 1,
                     episode: episodeNumber || 1,
                     description: cleanText(ep.desc || ""),
-                    posterUrl: proxiedUrl(ep.img || "") || coverUrl(info),
+                    posterUrl: posterUrl,
+                    thumbnailUrl: posterUrl,
+                    image: posterUrl,
                     headers: HEADERS,
                     dubStatus: "sub"
                 });
