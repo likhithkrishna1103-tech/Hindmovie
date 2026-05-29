@@ -11,12 +11,19 @@
     const API_BASE = MAIN_URL + "/v2/api/anime";
     const PROXY_BASE = "https://swiftstream.top/proxy";
     const NEXT_AIRING_CACHE = {};
+    const ANIZIP_CACHE = {};
 
     const HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "en-US,en;q=0.5",
         "Origin": MAIN_URL,
+        "Referer": MAIN_URL + "/"
+    };
+
+    const IMAGE_HEADERS = {
+        "User-Agent": HEADERS["User-Agent"],
+        "Accept": "image/avif,image/webp,image/png,image/jpeg,image/*,*/*;q=0.8",
         "Referer": MAIN_URL + "/"
     };
 
@@ -90,6 +97,28 @@
         } catch (_) {
             return cacheSet(NEXT_AIRING_CACHE, cacheKey, null);
         }
+    }
+
+    async function fetchAniZipMeta(malId) {
+        if (!malId) return null;
+        var cacheKey = "mal:" + String(malId);
+        if (Object.prototype.hasOwnProperty.call(ANIZIP_CACHE, cacheKey)) {
+            return cacheGet(ANIZIP_CACHE, cacheKey, 1800000);
+        }
+        try {
+            var meta = await httpJson(
+                "https://api.ani.zip/mappings?mal_id=" + encodeURIComponent(String(malId)),
+                { "Accept": "application/json", "User-Agent": HEADERS["User-Agent"] }
+            );
+            return cacheSet(ANIZIP_CACHE, cacheKey, meta || null);
+        } catch (_) {
+            return cacheSet(ANIZIP_CACHE, cacheKey, null);
+        }
+    }
+
+    function getAniZipEpisodeMeta(aniZipMeta, episodeNumber) {
+        if (!aniZipMeta || !aniZipMeta.episodes || episodeNumber == null) return null;
+        return aniZipMeta.episodes[String(episodeNumber)] || null;
     }
 
     function cleanText(str) {
@@ -171,8 +200,10 @@
         return stringOrEmpty(data.cover_image.large || data.cover_image.medium || data.cover_image.small || "");
     }
 
-    function episodePosterUrl(ep, info) {
-        return proxiedUrl(ep && ep.img) || coverUrl(info);
+    function episodePosterUrl(ep, info, aniZipMeta) {
+        var episodeNumber = integerOrUndefined(ep && ep.ep_num);
+        var meta = getAniZipEpisodeMeta(aniZipMeta, episodeNumber);
+        return stringOrEmpty(meta && meta.image) || proxiedUrl(ep && ep.img) || coverUrl(info);
     }
 
     function normalizeTag(tag) {
@@ -335,6 +366,7 @@
             var animeId = animeMatch[1];
             var info = await httpJson(API_BASE + "/info/" + animeId, HEADERS);
             var eps = await httpJson(API_BASE + "/eps/" + animeId, HEADERS);
+            var aniZipMeta = await fetchAniZipMeta(optionalString(info && info.mal_id));
 
             var trailers = [];
             if (info && info.trailer) {
@@ -359,17 +391,20 @@
 
             var episodes = ((eps || [])).map(function (ep) {
                 var episodeNumber = integerOrUndefined(ep && ep.ep_num);
-                var posterUrl = episodePosterUrl(ep, info);
+                var episodeMeta = getAniZipEpisodeMeta(aniZipMeta, episodeNumber);
+                var posterUrl = episodePosterUrl(ep, info, aniZipMeta);
                 return new Episode({
-                    name: stringOrEmpty(ep.name || ("Episode " + stringOrEmpty(episodeNumber || ep.ep_num))),
+                    name: stringOrEmpty((episodeMeta && episodeMeta.title && episodeMeta.title.en) || ep.name || ("Episode " + stringOrEmpty(episodeNumber || ep.ep_num))),
                     url: MAIN_URL + "/watch/" + animeId + "?ep=" + encodeURIComponent(stringOrEmpty(episodeNumber || ep.ep_num)) + "&server=default&source_type=sub",
                     season: 1,
                     episode: episodeNumber || 1,
-                    description: cleanText(ep.desc || ""),
+                    description: cleanText((episodeMeta && (episodeMeta.overview || episodeMeta.summary)) || ep.desc || ""),
                     posterUrl: posterUrl,
                     thumbnailUrl: posterUrl,
                     image: posterUrl,
-                    headers: HEADERS,
+                    headers: IMAGE_HEADERS,
+                    runtime: integerOrUndefined(episodeMeta && (episodeMeta.runtime || episodeMeta.length)),
+                    airDate: optionalString((episodeMeta && (episodeMeta.airDate || episodeMeta.airdate)) || (ep && ep.aired_at)),
                     dubStatus: "sub"
                 });
             });
