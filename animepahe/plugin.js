@@ -408,6 +408,22 @@
         }
     }
 
+    async function tmdbGet(url) {
+        return http_get(url, {
+            "Accept": "application/json",
+            "User-Agent": HEADERS["User-Agent"] || "Mozilla/5.0"
+        });
+    }
+
+    function parseJsonResponse(res, context) {
+        var body = res && (res.body || res.text || "") || "";
+        if (!body) throw new Error((context || "Request") + " returned empty response");
+        if (/^\s*</.test(body)) {
+            throw new Error((context || "Request") + " returned HTML instead of JSON");
+        }
+        return JSON.parse(body);
+    }
+
     function buildAniZipEpisodeMap(aniZipMeta) {
         return aniZipMeta && aniZipMeta.episodes ? aniZipMeta.episodes : null;
     }
@@ -496,7 +512,7 @@
                     + "&with_genres=16&with_origin_country=JP&language=en-US";
             var res  = await tmdbGet(url);
             if (!res || !res.body) throw new Error("Empty response");
-            var data = JSON.parse(res.body);
+            var data = parseJsonResponse(res, "TMDB search");
             return data.results || [];
         } catch(e) {
             console.error("[TMDB] search error:", e.message);
@@ -515,7 +531,7 @@
                     + (extraParams || "");
             var res  = await tmdbGet(url);
             if (!res || !res.body) throw new Error("Empty response");
-            var data = JSON.parse(res.body);
+            var data = parseJsonResponse(res, "TMDB category");
             return (data.results || []).slice(0, 20);
         } catch(e) {
             console.error("[TMDB] category error:", e.message);
@@ -523,13 +539,13 @@
         }
     }
 
-    function tmdbToMultimediaItem(item) {
+    function tmdbToMultimediaItem(item, forcedType) {
         var title   = item.name || item.original_name || item.title || "Unknown";
         var poster  = item.poster_path  ? (TMDB_IMG + item.poster_path)  : null;
         var banner  = item.backdrop_path? (TMDB_IMG + item.backdrop_path): poster;
         var year    = item.first_air_date ? parseInt(item.first_air_date.split("-")[0]) : null;
         var score   = item.vote_average  ? parseFloat(item.vote_average.toFixed(1)) : null;
-        var mediaType = (item.media_type === "movie") ? "movie" : "anime";
+        var mediaType = forcedType || ((item.media_type === "movie") ? "movie" : "anime");
 
         return new MultimediaItem({
             title:       title,
@@ -567,8 +583,7 @@
             async function fetchAiringPage(page) {
                 var url = MAIN_URL + "/api?m=airing&page=" + page;
                 var res = await http_get(url, HEADERS);
-                if (!res || !res.body) throw new Error("Empty response");
-                var data = new AiringResponse(JSON.parse(res.body));
+                var data = new AiringResponse(parseJsonResponse(res, "AnimePahe airing"));
                 return data.data.map(function(item) {
                     var m = toMultimediaItem(item, true);
                     m.description = "Episode " + item.episode;
@@ -581,9 +596,37 @@
             async function fetchSearchPage(query, page) {
                 var url = MAIN_URL + "/api?m=search&l=12&q=" + encodeURIComponent(query) + "&page=" + (page||1);
                 var res = await http_get(url, HEADERS);
-                if (!res || !res.body) throw new Error("Empty response");
-                var data = new SearchResponse(JSON.parse(res.body));
+                var data = new SearchResponse(parseJsonResponse(res, "AnimePahe search"));
                 return data.data.map(function(item) { return toMultimediaItem(item, false); });
+            }
+
+            async function fetchTmdbPage(endpoint, extraParams, forcedType) {
+                var rows = await tmdbAnimeByCategory(endpoint, extraParams);
+                return rows.map(function(item) { return tmdbToMultimediaItem(item, forcedType); });
+            }
+
+            async function buildTmdbFallbackHome() {
+                var today = new Date().toISOString().slice(0, 10);
+                var jobs = [
+                    { key: "Trending", run: function() { return fetchTmdbPage("/discover/tv", "&sort_by=popularity.desc&vote_count.gte=50"); } },
+                    { key: "Latest Anime", run: function() { return fetchTmdbPage("/discover/tv", "&sort_by=first_air_date.desc&first_air_date.lte=" + today); } },
+                    { key: "Popular Anime", run: function() { return fetchTmdbPage("/discover/tv", "&sort_by=popularity.desc&vote_count.gte=200"); } },
+                    { key: "Top Rated Anime", run: function() { return fetchTmdbPage("/discover/tv", "&sort_by=vote_average.desc&vote_count.gte=100"); } },
+                    { key: "Anime Movies", run: function() { return fetchTmdbPage("/discover/movie", "&sort_by=popularity.desc&with_original_language=ja", "movie"); } }
+                ];
+                var rows = await Promise.all(jobs.map(async function(job) {
+                    try {
+                        return { key: job.key, items: await job.run() };
+                    } catch(e) {
+                        console.error("[Home] " + job.key + " fallback error:", e.message);
+                        return { key: job.key, items: [] };
+                    }
+                }));
+                var fallback = {};
+                rows.forEach(function(row) {
+                    if (row.items && row.items.length) fallback[row.key] = row.items;
+                });
+                return fallback;
             }
 
             var rowJobs = [
@@ -602,7 +645,9 @@
                 try {
                     return { key: job.key, items: await job.run() };
                 } catch(e) {
-                    console.error("[Home] " + job.key + " error:", e.message);
+                    if (String(e && e.message || "").indexOf("returned HTML instead of JSON") === -1) {
+                        console.error("[Home] " + job.key + " error:", e.message);
+                    }
                     return { key: job.key, items: [] };
                 }
             }));
@@ -610,6 +655,10 @@
             rowResults.forEach(function(result) {
                 if (result.items && result.items.length) homeData[result.key] = result.items;
             });
+
+            if (!Object.keys(homeData).length) {
+                homeData = await buildTmdbFallbackHome();
+            }
 
             cb({ success: true, data: homeData });
 
