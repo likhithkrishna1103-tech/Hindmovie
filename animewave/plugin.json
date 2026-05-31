@@ -1,12 +1,11 @@
 {
   "packageName": "com.igris.repo.animewave",
-  "name": "AnimeWave and it's varients",
-  "version": 4,
+  "name": "AnimeWave + AniKoto",
+  "version": 5,
   "baseUrl": "https://animewave.to",
   "domains": [
     { "name": "animewave", "url": "https://animewave.to" },
-    { "name": "anikoto", "url": "https://anikoto.net" },
-    { "name": "anisuge", "url": "https://anisuge.tv" }
+    { "name": "anikoto", "url": "https://anikoto.net" }
   ],
   "description": "A clone for hianime",
   "authors": [
