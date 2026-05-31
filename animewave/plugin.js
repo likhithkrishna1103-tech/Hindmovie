@@ -735,7 +735,7 @@
         if (!resultUrl) return [];
         resultUrl = resultUrl.replace(/\\\//g, "/");
         var lang = server.language || "SUB";
-        var source = "AnimeWave [" + lang + "] [" + trim(server.name || "Server") + "]";
+        var source = "🎥 [" + lang + "] [" + trim(server.name || "Server") + "]";
         var host = (resultUrl.match(/^https?:\/\/([^\/]+)/i) || [])[1] || "";
         var headers = {
             "User-Agent": USER_AGENT,
