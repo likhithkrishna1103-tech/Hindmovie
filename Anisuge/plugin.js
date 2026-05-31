@@ -377,10 +377,26 @@
         return image;
     }
 
+    function firstImageUrl(html) {
+        var image = (String(html || "").match(/<img\b[^>]*(?:data-src|data-original|src)=["']([^"']+)["'][^>]*>/i) || [])[1] || "";
+        return image;
+    }
+
+    function backgroundImageUrl(html) {
+        return (String(html || "").match(/background-image:\s*url\((['"]?)([^'")]+)\1\)/i) || [])[2] || "";
+    }
+
+    function cleanCardTitle(title) {
+        return cleanText(title)
+            .replace(/\s+(?:TV|ONA|OVA|MOVIE|SPECIAL|MUSIC)\s+[\d\s?HMNIA.-]*$/i, "")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
     function cardFromWatchAnchor(anchorHtml, attrs, pageUrl, contextHtml) {
         var href = attrs.href || "";
         if (!/\/watch\//i.test(href)) return null;
-        var title = cleanText(anchorHtml).replace(/\s+(?:TV|ONA|OVA|MOVIE|SPECIAL|MUSIC)\s+[\d\s?HMNIA.-]*$/i, "");
+        var title = cleanCardTitle(anchorHtml);
         if (/^\d+$/.test(title)) title = "";
         if (!title) title = cleanText(attrs.title || attrs["data-title"] || attrs["aria-label"] || attrs["data-jp"] || "");
         if (!title) return null;
@@ -390,6 +406,47 @@
             posterUrl: absoluteUrl(pageUrl || BASE_URL, lastImageUrl(contextHtml || "")),
             type: typeFromText(contextHtml || anchorHtml)
         });
+    }
+
+    function parseAnchorItemCards(html, pageUrl) {
+        var cards = [];
+        var re = /<a\b([^>]*class=["'][^"']*\bitem\b[^"']*["'][^>]*href=["'][^"']*\/watch\/[^"']+["'][^>]*)>([\s\S]*?)<\/a>/gi;
+        var match;
+        while ((match = re.exec(html || "")) !== null) {
+            var attrs = parseAttrs(match[1]);
+            var body = match[2] || "";
+            var title = cleanCardTitle((body.match(/<(?:p|div)\b[^>]*class=["'][^"']*\bname\b[^"']*["'][^>]*>([\s\S]*?)<\/(?:p|div)>/i) || [])[1] || "");
+            if (!title) title = cleanText((body.match(/<img\b[^>]*alt=["']([^"']+)["']/i) || [])[1] || "");
+            if (!title) title = cleanText(attrs.title || attrs["data-title"] || attrs["aria-label"] || "");
+            if (!title) continue;
+            cards.push(safeMultimediaItem({
+                title: title,
+                url: absoluteUrl(pageUrl || BASE_URL, attrs.href || ""),
+                posterUrl: absoluteUrl(pageUrl || BASE_URL, firstImageUrl(body) || backgroundImageUrl(body)),
+                type: typeFromText(body)
+            }));
+        }
+        return cards;
+    }
+
+    function parsePosterNameCards(html, pageUrl) {
+        var cards = [];
+        var re = /<a\b([^>]*class=["'][^"']*\bposter\b[^"']*["'][^>]*href=["'][^"']*\/watch\/[^"']+["'][^>]*)>([\s\S]*?)<\/a>[\s\S]{0,1800}?<div\b[^>]*class=["'][^"']*\bname\b[^"']*["'][^>]*>\s*<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+        var match;
+        while ((match = re.exec(html || "")) !== null) {
+            var posterAttrs = parseAttrs(match[1]);
+            var titleAttrs = parseAttrs(match[3]);
+            var title = cleanCardTitle(match[4] || titleAttrs.title || titleAttrs["data-jp"] || "");
+            if (!title) title = cleanText((match[2].match(/<img\b[^>]*alt=["']([^"']+)["']/i) || [])[1] || "");
+            if (!title) continue;
+            cards.push(safeMultimediaItem({
+                title: title,
+                url: absoluteUrl(pageUrl || BASE_URL, posterAttrs.href || titleAttrs.href || ""),
+                posterUrl: absoluteUrl(pageUrl || BASE_URL, firstImageUrl(match[2])),
+                type: typeFromText(match[0])
+            }));
+        }
+        return cards;
     }
 
     function parseWatchCards(html, pageUrl) {
@@ -410,7 +467,7 @@
     }
 
     function parseCards(html, pageUrl) {
-        var cards = [];
+        var cards = parsePosterNameCards(html, pageUrl).concat(parseAnchorItemCards(html, pageUrl));
         var re = /<\b[^>]*class=["'][^"']*\bitem\b[^"']*["'][^>]*>[\s\S]*?<a\b[^>]*class=["'][^"']*\bname\b[^"']*\bd-title\b[^"']*["'][^>]*>[\s\S]*?<\/a>[\s\S]*?<\/a>\s*<\/a>/gi;
         var match;
         while ((match = re.exec(html || "")) !== null) {
@@ -423,14 +480,26 @@
 
     function parseHeroCards(html) {
         var out = [];
-        var re = /<a\b[^>]*class=["'][^"']*\bswiper-slide\b[^"']*\bitem\b[^"']*["'][^>]*>[\s\S]*?<h2\b[^>]*class=["'][^"']*\bd-title\b[^"']*["'][^>]*>([\s\S]*?)<\/h2>[\s\S]*?<a\b[^>]*href=["']([^"']+)["'][^>]*class=["'][^"']*\bplay\b[^"']*["'][\s\S]*?background-image:\s*url\((['"]?)([^'")]+)\3\)/gi;
+        var source = String(html || "");
+        var sliderStart = source.indexOf('id="slider"');
+        if (sliderStart === -1) sliderStart = source.indexOf("id='slider'");
+        if (sliderStart !== -1) {
+            var sliderEnd = source.indexOf('class="unix-site-search home', sliderStart);
+            source = source.slice(sliderStart, sliderEnd > sliderStart ? sliderEnd : undefined);
+        }
+        var re = /<a\b([^>]*)>/gi;
         var match;
-        while ((match = re.exec(html || "")) !== null) {
+        while ((match = re.exec(source)) !== null) {
+            var attrs = parseAttrs(match[1]);
+            if (!/\bswiper-slide\b/i.test(attrs.class || "") || !/\/watch\//i.test(attrs.href || "")) continue;
+            var image = backgroundImageUrl(match[1]);
+            var title = cleanText(attrs.title || attrs["aria-label"] || "");
+            if (!title || !attrs.href) continue;
             out.push(safeMultimediaItem({
-                title: cleanText(match[1]),
-                url: absoluteUrl(BASE_URL, match[2]),
-                posterUrl: absoluteUrl(BASE_URL, match[4]),
-                bannerUrl: absoluteUrl(BASE_URL, match[4]),
+                title: title,
+                url: absoluteUrl(BASE_URL, attrs.href),
+                posterUrl: absoluteUrl(BASE_URL, image),
+                bannerUrl: absoluteUrl(BASE_URL, image),
                 type: "anime"
             }));
         }
@@ -538,7 +607,16 @@
             if (infoEnd === -1) infoEnd = String(html || "").indexOf("id='ani-seasons'", infoStart);
             infoHtml = String(html || "").slice(infoStart, infoEnd > infoStart ? infoEnd : undefined);
         }
+        if (!infoHtml) {
+            infoStart = String(html || "").indexOf('id="media-info"');
+            if (infoStart === -1) infoStart = String(html || "").indexOf("id='media-info'");
+            if (infoStart !== -1) {
+                var relatedStart = String(html || "").indexOf('id="related', infoStart);
+                infoHtml = String(html || "").slice(infoStart, relatedStart > infoStart ? relatedStart : undefined);
+            }
+        }
         var title = cleanText((html.match(/<h1\b[^>]*class=["'][^"']*\bd-title\b[^"']*["'][^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || "");
+        if (!title) title = cleanText((infoHtml.match(/<h1\b[^>]*class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || "");
         if (!title) title = cleanText((html.match(/<meta\b[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i) || [])[1] || "");
         if (!title) title = cleanText((html.match(/<title>([\s\S]*?)<\/title>/i) || [])[1] || "");
         title = title
@@ -546,6 +624,8 @@
             .replace(/\s*[|-]\s*(?:AnimeWave|AnimeSuge|Animesuge).*$/i, "")
             .trim();
         var poster = ((infoHtml || html).match(/<a\b[^>]*class=["'][^"']*\bposter\b[^"']*["'][\s\S]*?<img\b[^>]*(?:data-src|src)=["']([^"']+)["']/i) || [])[1] || "";
+        if (!poster) poster = firstImageUrl(infoHtml || "");
+        if (!poster) poster = (html.match(/<meta\b[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i) || [])[1] || "";
         var banner = ((infoHtml || html).match(/background-image:\s*url\((['"]?)([^'")]+)\1\)/i) || [])[2] || poster;
         var description = cleanText((infoHtml.match(/<a\b[^>]*class=["'][^"']*\bcontent\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/i) || [])[1] || "");
         if (!description) description = cleanText((html.match(/<meta\b[^>]*(?:name|property)=["'](?:description|og:description)["'][^>]*content=["']([^"']+)["']/i) || [])[1] || "");
