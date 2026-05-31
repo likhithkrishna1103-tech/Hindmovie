@@ -2,7 +2,7 @@
   {
     "packageName": "com.igris.repo.animepahe",
     "name": "AnimePahe",
-    "version": 24,
+    "version": 25,
     "baseUrl": "https://animepahe.com",
     "domains": [
       {
