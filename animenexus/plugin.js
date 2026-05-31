@@ -24,18 +24,44 @@
         });
     }
 
+    function base64Decode(str) {
+        if (typeof atob !== "undefined") return atob(str);
+        var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        str = str.replace(/=+$/, "");
+        var output = "";
+        for (var i = 0; i < str.length; i += 4) {
+            var a = chars.indexOf(str[i] || "A");
+            var b = chars.indexOf(str[i + 1] || "A");
+            var c = chars.indexOf(str[i + 2] || "A");
+            var d = chars.indexOf(str[i + 3] || "A");
+            if (a < 0) a = 0; if (b < 0) b = 0; if (c < 0) c = 0; if (d < 0) d = 0;
+            output += String.fromCharCode((a << 18) | (b << 12) | (c << 6) | d);
+        }
+        return output;
+    }
+
     function decodeImgproxyUrl(path) {
         if (!path) return "";
         if (path.indexOf("http://") === 0 || path.indexOf("https://") === 0) return path;
         var segments = String(path).split("/");
-        var lastSegment = segments[segments.length - 1];
-        if (!lastSegment) return "";
-        var b64 = lastSegment.replace(/\.[^.]+$/, "");
+        var b64Parts = [];
+        for (var i = 2; i < segments.length; i++) {
+            var seg = segments[i];
+            if (seg.indexOf(":") >= 0) continue;
+            b64Parts.push(seg);
+        }
+        if (b64Parts.length === 0) return "";
+        var last = b64Parts[b64Parts.length - 1];
+        b64Parts[b64Parts.length - 1] = last.replace(/\.[^.]+$/, "");
+        var b64 = b64Parts.join("");
+        if (b64.length % 4 !== 0) {
+            b64 += "====".substring(0, 4 - (b64.length % 4));
+        }
         try {
-            var decoded = atob(b64);
+            var decoded = base64Decode(b64);
             if (decoded.indexOf("http://") === 0 || decoded.indexOf("https://") === 0) return decoded;
         } catch (_) {}
-        return ASSETS_BASE + (path.charAt(0) === "/" ? "" : "/") + path;
+        return "";
     }
 
     function cleanText(str) {
@@ -175,7 +201,6 @@
 
     async function fetchAllEpisodes(animeId) {
         var all = [];
-        var page = 1;
         var lastPage = 1;
         var baseUrl = API_BASE + "/details/episodes?id=" + encodeURIComponent(animeId) + "&order=asc&fillers=true&recaps=true";
 
@@ -185,14 +210,18 @@
                 all = first.data;
                 lastPage = first.meta && first.meta.last_page ? first.meta.last_page : 1;
             }
-            for (var p = 2; p <= lastPage; p++) {
-                try {
-                    var more = await httpJson(baseUrl + "&page=" + p, HEADERS);
-                    if (more && more.data && Array.isArray(more.data)) {
-                        all = all.concat(more.data);
+            for (var p = 2; p <= lastPage; p += 5) {
+                var batch = [];
+                var batchEnd = Math.min(p + 5, lastPage + 1);
+                for (var b = p; b < batchEnd; b++) {
+                    var pageNum = b;
+                    batch.push(httpJson(baseUrl + "&page=" + pageNum, HEADERS).catch(function () { return null; }));
+                }
+                var pageResults = await Promise.all(batch);
+                for (var r = 0; r < pageResults.length; r++) {
+                    if (pageResults[r] && pageResults[r].data && Array.isArray(pageResults[r].data)) {
+                        all = all.concat(pageResults[r].data);
                     }
-                } catch (_) {
-                    break;
                 }
             }
         } catch (_) {}
@@ -202,15 +231,17 @@
 
     async function getHome(cb) {
         try {
-            var featured = await httpJson(API_BASE + "/featured", HEADERS);
-            var seasonal = await httpJson(API_BASE + "/seasonal", HEADERS);
-            var popular = await httpJson(API_BASE + "/popular?period=day&limit=15", HEADERS);
-            var latest = await httpJson(API_BASE + "/latest", HEADERS);
+            var results = await Promise.all([
+                httpJson(API_BASE + "/featured", HEADERS).catch(function () { return null; }),
+                httpJson(API_BASE + "/seasonal", HEADERS).catch(function () { return null; }),
+                httpJson(API_BASE + "/popular?period=day&limit=15", HEADERS).catch(function () { return null; }),
+                httpJson(API_BASE + "/latest", HEADERS).catch(function () { return null; })
+            ]);
 
-            var trendingItems = mapHomeItems((featured && featured.data) || []).slice(0, 20);
-            var seasonalItems = mapHomeItems((seasonal && seasonal.data) || []).slice(0, 20);
-            var popularItems = mapHomeItems((popular && popular.data) || []).slice(0, 20);
-            var latestItems = mapHomeItems((latest && latest.data) || []).slice(0, 20);
+            var trendingItems = mapHomeItems((results[0] && results[0].data) || []).slice(0, 20);
+            var seasonalItems = mapHomeItems((results[1] && results[1].data) || []).slice(0, 20);
+            var popularItems = mapHomeItems((results[2] && results[2].data) || []).slice(0, 20);
+            var latestItems = mapHomeItems((results[3] && results[3].data) || []).slice(0, 20);
 
             cb({
                 success: true,
@@ -251,43 +282,17 @@
 
             var animeId = animeMatch[1];
 
-            var info = null;
-            try {
-                var infoRes = await httpJson(
-                    API_BASE + "/details/view?id=" + encodeURIComponent(animeId),
-                    HEADERS
-                );
-                info = infoRes && infoRes.data;
-            } catch (_) {
-                info = null;
-            }
+            var results = await Promise.all([
+                httpJson(API_BASE + "/details/view?id=" + encodeURIComponent(animeId), HEADERS).catch(function () { return null; }),
+                fetchAllEpisodes(animeId),
+                httpJson(API_BASE + "/details/statistics?id=" + encodeURIComponent(animeId), HEADERS).catch(function () { return null; }),
+                httpJson(API_BASE + "/details/related?id=" + encodeURIComponent(animeId), HEADERS).catch(function () { return null; })
+            ]);
 
-            var episodes = [];
-            try {
-                episodes = await fetchAllEpisodes(animeId);
-            } catch (_) {}
-
-            var stats = null;
-            try {
-                var statsRes = await httpJson(
-                    API_BASE + "/details/statistics?id=" + encodeURIComponent(animeId),
-                    HEADERS
-                );
-                stats = statsRes && statsRes.data;
-            } catch (_) {
-                stats = null;
-            }
-
-            var relatedData = [];
-            try {
-                var relatedRes = await httpJson(
-                    API_BASE + "/details/related?id=" + encodeURIComponent(animeId),
-                    HEADERS
-                );
-                relatedData = (relatedRes && relatedRes.data) || [];
-            } catch (_) {
-                relatedData = [];
-            }
+            var info = results[0] && results[0].data;
+            var episodes = results[1] || [];
+            var stats = results[2] && results[2].data;
+            var relatedData = (results[3] && results[3].data) || [];
 
             var trailers = [];
 
@@ -474,4 +479,10 @@
     globalThis.search = search;
     globalThis.load = load;
     globalThis.loadStreams = loadStreams;
+    if (typeof window !== "undefined") {
+        window.getHome = getHome;
+        window.search = search;
+        window.load = load;
+        window.loadStreams = loadStreams;
+    }
 })();
