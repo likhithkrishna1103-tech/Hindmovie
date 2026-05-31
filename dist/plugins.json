@@ -1,37 +1,5 @@
 [
   {
-    "packageName": "com.igris.repo.animepahe",
-    "name": "AnimePahe",
-    "version": 25,
-    "baseUrl": "https://animepahe.com",
-    "domains": [
-      {
-        "name": "animepahe.com",
-        "url": "https://animepahe.com"
-      },
-      {
-        "name": "animepahe.org",
-        "url": "https://animepahe.org"
-      },
-      {
-        "name": "animepahe.pw",
-        "url": "https://animepahe.pw"
-      }
-    ],
-    "description": "Fast anime streaming with sub and dub.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "en",
-      "ja"
-    ],
-    "categories": [
-      "Anime"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animepahe.sky"
-  },
-  {
     "packageName": "com.igris.repo.animetsu",
     "name": "Animetsu",
     "version": 10,
