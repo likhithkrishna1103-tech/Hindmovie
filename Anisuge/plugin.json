@@ -1,0 +1,21 @@
+{
+  "packageName": "com.igris.repo.anisuge",
+  "name": "AniSuge",
+  "version": 1,
+  "baseUrl": "https://anisuge.tv",
+  "domains": [
+    { "name": "anisuge", "url": "https://anisuge.tv" },
+    { "name": "animesogo", "url": "https://animesogo.to" }    
+  ],
+  "description": "A Varient for animewave",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "ja"
+  ],
+  "categories": [
+    "Anime"
+  ]
+}
