@@ -2,12 +2,21 @@
   {
     "packageName": "com.igris.repo.animepahe",
     "name": "AnimePahe",
-    "version": 23,
+    "version": 24,
     "baseUrl": "https://animepahe.com",
     "domains": [
-      "animepahe.com",
-      "animepahe.org",
-      "animepahe.pw"
+      {
+        "name": "animepahe.com",
+        "url": "https://animepahe.com"
+      },
+      {
+        "name": "animepahe.org",
+        "url": "https://animepahe.org"
+      },
+      {
+        "name": "animepahe.pw",
+        "url": "https://animepahe.pw"
+      }
     ],
     "description": "Fast anime streaming with sub and dub.",
     "authors": [

@@ -1,6 +1,5 @@
 (function() {
     const MAIN_URL = (((typeof manifest !== "undefined" && manifest && manifest.baseUrl) || "https://animepahe.com") + "").replace(/\/+$/, "");
-    const PROXY = "https://animepaheproxy.phisheranimepahe.workers.dev/?url=";
     const HEADERS = {
         "Cookie": "__ddg2_=1234567890",
         "Referer": MAIN_URL,
@@ -18,14 +17,14 @@
     var nextAiringCache = {};
     // Poster lookup:
     // AnimePahe's search API returns a proper "poster" cover image for each anime.
-    // We search by title and take the first result's poster — same proxy, always works.
+    // We search by title and take the first result's poster.
     // Falls back to TMDB direct if AnimePahe search returns nothing.
     async function getPoster(title) {
         if (!title) return null;
 
         // Source 1: AnimePahe search API — returns proper cover poster, not episode snapshot
         try {
-            var apUrl = PROXY + MAIN_URL + "/api?m=search&l=1&q=" + encodeURIComponent(title);
+            var apUrl = MAIN_URL + "/api?m=search&l=1&q=" + encodeURIComponent(title);
             var apRes = await http_get(apUrl, HEADERS);
             if (apRes && apRes.body) {
                 var apData = JSON.parse(apRes.body);
@@ -49,20 +48,6 @@
                 if (r && r.poster_path) return TMDB_IMG + r.poster_path;
             }
         } catch(e) { /* try next */ }
-
-        // Source 3: TMDB via proxy (last resort)
-        try {
-            var tpUrl = PROXY + encodeURIComponent(
-                TMDB_BASE + "/search/tv?api_key=" + TMDB_API_KEY
-                + "&query=" + encodeURIComponent(title) + "&language=en-US"
-            );
-            var tpRes = await http_get(tpUrl);
-            if (tpRes && tpRes.body && tpRes.body.indexOf("{") === 0) {
-                var tpData = JSON.parse(tpRes.body);
-                var rp = tpData.results && tpData.results[0];
-                if (rp && rp.poster_path) return TMDB_IMG + rp.poster_path;
-            }
-        } catch(e) { /* all failed */ }
 
         return null;
     }
@@ -580,7 +565,7 @@
 
             // Helper: fetch one airing page, enrich posters from Jikan (MAL)
             async function fetchAiringPage(page) {
-                var url = PROXY + MAIN_URL + "/api?m=airing&page=" + page;
+                var url = MAIN_URL + "/api?m=airing&page=" + page;
                 var res = await http_get(url, HEADERS);
                 if (!res || !res.body) throw new Error("Empty response");
                 var data = new AiringResponse(JSON.parse(res.body));
@@ -594,7 +579,7 @@
 
             // Helper: fetch one search page for anime type, enrich posters from Jikan
             async function fetchSearchPage(query, page) {
-                var url = PROXY + MAIN_URL + "/api?m=search&l=12&q=" + encodeURIComponent(query) + "&page=" + (page||1);
+                var url = MAIN_URL + "/api?m=search&l=12&q=" + encodeURIComponent(query) + "&page=" + (page||1);
                 var res = await http_get(url, HEADERS);
                 if (!res || !res.body) throw new Error("Empty response");
                 var data = new SearchResponse(JSON.parse(res.body));
@@ -651,7 +636,7 @@
             }
             searchInflight[key] = (async function() {
             // Primary: AnimePahe API
-            var url = PROXY + MAIN_URL + "/api?m=search&l=8&q=" + encodeURIComponent(query);
+            var url = MAIN_URL + "/api?m=search&l=8&q=" + encodeURIComponent(query);
             var res = await http_get(url, HEADERS);
             var data = JSON.parse(res.body);
             var searchRes = new SearchResponse(data);
@@ -898,7 +883,7 @@
             var name    = loadData.name;
 
             async function fetchAnimePage(targetSession) {
-                var animeUrl = PROXY + MAIN_URL + "/anime/" + targetSession;
+                var animeUrl = MAIN_URL + "/anime/" + targetSession;
                 var res = await http_get(animeUrl, HEADERS);
                 return { animeUrl: animeUrl, html: res.body || "" };
             }
@@ -990,7 +975,7 @@
 
     async function fetchAllEpisodes(session, metaEpisodes) {
         var episodes = [];
-        var firstPageUrl = PROXY + MAIN_URL + "/api?m=release&id=" + session + "&sort=episode_asc&page=1";
+        var firstPageUrl = MAIN_URL + "/api?m=release&id=" + session + "&sort=episode_asc&page=1";
 
         try {
             var res       = await http_get(firstPageUrl, HEADERS);
@@ -1024,7 +1009,7 @@
     }
 
     async function fetchEpisodePage(session, page, metaEpisodes) {
-        var url = PROXY + MAIN_URL + "/api?m=release&id=" + session + "&sort=episode_asc&page=" + page;
+        var url = MAIN_URL + "/api?m=release&id=" + session + "&sort=episode_asc&page=" + page;
         try {
             var res      = await http_get(url, HEADERS);
             var data     = JSON.parse(res.body);
@@ -1077,7 +1062,7 @@
     async function loadStreams(url, cb) {
         try {
             var data       = JSON.parse(url);
-            var episodeUrl = PROXY + MAIN_URL + "/play/" + data.session + "/" + data.episode_session;
+            var episodeUrl = MAIN_URL + "/play/" + data.session + "/" + data.episode_session;
 
             console.log("[loadStreams] Fetching play page:", episodeUrl);
 
