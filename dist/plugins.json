@@ -20,7 +20,7 @@
   {
     "packageName": "com.igris.repo.animewave",
     "name": "AnimeWave + AniKoto",
-    "version": 5,
+    "version": 6,
     "baseUrl": "https://animewave.to",
     "domains": [
       {
@@ -28,8 +28,24 @@
         "url": "https://animewave.to"
       },
       {
-        "name": "anikoto",
+        "name": "anikoto.net",
         "url": "https://anikoto.net"
+      },
+      {
+        "name": "anikototv.to",
+        "url": "https://anikototv.to"
+      },
+      {
+        "name": "anikoto.cz",
+        "url": "https://anikoto.cz"
+      },
+      {
+        "name": "anikoto.me",
+        "url": "https://anikoto.me"
+      },
+      {
+        "name": "anikototv.se",
+        "url": "https://anikototv.se"
       }
     ],
     "description": "A clone for hianime",
