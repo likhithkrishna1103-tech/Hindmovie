@@ -422,6 +422,8 @@
 
     async function loadStreams(url, cb) {
         try {
+            await httpJson(API_BASE + "/search?q=a", HEADERS).catch(function () {});
+
             var match = String(url || "").match(/\/watch\/([^/?#]+)\?ep=([^&]+)/i);
             if (!match) throw new Error("Could not extract episode info from URL: " + url);
 
@@ -433,11 +435,9 @@
             );
 
             var data = payload && payload.data;
-            if (!data || !data.video_meta || !data.video_meta.hls) {
-                throw new Error("No HLS stream found");
-            }
+            if (!data || !data.hls) throw new Error("No HLS stream found");
 
-            var hlsUrl = data.video_meta.hls;
+            var hlsUrl = data.hls;
             var subtitles = [];
             if (data.subtitles && Array.isArray(data.subtitles)) {
                 subtitles = data.subtitles.map(function (sub) {
@@ -452,10 +452,13 @@
             var streamHeaders = {
                 "User-Agent": HEADERS["User-Agent"],
                 "Origin": MAIN_URL,
-                "Referer": MAIN_URL + "/"
+                "Referer": url
             };
 
-            var streams = await expandM3u8(hlsUrl, streamHeaders, subtitles);
+            var streams = [];
+            try {
+                streams = await expandM3u8(hlsUrl, streamHeaders, subtitles);
+            } catch (_) {}
 
             streams.sort(function (a, b) {
                 return (b.quality || 0) - (a.quality || 0);
