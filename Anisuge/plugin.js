@@ -6,6 +6,7 @@
     var TEXT_CACHE = {};
     var JSON_CACHE = {};
     var KWIK_CACHE = {};
+    var ANIZIP_CACHE = {};
     var TEXT_INFLIGHT = {};
     var JSON_INFLIGHT = {};
 
@@ -209,6 +210,62 @@
         return JSON_INFLIGHT[key];
     }
 
+    async function postJson(url, payload, headers) {
+        var body = JSON.stringify(payload || {});
+        var merged = Object.assign({ "Content-Type": "application/json", "Accept": "application/json" }, headers || {});
+        try {
+            var res = await http_post(url, merged, body);
+            if (!res || !res.body) throw new Error("Empty response");
+            return JSON.parse(res.body);
+        } catch (_) {
+            var res = await http_post(url, body, merged);
+            if (!res || !res.body) throw new Error("Empty response");
+            return JSON.parse(res.body);
+        }
+    }
+
+    async function fetchAniZipMeta(malId) {
+        if (!malId) return null;
+        var cacheKey = "mal:" + String(malId);
+        if (Object.prototype.hasOwnProperty.call(ANIZIP_CACHE, cacheKey)) {
+            return cacheGet(ANIZIP_CACHE, cacheKey, 1800000);
+        }
+        try {
+            var meta = await getJson(
+                "https://api.ani.zip/mappings?mal_id=" + encodeURIComponent(String(malId)),
+                { "Accept": "application/json", "User-Agent": USER_AGENT },
+                30 * 60 * 1000
+            );
+            return cacheSet(ANIZIP_CACHE, cacheKey, meta || null);
+        } catch (_) {
+            return cacheSet(ANIZIP_CACHE, cacheKey, null);
+        }
+    }
+
+    function getAniZipEpisodeMeta(aniZipMeta, episodeNumber) {
+        if (!aniZipMeta || !aniZipMeta.episodes || episodeNumber == null) return null;
+        return aniZipMeta.episodes[String(episodeNumber)] || null;
+    }
+
+    function extractMalId(html) {
+        var match = String(html || "").match(/myanimelist\.net\/anime\/(\d+)/i);
+        return match ? Number(match[1]) : null;
+    }
+
+    async function searchMalIdByTitle(title) {
+        if (!title) return null;
+        try {
+            var json = await postJson("https://graphql.anilist.co", {
+                query: "query($search:String){Media(search:$search,type:ANIME){id idMal title{romaji english native}}}",
+                variables: { search: title }
+            }, { "User-Agent": USER_AGENT });
+            var media = json && json.data && json.data.Media;
+            return (media && media.idMal) || null;
+        } catch (_) {
+            return null;
+        }
+    }
+
     function getQuality(text) {
         text = String(text || "");
         var match = text.match(/(?:^|[^\d])((?:2160|1440|1080|720|540|480|360|240))p?(?:[^\d]|$)/i);
@@ -344,7 +401,7 @@
             title: data.title || "Unknown",
             url: data.url,
             posterUrl: data.posterUrl || "",
-            bannerUrl: data.bannerUrl || data.posterUrl || "",
+            bannerUrl: data.bannerUrl || "",
             type: data.type || "anime"
         });
     }
@@ -626,7 +683,7 @@
         var poster = ((infoHtml || html).match(/<a\b[^>]*class=["'][^"']*\bposter\b[^"']*["'][\s\S]*?<img\b[^>]*(?:data-src|src)=["']([^"']+)["']/i) || [])[1] || "";
         if (!poster) poster = firstImageUrl(infoHtml || "");
         if (!poster) poster = (html.match(/<meta\b[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i) || [])[1] || "";
-        var banner = ((infoHtml || html).match(/background-image:\s*url\((['"]?)([^'")]+)\1\)/i) || [])[2] || poster;
+        var banner = ((infoHtml || html).match(/background-image:\s*url\((['"]?)([^'")]+)\1\)/i) || [])[2] || "";
         var description = cleanText((infoHtml.match(/<a\b[^>]*class=["'][^"']*\bcontent\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/i) || [])[1] || "");
         if (!description) description = cleanText((html.match(/<meta\b[^>]*(?:name|property)=["'](?:description|og:description)["'][^>]*content=["']([^"']+)["']/i) || [])[1] || "");
         var year = Number((html.match(/\/year\/(\d{4})/i) || [])[1] || 0) || undefined;
@@ -644,7 +701,8 @@
             bannerUrl: absoluteUrl(BASE_URL, banner),
             description: description,
             year: year,
-            genres: uniqueBy(genres, function (item) { return item; })
+            genres: uniqueBy(genres, function (item) { return item; }),
+            malId: extractMalId(html)
         };
     }
 
@@ -672,7 +730,7 @@
         return buildNextAiring(explicitEp || (maxEp + 1), 1, target);
     }
 
-    function parseEpisodes(html, meta) {
+    function parseEpisodes(html, meta, aniZipMeta) {
         var episodes = [];
         var re = /<a\b([^>]*data-ids=["'][^"']+["'][^>]*)>([\s\S]*?)<\/a>/gi;
         var match;
@@ -682,11 +740,15 @@
             var slug = attrs["data-slug"] || epNum;
             var name = cleanText(match[2]).replace(/\s+/g, " ") || ("Episode " + epNum);
             var watchUrl = meta.cleanUrl.replace(/\/+$/, "") + "/ep-" + slug;
+            var epMeta = getAniZipEpisodeMeta(aniZipMeta, epNum);
+            var epPoster = (epMeta && epMeta.image) || meta.posterUrl;
             episodes.push(new Episode({
-                name: name === String(epNum) ? ("Episode " + epNum) : name,
+                name: (epMeta && epMeta.title && epMeta.title.en) || (name === String(epNum) ? ("Episode " + epNum) : name),
                 season: 1,
                 episode: epNum,
-                posterUrl: meta.posterUrl,
+                posterUrl: epPoster,
+                description: epMeta && epMeta.overview || undefined,
+                runtime: epMeta && epMeta.runtime || undefined,
                 url: packPayload({
                     watchUrl: watchUrl,
                     cleanUrl: meta.cleanUrl,
@@ -712,13 +774,32 @@
             if (!meta.animeId) throw new Error("AnimeWave anime id missing");
             var episodeJson = await getJson(BASE_URL + "/ajax/episode/list/" + encodeURIComponent(meta.animeId) + "?style=&vrf=", ajaxHeaders(cleanUrl), 2 * 60 * 1000);
             var episodeHtml = episodeJson && episodeJson.result || "";
-            var episodes = parseEpisodes(episodeHtml, meta);
+
+            var aniZipMeta = null;
+            if (meta.malId) {
+                aniZipMeta = await fetchAniZipMeta(meta.malId);
+            } else if (meta.title) {
+                var malId = await searchMalIdByTitle(meta.title);
+                if (malId) aniZipMeta = await fetchAniZipMeta(malId);
+            }
+
+            var fanartUrl = "";
+            if (aniZipMeta && aniZipMeta.images) {
+                for (var i = 0; i < aniZipMeta.images.length; i++) {
+                    if (aniZipMeta.images[i].coverType === "Fanart") {
+                        fanartUrl = aniZipMeta.images[i].url || "";
+                        break;
+                    }
+                }
+            }
+
+            var episodes = parseEpisodes(episodeHtml, meta, aniZipMeta);
             var nextAiring = parseNextAiring(html, episodes);
             var item = new MultimediaItem({
                 title: meta.title,
                 url: cleanUrl,
                 posterUrl: meta.posterUrl,
-                bannerUrl: meta.bannerUrl || meta.posterUrl,
+                bannerUrl: fanartUrl || meta.bannerUrl,
                 description: meta.description,
                 type: episodes.length === 1 ? "movie" : "anime",
                 year: meta.year,
