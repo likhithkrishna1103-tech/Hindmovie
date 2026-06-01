@@ -3,6 +3,7 @@
     var FLIX_URL = "https://flixcloud.cc";
     var ENC_DEC_URL = "https://enc-dec.app/api/dec-reanime";
     var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+    var CACHE_TTL = 180000;
     var HOME_CACHE = { value: null, time: 0 };
     var DETAIL_CACHE = {};
     var API_CACHE = {};
@@ -155,7 +156,39 @@
         }
     }
 
+    function unwrapSveltekitData(json) {
+        if (!json) return null;
+        if (json.nodes && Array.isArray(json.nodes)) {
+            for (var i = 0; i < json.nodes.length; i++) {
+                var node = json.nodes[i];
+                if (node && node.type === "data" && node.data) return node.data;
+            }
+            return null;
+        }
+        return json;
+    }
+
+    var CF_INIT_DONE = false;
+
+    async function ensureCloudflare() {
+        if (CF_INIT_DONE) return;
+        try {
+            if (typeof solveCaptcha !== "undefined") {
+                await solveCaptcha("cloudflare", BASE_URL);
+            }
+        } catch (_) {}
+        try {
+            await http_get(BASE_URL, {
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9"
+            });
+        } catch (_) {}
+        CF_INIT_DONE = true;
+    }
+
     async function httpGet(url, headers) {
+        await ensureCloudflare();
         return http_get(url, headers || {});
     }
 
@@ -191,32 +224,62 @@
         }
     }
 
+    function pickPoster(row) {
+        if (!row) return "";
+        if (row.posterUrl) return row.posterUrl;
+        var img = row.cover_image || row.poster || {};
+        return absoluteUrl(BASE_URL, img.extra_large || img.large || img.medium || img.default || (typeof img === "string" ? img : "") || row.thumbnail || row.poster_path || "");
+    }
+
+    function pickBanner(row) {
+        if (!row) return "";
+        if (row.bannerUrl) return row.bannerUrl;
+        var fallback = pickPoster(row);
+        return absoluteUrl(BASE_URL, row.banner_image || row.cover || row.backdrop_path || fallback);
+    }
+
     function displayTitle(row) {
-        return trim(row && row.title && (row.title.english || row.title.user_preferred || row.title.romaji || row.title.native)) || "Unknown";
+        var t = row && (row.title || row.name);
+        if (!t) return "Unknown";
+        if (typeof t === "string") return t;
+        return trim(t.english || t.user_preferred || t.romaji || t.native || t.en || t.jp || "") || "Unknown";
     }
 
-    function subtitleCount(row) {
-        return Number(row && row.subbed || 0);
+    function getType(row) {
+        if (!row) return "anime";
+        var fmt = String(row.format || row.type || "").toLowerCase();
+        if (/movie|film/i.test(fmt)) return "movie";
+        return "anime";
     }
 
-    function dubCount(row) {
-        return Number(row && row.dubbed || 0);
+    function getStatus(row) {
+        if (!row) return "";
+        var s = String(row.status || "").toLowerCase();
+        if (/ongoing|currently airing|releasing/i.test(s)) return "ongoing";
+        if (/completed|finished/i.test(s)) return "completed";
+        if (/upcoming|not yet aired/i.test(s)) return "upcoming";
+        return s;
     }
 
-    function rowType(row) {
-        return /movie/i.test(String(row && row.format || "")) ? "movie" : "anime";
+    function getScore(row) {
+        var score = Number(row && (row.score || row.average_score || row.rating || 0)) || 0;
+        if (score > 100) score = score / 10;
+        return Math.round(score * 10) / 10;
     }
 
-    function buildCard(row) {
-        var posterUrl = absoluteUrl(BASE_URL, row && row.cover_image && (row.cover_image.extra_large || row.cover_image.large || row.cover_image.medium) || "");
-        var bannerUrl = absoluteUrl(BASE_URL, row && row.banner_image || posterUrl);
-        return new MultimediaItem({
-            title: displayTitle(row),
-            posterUrl: posterUrl,
-            bannerUrl: bannerUrl,
-            url: absoluteUrl(BASE_URL, "/anime/" + row.anime_id),
-            type: rowType(row)
-        });
+    function getYear(row) {
+        return Number(row && (row.season_year || row.year || row.release_date ? parseInt(String(row.release_date).split("-")[0], 10) : 0)) || 0;
+    }
+
+    function getAnimeId(row) {
+        return row && (row.anime_id || row.id || row.slug || "");
+    }
+
+    function getSlug(url) {
+        var parts = (url || "").split("/anime/");
+        if (parts.length > 1) return parts[1].split(/[?#]/)[0];
+        var slug = trim(url || "").split("/").pop().split(/[?#]/)[0];
+        return slug || "";
     }
 
     function buildNextAiring(next) {
@@ -225,6 +288,23 @@
         if (!unixTime) return undefined;
         var payload = { episode: Number(next.episode), season: 1, unixTime: unixTime };
         return typeof NextAiring === "function" ? new NextAiring(payload) : payload;
+    }
+
+    function buildCard(row) {
+        var poster = pickPoster(row);
+        var banner = pickBanner(row);
+        return new MultimediaItem({
+            title: displayTitle(row),
+            posterUrl: poster,
+            bannerUrl: banner,
+            url: absoluteUrl(BASE_URL, "/anime/" + getAnimeId(row)),
+            type: getType(row),
+            year: getYear(row),
+            score: getScore(row),
+            status: getStatus(row),
+            description: cleanText(row.description || row.overview || ""),
+            nextAiring: buildNextAiring(row.next_airing_episode || row.nextAiring)
+        });
     }
 
     function buildEpisodePayload(payload) {
@@ -314,7 +394,19 @@
     }
 
     async function fetchHomeData() {
-        if (HOME_CACHE.value && Date.now() - HOME_CACHE.time < 180000) return HOME_CACHE.value;
+        if (HOME_CACHE.value && Date.now() - HOME_CACHE.time < CACHE_TTL) return HOME_CACHE.value;
+
+        // Try __data.json API first (SvelteKit)
+        try {
+            var json = await httpGetJson(BASE_URL + "/home/__data.json?x-appkit-invalidated=01", MAIN_HEADERS);
+            var data = unwrapSveltekitData(json);
+            if (data) {
+                HOME_CACHE = { value: data, time: Date.now() };
+                return data;
+            }
+        } catch (_) {}
+
+        // Fall back to HTML scraping
         var html = await httpGetText(BASE_URL + "/home", MAIN_HEADERS);
         var homeData = extractObjectByKey(html, "homeData");
         if (!homeData) throw new Error("ReAnime home data not found");
@@ -322,33 +414,91 @@
         return homeData;
     }
 
+    async function fetchTopAnime() {
+        try {
+            var json = await httpGetJson(BASE_URL + "/api/top/anime?period=today&limit=10", MAIN_HEADERS);
+            if (json && json.data) return json.data;
+            if (Array.isArray(json)) return json;
+            if (json && json.results) return json.results;
+            return [];
+        } catch (_) {
+            return [];
+        }
+    }
+
     async function fetchAnimeDetail(slug) {
         var cached = cacheGet(DETAIL_CACHE, slug, 300000);
         if (cached) return cached;
-        var html = await httpGetText(BASE_URL + "/anime/" + slug, MAIN_HEADERS);
+
+        // Try __data.json API first (SvelteKit)
+        try {
+            var json = await httpGetJson(BASE_URL + "/anime/" + encodeURIComponent(slug) + "/__data.json?x-appkit-invalidated=01", MAIN_HEADERS);
+            var data = unwrapSveltekitData(json);
+            if (data && data.anime) {
+                data._html = "";
+                return cacheSet(DETAIL_CACHE, slug, data);
+            }
+        } catch (_) {}
+
+        // Try meta API
+        try {
+            var meta = await httpGetJson(BASE_URL + "/api/anime/" + encodeURIComponent(slug) + "/meta", MAIN_HEADERS);
+            if (meta && (meta.anime_id || meta.id)) {
+                meta._html = "";
+                return cacheSet(DETAIL_CACHE, slug, meta);
+            }
+        } catch (_) {}
+
+        // Fall back to HTML scraping
+        var html = await httpGetText(BASE_URL + "/anime/" + encodeURIComponent(slug), MAIN_HEADERS);
         var anime = extractObjectByKey(html, "anime");
         if (!anime) throw new Error("ReAnime anime data not found");
         anime._html = html;
         return cacheSet(DETAIL_CACHE, slug, anime);
     }
 
-    async function fetchSearch(query, limit) {
-        var cacheKey = String(query || "") + "::" + String(limit || 24);
-        var cached = cacheGet(API_CACHE, cacheKey, 120000);
-        if (cached) return cached;
-        var json = await httpGetJson(BASE_URL + "/api/search?q=" + encodeURIComponent(query || "") + "&limit=" + encodeURIComponent(limit || 24), MAIN_HEADERS);
-        return cacheSet(API_CACHE, cacheKey, json);
-    }
-
     async function fetchEpisodes(slug) {
         return httpGetJson(BASE_URL + "/api/episodes/" + encodeURIComponent(slug), MAIN_HEADERS);
     }
 
+    async function fetchRecommendations(slug) {
+        try {
+            var json = await httpGetJson(BASE_URL + "/api/anime/" + encodeURIComponent(slug) + "/recommendations", MAIN_HEADERS);
+            if (json && json.data) return json.data;
+            if (Array.isArray(json)) return json;
+            if (json && json.results) return json.results;
+            return [];
+        } catch (_) {
+            return [];
+        }
+    }
+
+    async function fetchThumbnails(anilistId) {
+        if (!anilistId) return {};
+        try {
+            var json = await httpGetJson(BASE_URL + "/api/thumbnails/" + encodeURIComponent(anilistId), MAIN_HEADERS);
+            if (json && json.data) return json.data;
+            if (json && typeof json === "object") return json;
+            return {};
+        } catch (_) {
+            return {};
+        }
+    }
+
+    async function fetchSchedule() {
+        try {
+            return await httpGetJson(BASE_URL + "/api/schedule?timezone=Asia/Kolkata", MAIN_HEADERS);
+        } catch (_) {
+            return { data: [] };
+        }
+    }
+
     function mapRows(list, filterWatchable) {
         return uniqueBy((list || []).filter(function (row) {
-            if (!row || !row.anime_id) return false;
+            if (!row) return false;
             if (!filterWatchable) return true;
-            return row.can_watch || subtitleCount(row) > 0 || dubCount(row) > 0;
+            if (!getAnimeId(row)) return false;
+            return row.can_watch || Number(row.subbed || 0) > 0 || Number(row.dubbed || 0) > 0;
         }).map(buildCard), function (item) {
             return item.url;
         });
@@ -357,15 +507,35 @@
     async function getHome(cb) {
         try {
             var homeData = await fetchHomeData();
+            var topAnime = await fetchTopAnime();
             var data = {};
-            data["Trending"] = mapRows(homeData.trending || homeData.popular || [], true).slice(0, 24);
-            data["Latest Aired"] = mapRows(homeData.latest_aired || [], true).slice(0, 24);
-            data["Popular"] = mapRows(homeData.most_popular || homeData.top_popular || [], true).slice(0, 24);
-            if (!data["Popular"].length) {
-                var popularApi = await httpGetJson(BASE_URL + "/api/search?sort=popularity_desc&limit=24", MAIN_HEADERS).catch(function () { return { results: [] }; });
-                data["Popular"] = mapRows(popularApi && popularApi.results || [], true).slice(0, 24);
+
+            var trendingSource = topAnime.length ? topAnime : (homeData.trending || homeData.popular || []);
+            data["Trending"] = mapRows(trendingSource, true).slice(0, 24);
+
+            data["Latest Aired"] = mapRows(homeData.latest_episodes || homeData.latestAired || homeData.latest_aired || [], true).slice(0, 24);
+            data["Popular"] = mapRows(homeData.most_popular || homeData.top_popular || homeData.popular || [], true).slice(0, 24);
+
+            // Schedule for upcoming
+            try {
+                var scheduleJson = await fetchSchedule();
+                var scheduleRows = scheduleJson && (scheduleJson.data || scheduleJson.schedule || scheduleJson.results || []);
+                if (Array.isArray(scheduleRows) && scheduleRows.length) {
+                    data["Schedule"] = mapRows(scheduleRows, false).slice(0, 24);
+                }
+            } catch (_) {
+                if (homeData.upcoming || homeData.top_upcoming) {
+                    data["Upcoming"] = mapRows(homeData.upcoming || homeData.top_upcoming || [], false).slice(0, 24);
+                }
             }
-            data["Upcoming"] = mapRows(homeData.upcoming || homeData.top_upcoming || [], false).slice(0, 24);
+
+            if (!data["Popular"] || !data["Popular"].length) {
+                try {
+                    var popularApi = await httpGetJson(BASE_URL + "/api/search?sort=popularity_desc&limit=24", MAIN_HEADERS);
+                    data["Popular"] = mapRows(popularApi && popularApi.results || [], true).slice(0, 24);
+                } catch (_) {}
+            }
+
             cb({ success: true, data: data });
         } catch (error) {
             cb({ success: false, errorCode: "HOME_ERROR", message: String(error && error.message || error) });
@@ -374,7 +544,7 @@
 
     async function search(query, cb) {
         try {
-            var json = await fetchSearch(query || "", 40);
+            var json = await httpGetJson(BASE_URL + "/api/search?q=" + encodeURIComponent(query || "") + "&limit=40", MAIN_HEADERS);
             cb({ success: true, data: mapRows(json && json.results || [], true) });
         } catch (error) {
             cb({ success: false, errorCode: "SEARCH_ERROR", message: String(error && error.message || error) });
@@ -384,34 +554,60 @@
     async function load(url, cb) {
         try {
             var watchUrl = absoluteUrl(BASE_URL, url);
-            var slug = trim(watchUrl.split("/anime/")[1] || "").split(/[?#]/)[0];
+            var slug = getSlug(url);
             if (!slug) throw new Error("ReAnime slug not found");
 
-            var anime = await fetchAnimeDetail(slug);
-            var episodesJson = await fetchEpisodes(slug).catch(function () { return { data: [] }; });
+            var [animeData, episodesJson, recommendations] = await Promise.all([
+                fetchAnimeDetail(slug).catch(function () { return {}; }),
+                fetchEpisodes(slug).catch(function () { return { data: [] }; }),
+                fetchRecommendations(slug).catch(function () { return []; })
+            ]);
+
+            // Merge recommendation data from page if available
+            var recList = recommendations.length ? recommendations : [];
+            if (animeData.recommendations && Array.isArray(animeData.recommendations)) {
+                recList = animeData.recommendations;
+            }
+
+            var anime = animeData.anime || animeData;
             var episodeRows = episodesJson && episodesJson.data || [];
             var isMovie = /movie/i.test(String(anime.format || "")) || episodeRows.length <= 1;
-            var title = trim(anime.title && (anime.title.english || anime.title.user_preferred || anime.title.romaji || anime.title.native)) || slug;
+
+            var title = displayTitle(anime);
             var originalTitle = trim(anime.title && (anime.title.romaji || anime.title.native || anime.title.english)) || title;
-            var posterUrl = absoluteUrl(BASE_URL, anime.cover_image && (anime.cover_image.extra_large || anime.cover_image.large || anime.cover_image.medium) || "");
-            var bannerUrl = absoluteUrl(BASE_URL, anime.banner_image || posterUrl);
+            var poster = pickPoster(anime);
+            var banner = pickBanner(anime);
+
+            // Fetch thumbnails for episodes
+            var anilistId = Number(anime.anilist_id || anime.anilistId || 0) || 0;
+            var thumbnails = {};
+            if (anilistId) {
+                thumbnails = await fetchThumbnails(anilistId).catch(function () { return {}; });
+            }
+
             var item = new MultimediaItem({
                 title: title,
                 originalTitle: originalTitle,
-                posterUrl: posterUrl,
-                bannerUrl: bannerUrl,
-                description: cleanText(anime.description || ""),
-                year: Number(anime.season_year || 0) || 0,
+                posterUrl: poster,
+                bannerUrl: banner,
+                description: cleanText(anime.description || anime.overview || ""),
+                year: getYear(anime),
+                score: getScore(anime),
+                status: getStatus(anime),
                 type: "anime",
-                nextAiring: buildNextAiring(anime.next_airing_episode),
+                nextAiring: buildNextAiring(anime.next_airing_episode || anime.nextAiring),
+                recommendations: recList.map(function (rec) {
+                    if (rec instanceof MultimediaItem) return rec;
+                    return buildCard(rec);
+                }).filter(Boolean).slice(0, 20),
                 syncData: typeof SyncData === "function" ? new SyncData({
-                    animeId: String(anime.anilist_id || ""),
-                    imdbId: trim(anime.imdb_id || ""),
-                    malId: String(anime.mal_id || "")
+                    animeId: String(anilistId || anime.anilist_id || ""),
+                    imdbId: trim(anime.imdb_id || anime.imdbId || ""),
+                    malId: String(anime.mal_id || anime.malId || "")
                 }) : {
-                    animeId: String(anime.anilist_id || ""),
-                    imdbId: trim(anime.imdb_id || ""),
-                    malId: String(anime.mal_id || "")
+                    animeId: String(anilistId || anime.anilist_id || ""),
+                    imdbId: trim(anime.imdb_id || anime.imdbId || ""),
+                    malId: String(anime.mal_id || anime.malId || "")
                 }
             });
 
@@ -420,29 +616,43 @@
                     name: "Movie",
                     season: 1,
                     episode: 1,
-                    posterUrl: posterUrl,
+                    posterUrl: poster,
+                    rating: getScore(anime),
+                    runtime: Number(anime.duration || anime.runtime || 0) || 0,
+                    airDate: anime.release_date || "",
                     url: buildEpisodePayload({
                         slug: slug,
                         title: title,
                         originalTitle: originalTitle,
-                        anilistId: Number(anime.anilist_id || 0) || 0,
+                        anilistId: anilistId,
                         episode: 1,
                         isMovie: true
                     })
                 })];
             } else {
                 item.episodes = episodeRows.map(function (row) {
-                    var epNum = Number(row.episode_number || 0) || 0;
+                    var epNum = Number(row.episode_number || row.episode || 0) || 0;
+                    var epKey = String(epNum);
+                    var epThumb = "";
+                    if (thumbnails && typeof thumbnails === "object") {
+                        epThumb = thumbnails[epKey] || thumbnails["episode_" + epKey] || thumbnails[epNum] || "";
+                        if (epThumb && !/^https?:\/\//i.test(epThumb)) {
+                            epThumb = absoluteUrl(BASE_URL, epThumb);
+                        }
+                    }
                     return new Episode({
                         name: trim(row.title || "") || ("Episode " + epNum),
                         season: 1,
                         episode: epNum,
-                        posterUrl: row.thumbnail || posterUrl,
+                        posterUrl: epThumb || row.thumbnail || poster,
+                        rating: Number(row.rating || row.score || 0) || 0,
+                        runtime: Number(row.duration || row.runtime || anime.duration || 0) || 0,
+                        airDate: row.air_date || row.aired || row.release_date || "",
                         url: buildEpisodePayload({
                             slug: slug,
                             title: title,
                             originalTitle: originalTitle,
-                            anilistId: Number(anime.anilist_id || 0) || 0,
+                            anilistId: anilistId,
                             episode: epNum,
                             isMovie: false
                         })
@@ -515,9 +725,10 @@
             var episode = Number(payload.episode || 1) || 1;
             var anilistId = Number(payload.anilistId || 0) || 0;
             if (!slug) throw new Error("ReAnime payload slug missing");
+
             if (!anilistId) {
                 var anime = await fetchAnimeDetail(slug);
-                anilistId = Number(anime.anilist_id || 0) || 0;
+                anilistId = Number((anime.anime || anime).anilist_id || (anime.anime || anime).anilistId || 0) || 0;
             }
             if (!anilistId) return cb({ success: true, data: [] });
 
@@ -543,4 +754,12 @@
     globalThis.search = search;
     globalThis.load = load;
     globalThis.loadStreams = loadStreams;
+
+    // Also export to window if available
+    if (typeof window !== "undefined") {
+        window.getHome = getHome;
+        window.search = search;
+        window.load = load;
+        window.loadStreams = loadStreams;
+    }
 })();

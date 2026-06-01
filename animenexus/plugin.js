@@ -441,10 +441,45 @@
 
     async function loadStreams(url, cb) {
         try {
-            await httpJson(API_BASE + "/search?q=a", HEADERS).catch(function () {});
-
             var match = String(url || "").match(/\/watch\/([^/?#]+)\?ep=([^&]+)/i);
             if (!match) throw new Error("Could not extract episode info from URL: " + url);
+
+            var sessionCookie = "";
+
+            try {
+                if (typeof fetch !== "undefined") {
+                    var fr = await fetch(MAIN_URL + "/watch/" + match[1], {
+                        headers: {
+                            "User-Agent": HEADERS["User-Agent"],
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                            "Accept-Language": "en-US,en;q=0.5",
+                            "Origin": MAIN_URL,
+                            "Referer": MAIN_URL + "/"
+                        },
+                        credentials: "include"
+                    }).catch(function () { return null; });
+                    if (fr) {
+                        var sc = fr.headers.get("Set-Cookie");
+                        if (sc) {
+                            var m = sc.match(/^([^=]+=[^;]+)/);
+                            if (m) sessionCookie = m[1];
+                        }
+                    }
+                    var sr = await fetch(API_BASE + "/search?q=a", {
+                        headers: HEADERS,
+                        credentials: "include"
+                    }).catch(function () { return null; });
+                    if (sr && !sessionCookie) {
+                        var sc2 = sr.headers.get("Set-Cookie");
+                        if (sc2) {
+                            var m2 = sc2.match(/^([^=]+=[^;]+)/);
+                            if (m2) sessionCookie = m2[1];
+                        }
+                    }
+                }
+            } catch (_) {}
+            try { await http_get(MAIN_URL + "/", HEADERS); } catch (_) {}
+            try { await httpJson(API_BASE + "/search?q=a", HEADERS); } catch (_) {}
 
             var episodeId = decodeURIComponent(match[2]);
 
@@ -472,9 +507,13 @@
 
             var streamHeaders = {
                 "User-Agent": HEADERS["User-Agent"],
+                "Accept": "*/*",
                 "Origin": MAIN_URL,
                 "Referer": url
             };
+            if (sessionCookie) {
+                streamHeaders["Cookie"] = sessionCookie;
+            }
 
             var streams = [];
             var qualityKeys = Object.keys(qualities).sort(function (a, b) {
