@@ -40,6 +40,25 @@
         return output;
     }
 
+    function base64Encode(str) {
+        if (typeof btoa !== "undefined") return btoa(str);
+        var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        var output = "";
+        for (var i = 0; i < str.length; i += 3) {
+            var a = str.charCodeAt(i) || 0;
+            var b = str.charCodeAt(i + 1) || 0;
+            var c = str.charCodeAt(i + 2) || 0;
+            output += chars.charAt(a >> 2);
+            output += chars.charAt(((a & 3) << 4) | (b >> 4));
+            output += chars.charAt(((b & 15) << 2) | (c >> 6));
+            output += chars.charAt(c & 63);
+        }
+        var pad = str.length % 3;
+        if (pad === 1) output = output.substring(0, output.length - 2) + "==";
+        else if (pad === 2) output = output.substring(0, output.length - 1) + "=";
+        return output;
+    }
+
     function decodeImgproxyUrl(path) {
         if (!path) return "";
         if (path.indexOf("http://") === 0 || path.indexOf("https://") === 0) return path;
@@ -437,7 +456,9 @@
             var data = payload && payload.data;
             if (!data || !data.hls) throw new Error("No HLS stream found");
 
-            var hlsUrl = data.hls;
+            var hlsBase = data.hls.replace(/\/video\.m3u8$/, "");
+            var qualities = (data.video_meta && data.video_meta.qualities) || {};
+
             var subtitles = [];
             if (data.subtitles && Array.isArray(data.subtitles)) {
                 subtitles = data.subtitles.map(function (sub) {
@@ -456,16 +477,27 @@
             };
 
             var streams = [];
-            try {
-                streams = await expandM3u8(hlsUrl, streamHeaders, subtitles);
-            } catch (_) {}
-
-            streams.sort(function (a, b) {
-                return (b.quality || 0) - (a.quality || 0);
+            var qualityKeys = Object.keys(qualities).sort(function (a, b) {
+                return (parseInt(b.split("x")[1], 10) || 0) - (parseInt(a.split("x")[1], 10) || 0);
             });
 
+            for (var i = 0; i < qualityKeys.length; i++) {
+                var q = qualityKeys[i];
+                var height = parseInt(q.split("x")[1], 10) || 0;
+                var variantUrl = hlsBase + "/" + q + ".m3u8";
+                var proxyUrl = "MAGIC_PROXY_v1" + base64Encode(variantUrl);
+                streams.push(buildStreamResult(
+                    proxyUrl,
+                    "Anime Nexus [" + height + "p]",
+                    streamHeaders,
+                    height,
+                    subtitles
+                ));
+            }
+
+            var masterProxyUrl = "MAGIC_PROXY_v1" + base64Encode(data.hls);
             streams.push(buildStreamResult(
-                hlsUrl,
+                masterProxyUrl,
                 "Anime Nexus Auto",
                 streamHeaders,
                 undefined,
