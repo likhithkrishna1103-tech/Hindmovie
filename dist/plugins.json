@@ -21,23 +21,6 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anisuge.sky"
   },
   {
-    "packageName": "com.igris.repo.animenexus",
-    "name": "Animenexus",
-    "version": 4,
-    "baseUrl": "https://anime.nexus",
-    "description": "Watch the latest anime from anime.nexus",
-    "authors": [
-      "igris"
-    ],
-    "languages": [
-      "en"
-    ],
-    "categories": [
-      "Anime"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animenexus.sky"
-  },
-  {
     "packageName": "com.igris.repo.animetsu",
     "name": "Animetsu",
     "version": 10,
@@ -439,34 +422,6 @@
       "Livestream"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztv.sky"
-  },
-  {
-    "packageName": "com.igris.repo.reanime",
-    "name": "ReAnime",
-    "version": 3,
-    "baseUrl": "https://reanime.to",
-    "domains": [
-      {
-        "name": "reanime.to",
-        "url": "https://reanime.to"
-      },
-      {
-        "name": "reanime.tv",
-        "url": "https://reanime.tv"
-      }
-    ],
-    "description": "Full-featured ReAnime plugin with hero banners, episode thumbnails, recommendations, schedule, and next airing date.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "en",
-      "ja"
-    ],
-    "categories": [
-      "Anime"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.reanime.sky"
   },
   {
     "packageName": "com.igris.repo.tokyoinsider",
