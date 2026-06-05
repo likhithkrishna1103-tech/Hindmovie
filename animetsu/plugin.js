@@ -172,6 +172,33 @@
         return "anime";
     }
 
+    function getStreamQuality(text) {
+        text = String(text || "");
+        var match = text.match(/(?:^|[^\d])((?:2160|1440|1080|720|540|480|360|240))p?(?:[^\d]|$)/i);
+        return match ? Number(match[1]) : 0;
+    }
+
+    function normalizeSubtitle(sub) {
+        if (!sub) return null;
+        var url = sub.url || sub.file || sub.src || "";
+        var lang = sub.label || sub.lang || sub.language || "English";
+        if (!url) return null;
+        return { url: url, lang: lang, label: lang };
+    }
+
+    function resolveUrl(base, value) {
+        value = String(value || "").trim();
+        if (!value) return "";
+        if (/^https?:\/\//i.test(value)) return value;
+        if (value.indexOf("//") === 0) return "https:" + value;
+        try {
+            return new URL(value, base || MAIN_URL).toString();
+        } catch (_) {
+            base = base || MAIN_URL;
+            return base.replace(/\/+$/, "") + "/" + value.replace(/^\/+/, "");
+        }
+    }
+
     function itemTitle(data) {
         if (!data || !data.title) return "";
         return stringOrEmpty(data.title.english || data.title.romaji || data.title.native || "");
@@ -228,7 +255,7 @@
             .slice(0, 20);
     }
 
-    function formatSourceLabel(serverName, quality, sourceType) {
+    function formatSourceLabel(serverName, quality, sourceType, isSoftSub) {
         var parts = [];
         var q = String(quality || "").trim();
         var normalized = q.toLowerCase();
@@ -239,7 +266,15 @@
             parts.push(q);
         }
 
-        parts.push(String(sourceType || "sub").toUpperCase());
+        if (sourceType === "dub") {
+            parts.push("[Audio: DUB]");
+        } else if (sourceType === "sub" && isSoftSub) {
+            parts.push("[Soft Sub]");
+        } else if (sourceType === "sub") {
+            parts.push("[Hard Sub]");
+        } else {
+            parts.push("[" + String(sourceType || "sub").toUpperCase() + "]");
+        }
         return parts.join(" ");
     }
 
@@ -417,12 +452,22 @@
                 })
                 : undefined;
 
+            var fanartUrl = "";
+            if (aniZipMeta && aniZipMeta.images) {
+                for (var i = 0; i < aniZipMeta.images.length; i++) {
+                    if (aniZipMeta.images[i].coverType === "Fanart") {
+                        fanartUrl = aniZipMeta.images[i].url || "";
+                        break;
+                    }
+                }
+            }
+
             var item = new MultimediaItem({
                 title: itemTitle(info),
                 japaneseTitle: itemSubtitle(info),
                 url: MAIN_URL + "/anime/" + animeId,
                 posterUrl: coverUrl(info),
-                bannerUrl: absoluteUrl(info.banner || ""),
+                bannerUrl: fanartUrl || absoluteUrl(info.banner || ""),
                 logoUrl: absoluteUrl(info.clear_logo || ""),
                 description: cleanText(info.description || ""),
                 type: animeTypeFromFormat(info.format || info.type),
@@ -509,22 +554,80 @@
 
                     if (!payload || !payload.sources || !payload.sources.length) continue;
 
+                    // Extract subtitles from payload
+                    var subtitles = [];
+                    if (payload.subtitles && payload.subtitles.length) {
+                        for (var s = 0; s < payload.subtitles.length; s++) {
+                            var sub = normalizeSubtitle(payload.subtitles[s]);
+                            if (sub) subtitles.push(sub);
+                        }
+                    }
+                    if (payload.tracks && payload.tracks.subtitle && payload.tracks.subtitle.length) {
+                        for (var s = 0; s < payload.tracks.subtitle.length; s++) {
+                            var sub = normalizeSubtitle(payload.tracks.subtitle[s]);
+                            if (sub) subtitles.push(sub);
+                        }
+                    }
+
+                    // Determine if this is a soft-sub (has separate subtitle tracks)
+                    var isSoftSub = sourceType === "sub" && subtitles.length > 0;
+
+                    var serverName = payload.server || server.id || "default";
+                    var language = sourceType === "dub" ? "DUB" : "SUB";
+
                     for (var k = 0; k < payload.sources.length; k++) {
                         var source = payload.sources[k];
                         var streamUrl = source.need_proxy ? proxiedUrl(source.url) : absoluteUrl(source.url);
-                        var key = streamUrl + "|" + (payload.server || server.id) + "|" + sourceType + "|" + (source.quality || "");
+                        var key = streamUrl + "|" + serverName + "|" + sourceType + "|" + (source.quality || "");
                         if (!streamUrl || seen[key]) continue;
                         seen[key] = true;
 
-                        streams.push(new StreamResult({
+                        var headers = {
+                            "User-Agent": HEADERS["User-Agent"],
+                            "Origin": MAIN_URL,
+                            "Referer": MAIN_URL + "/"
+                        };
+
+                        // Expand M3U8 variant playlists into individual quality streams
+                        if (/\.m3u8(?:$|[?#])/i.test(streamUrl)) {
+                            try {
+                                var res = await http_get(streamUrl, headers);
+                                var body = res && (res.body || res.text) || "";
+                                if (/#EXTM3U/i.test(body) && /#EXT-X-STREAM-INF:/i.test(body)) {
+                                    var variantRe = /#EXT-X-STREAM-INF:([^\n\r]*)[\r\n]+([^\r\n]+)/gi;
+                                    var vMatch;
+                                    var m3u8Seen = {};
+                                    while ((vMatch = variantRe.exec(body)) !== null) {
+                                        var q = getStreamQuality(vMatch[1] + " " + vMatch[2]);
+                                        var variantUrl = resolveUrl(streamUrl, vMatch[2]);
+                                        var vKey = variantUrl + "|" + serverName + "|" + sourceType;
+                                        if (!variantUrl || m3u8Seen[vKey]) continue;
+                                        m3u8Seen[vKey] = true;
+                                        var stream = new StreamResult({
+                                            url: variantUrl,
+                                            source: formatSourceLabel(serverName, q ? (q + "p") : source.quality, sourceType, isSoftSub),
+                                            quality: q || undefined,
+                                            headers: headers
+                                        });
+                                        stream.language = language;
+                                        if (subtitles.length) stream.subtitles = subtitles;
+                                        streams.push(stream);
+                                    }
+                                    if (Object.keys(m3u8Seen).length > 0) continue;
+                                }
+                            } catch (_) {}
+                        }
+
+                        // Create stream for non-M3U8 or failed M3U8 expansion
+                        var stream = new StreamResult({
                             url: streamUrl,
-                            source: formatSourceLabel(payload.server || server.id || "default", source.quality, sourceType),
-                            headers: {
-                                "User-Agent": HEADERS["User-Agent"],
-                                "Origin": MAIN_URL,
-                                "Referer": MAIN_URL + "/"
-                            }
-                        }));
+                            source: formatSourceLabel(serverName, source.quality, sourceType, isSoftSub),
+                            quality: getStreamQuality(source.quality || "") || undefined,
+                            headers: headers
+                        });
+                        stream.language = language;
+                        if (subtitles.length) stream.subtitles = subtitles;
+                        streams.push(stream);
                     }
                 }
             }
