@@ -99,21 +99,34 @@
         }
     }
 
-    async function fetchAniZipMeta(malId) {
-        if (!malId) return null;
-        var cacheKey = "mal:" + String(malId);
+    async function fetchAniZipMeta(ids) {
+        if (!ids || (!ids.mal_id && !ids.anilist_id)) return null;
+        var idType = ids.mal_id ? "mal_id" : "anilist_id";
+        var idValue = ids[idType];
+        var cacheKey = idType + ":" + String(idValue);
         if (Object.prototype.hasOwnProperty.call(ANIZIP_CACHE, cacheKey)) {
             return cacheGet(ANIZIP_CACHE, cacheKey, 1800000);
         }
         try {
             var meta = await httpJson(
-                "https://api.ani.zip/mappings?mal_id=" + encodeURIComponent(String(malId)),
+                "https://api.ani.zip/mappings?" + idType + "=" + encodeURIComponent(String(idValue)),
                 { "Accept": "application/json", "User-Agent": HEADERS["User-Agent"] }
             );
             return cacheSet(ANIZIP_CACHE, cacheKey, meta || null);
         } catch (_) {
             return cacheSet(ANIZIP_CACHE, cacheKey, null);
         }
+    }
+
+    function extractFanart(aniZipMeta) {
+        if (aniZipMeta && aniZipMeta.images) {
+            for (var i = 0; i < aniZipMeta.images.length; i++) {
+                if (aniZipMeta.images[i].coverType === "Fanart") {
+                    return aniZipMeta.images[i].url || "";
+                }
+            }
+        }
+        return "";
     }
 
     function getAniZipEpisodeMeta(aniZipMeta, episodeNumber) {
@@ -280,6 +293,7 @@
 
     function toMultimediaItem(data, opts) {
         opts = opts || {};
+        if (data && !toMultimediaItem._logged) { toMultimediaItem._logged = true; try { var keys = []; for (var k in data) { keys.push(k + ":" + typeof data[k]); } console.log("[Animetsu-DEBUG] toMultimediaItem data keys: " + keys.join(", ")); if (data.clear_logo) console.log("[Animetsu-DEBUG] clear_logo: " + data.clear_logo); if (data.title) { var tkeys = []; for (var tk in data.title) { tkeys.push(tk); } console.log("[Animetsu-DEBUG] title keys: " + tkeys.join(", ")); } } catch(_) {} }
 
         var title = itemTitle(data);
         if (!title || !data || !data.id) return null;
@@ -289,9 +303,10 @@
             title: title,
             url: url,
             posterUrl: coverUrl(data),
-            bannerUrl: absoluteUrl(data.banner || ""),
+            bannerUrl: opts.fanartUrl || absoluteUrl(data.banner || ""),
+            logoUrl: absoluteUrl(data.clear_logo || ""),
             type: animeTypeFromFormat(data.format || data.type),
-            description: cleanText(data.description || opts.description || ""),
+            description: opts.description !== undefined ? opts.description : cleanText(data.description || ""),
             year: numericYear(data),
             headers: HEADERS
         });
@@ -320,7 +335,7 @@
                 url: opts.watchEpisode && entry && entry.next_airing_ep && entry.next_airing_ep.ep_num
                     ? MAIN_URL + "/watch/" + entry.id + "?ep=" + entry.next_airing_ep.ep_num
                     : MAIN_URL + "/anime/" + (entry && entry.id),
-                description: opts.descriptionField && entry ? entry[opts.descriptionField] : undefined
+                description: ""
             });
         })));
     }
@@ -359,7 +374,22 @@
     async function getHome(cb) {
         try {
             var home = await httpJson(API_BASE + "/home", HEADERS);
-            var trendingItems = mapHomeItems((home && home.trending) || []).slice(0, 20);
+            var trendingEntries = ((home && home.trending) || []).slice(0, 20);
+            var trendingFanartPromises = trendingEntries.map(function (entry) {
+                if (entry && entry.anilist_id) {
+                    return fetchAniZipMeta({ anilist_id: entry.anilist_id }).then(extractFanart);
+                }
+                return Promise.resolve("");
+            });
+            var trendingFanartUrls = await Promise.all(trendingFanartPromises);
+            var trendingItems = uniqueByUrl(trendingEntries.map(function (entry, i) {
+                return toMultimediaItem(entry, {
+                    url: MAIN_URL + "/anime/" + (entry && entry.id),
+                    description: "",
+                    fanartUrl: trendingFanartUrls[i] || ""
+                });
+            })).slice(0, 20);
+
             var seasonalItems = mapHomeItems((home && home.seasonal) || []).slice(0, 20);
             var popularItems = mapHomeItems((home && home.popular) || []).slice(0, 20);
             var topItems = mapHomeItems((home && home.top) || []).slice(0, 20);
@@ -401,7 +431,7 @@
             var animeId = animeMatch[1];
             var info = await httpJson(API_BASE + "/info/" + animeId, HEADERS);
             var eps = await httpJson(API_BASE + "/eps/" + animeId, HEADERS);
-            var aniZipMeta = await fetchAniZipMeta(optionalString(info && info.mal_id));
+            var aniZipMeta = await fetchAniZipMeta({ mal_id: optionalString(info && info.mal_id) });
 
             var trailers = [];
             if (info && info.trailer) {
@@ -452,15 +482,7 @@
                 })
                 : undefined;
 
-            var fanartUrl = "";
-            if (aniZipMeta && aniZipMeta.images) {
-                for (var i = 0; i < aniZipMeta.images.length; i++) {
-                    if (aniZipMeta.images[i].coverType === "Fanart") {
-                        fanartUrl = aniZipMeta.images[i].url || "";
-                        break;
-                    }
-                }
-            }
+            var fanartUrl = extractFanart(aniZipMeta);
 
             var item = new MultimediaItem({
                 title: itemTitle(info),
