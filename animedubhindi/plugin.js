@@ -491,11 +491,9 @@
         if (value.indexOf("desidubanime") !== -1) return false;
         if (value.indexOf("t.me/") !== -1) return false;
         if (value.indexOf("watch") !== -1) return false;
-        if (value.indexOf("hubcloud") !== -1) return true;
-        return value.indexOf("gdflix") !== -1
-            || value.indexOf("gdlink") !== -1
-            || value.indexOf("/re.php") !== -1
-            || value.indexOf("pixeldrain") !== -1;
+        return value.indexOf("hubcloud") !== -1
+            || value.indexOf("gdflix") !== -1
+            || value.indexOf("gdlink") !== -1;
     }
 
     function parseLinkGroupsFromHeadingBlocks(html, base) {
@@ -836,18 +834,19 @@
 
     async function tryBuiltinExtractor(url, source, quality) {
         if (!url || typeof globalThis.loadExtractor !== "function" || !isExtractorHost(url)) return [];
-        var out = [];
+        var results = [];
         try {
             await globalThis.loadExtractor(url, function(stream) {
-                if (!stream) return;
-                if (!stream.source && source) stream.source = sourceWithQuality(source, quality);
-                if (!stream.quality && quality) stream.quality = quality;
-                out.push(stream);
+                if (stream) {
+                    if (!stream.source && source) stream.source = sourceWithQuality(source, quality);
+                    if (!stream.quality && quality) stream.quality = quality;
+                    results.push(stream);
+                }
             });
+            return dedupeStreams(results);
         } catch (_) {
             return [];
         }
-        return dedupeStreams(out);
     }
 
     function base64Decode(text) {
@@ -875,21 +874,33 @@
         try {
             var res = await fetchPage(url, { referer: LINKS_URL + "/", base: LINKS_URL });
             var html = String(res && res.body || "");
+            if (!html) return url;
             var redirectBase64 = html.match(/var\s+redirectUrl\s*=\s*"([^"]+)"/i);
             if (redirectBase64 && redirectBase64[1]) {
                 var redirectDecoded = base64Decode(redirectBase64[1]).trim();
                 if (redirectDecoded) return redirectDecoded;
             }
             var combined = "";
-            html.replace(/s\('o','([A-Za-z0-9+/=]+)'|ck\('_wp_http_\d+','([^']+)'/g, function(_, a, b) {
-                combined += a || b || "";
+            html.replace(/s\('o','([A-Za-z0-9+/=]+)'/g, function(_, a) {
+                combined += a || "";
+                return _;
+            });
+            html.replace(/ck\('_wp_http_\d+','([^']+)'/g, function(_, b) {
+                combined += b || "";
                 return _;
             });
             if (!combined) return url;
             var rawDecoded = base64Decode(combined);
-            var pDecoded = pen(base64Decode(rawDecoded));
-            var decoded = JSON.parse(base64Decode(pDecoded));
-            return decoded && decoded.o ? base64Decode(decoded.o).trim() : url;
+            if (!rawDecoded) return url;
+            var pDecoded = pen(rawDecoded);
+            var decodedStr = base64Decode(pDecoded);
+            if (!decodedStr) return url;
+            var decoded = JSON.parse(decodedStr);
+            if (decoded && decoded.o) {
+                var finalUrl = base64Decode(decoded.o).trim();
+                if (finalUrl) return finalUrl;
+            }
+            return url;
         } catch (_) {
             return url;
         }
@@ -898,25 +909,58 @@
     async function extractGdflix(url, source, quality) {
         var results = [];
         try {
-            var res = await http_get(url, COMMON_HEADERS);
+            var res = await fetchPage(url, { referer: LINKS_URL + "/", base: LINKS_URL });
             var html = String(res && res.body || "");
             if (!html) return results;
-            var originMatch = String(res && res.finalUrl || url).match(/^(https?:\/\/[^\/]+)/i);
+            var finalUrl = String(res && res.finalUrl || url);
+            var originMatch = finalUrl.match(/^(https?:\/\/[^\/]+)/i);
             var origin = originMatch ? originMatch[1] : url;
-            var fileName = cleanText((html.match(/<title>\s*GDFlix\s*\|\s*([^<]+)<\/title>/i) || [])[1] || parseMeta(html, "og:description"));
-            var mergedQuality = quality || parseQuality(fileName) || parseQuality(html);
-            html.replace(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, function(_, href, text) {
-                var label = cleanText(stripHtml(text));
+            var fileName = cleanText((html.match(/<title>\s*GDFlix\s*\|\s*([^<]+)<\/title>/i) || [])[1] || parseMeta(html, "og:description") || "");
+            var fileSize = "";
+            var sizeEl = html.match(/Name\s*:\s*([^<]+)<\/li>/i);
+            if (sizeEl) fileSize = cleanText(sizeEl[1]);
+            var mergedQuality = quality || parseQuality(fileName + " " + html);
+            var anchorRe = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+            var match;
+            while ((match = anchorRe.exec(html))) {
+                var href = match[1];
+                var label = cleanText(stripHtml(match[2]));
                 var lower = label.toLowerCase();
-                var finalUrl = fixUrl(href, origin);
-                if (!finalUrl) return _;
-                if (lower.indexOf("instant dl") !== -1) {
-                    results.push(toStreamResult(finalUrl, source + " Instant", mergedQuality));
-                } else if (lower.indexOf("pixel") !== -1 && /\/u\//.test(finalUrl)) {
-                    results.push(toStreamResult("https://pixeldrain.dev/api/file/" + finalUrl.split("/").pop() + "?download", source + " Pixeldrain", mergedQuality));
+                var absUrl = fixUrl(href, origin);
+                if (!absUrl) continue;
+                if (lower.indexOf("login") !== -1 || lower.indexOf("sign in") !== -1) continue;
+                if (lower.indexOf("about us") !== -1 || lower.indexOf("privacy") !== -1) continue;
+                if (lower.indexOf("terms") !== -1 || lower.indexOf("copyright") !== -1) continue;
+                if (lower.indexOf("dmca") !== -1 || lower.indexOf("contact us") !== -1) continue;
+                if (lower.indexOf("join telegram") !== -1 || href.indexOf("t.me") !== -1) continue;
+                if (lower.replace(/\s/g, "").indexOf("gdflix") !== -1) continue;
+                if (lower.indexOf("anime dub hindi") !== -1) continue;
+                if (lower.indexOf("direct dl") !== -1) {
+                    results.push(toStreamResult(absUrl, source + " Direct", mergedQuality));
+                } else if (lower.indexOf("cloud") !== -1 || lower.indexOf("zipdisk") !== -1) {
+                    var cloudUrl = absUrl;
+                    var urlParam = absUrl.match(/url=([^&]+)/i);
+                    if (urlParam && urlParam[1]) {
+                        try { cloudUrl = decodeURIComponent(urlParam[1]); } catch (_) {}
+                    }
+                    results.push(toStreamResult(cloudUrl, source + " Cloud", mergedQuality));
+                } else if (lower.indexOf("instant dl") !== -1) {
+                    results.push(toStreamResult(absUrl, source + " Instant", mergedQuality));
+                } else if ((lower.indexOf("pixel") !== -1 || lower.indexOf("pixeldra") !== -1) && /\/u\//.test(absUrl)) {
+                    var pixelId = absUrl.split("/").pop();
+                    results.push(toStreamResult("https://pixeldrain.dev/api/file/" + pixelId + "?download", source + " Pixeldrain", mergedQuality));
+                } else if (lower.indexOf("index link") !== -1) {
+                    results.push(toStreamResult(absUrl, source + " Index", mergedQuality));
+                } else if (lower.indexOf("drivebot") !== -1) {
+                    results.push(toStreamResult(absUrl, source + " DriveBot", mergedQuality, { "User-Agent": UA, "Referer": origin + "/", "Accept": "*/*" }));
+                } else if (lower.indexOf("gofile") !== -1) {
+                    results.push(toStreamResult(absUrl, source + " GoFile", mergedQuality));
+                } else if (lower.indexOf("telegram") !== -1) {
+                    results.push(toStreamResult(absUrl, source + " Telegram", mergedQuality));
+                } else if (absUrl.indexOf("busycdn") !== -1 || absUrl.indexOf("r2.dev") !== -1) {
+                    results.push(toStreamResult(absUrl, source + " Direct", mergedQuality));
                 }
-                return _;
-            });
+            }
             if (!results.length && /pixeldrain\.dev\/u\/([A-Za-z0-9]+)/i.test(html)) {
                 var id = html.match(/pixeldrain\.dev\/u\/([A-Za-z0-9]+)/i)[1];
                 results.push(toStreamResult("https://pixeldrain.dev/api/file/" + id + "?download", source + " Pixeldrain", mergedQuality));
@@ -930,7 +974,7 @@
     async function extractMulti(url, source, quality) {
         var results = [];
         try {
-            var res = await http_get(url, COMMON_HEADERS);
+            var res = await fetchPage(url, { referer: LINKS_URL + "/" });
             var html = String(res && res.body || "");
             if (!html) return results;
             var fileUrlMatch = html.match(/const\s+fileurl\s*=\s*"([^"]+)"/i);
@@ -944,6 +988,62 @@
                     "Referer": String(res && res.finalUrl || url).replace(/\/file\/.*/, "/"),
                     "Accept": "*/*"
                 }));
+            }
+            return dedupeStreams(results);
+        } catch (_) {
+            return results;
+        }
+    }
+
+    async function extractHubCloud(url, source, quality) {
+        var results = [];
+        try {
+            var baseUrl = url.match(/^(https?:\/\/[^\/]+)/i);
+            var hubOrigin = baseUrl ? baseUrl[1] : url;
+            var href = url;
+            if (url.indexOf("hubcloud.php") === -1) {
+                var res = await fetchPage(url, { referer: LINKS_URL + "/", base: LINKS_URL });
+                var html = String(res && res.body || "");
+                if (!html) return results;
+                var doc = new JsoupLite(html);
+                var dlEl = doc.find("#download");
+                var rawHref = dlEl ? dlEl.attr("href") : "";
+                if (rawHref) {
+                    href = /^https?:\/\//i.test(rawHref) ? rawHref : hubOrigin.replace(/\/+$/, "") + "/" + rawHref.replace(/^\/+/, "");
+                }
+            }
+            var pageRes = await fetchPage(href, { referer: LINKS_URL + "/", base: LINKS_URL });
+            var pageHtml = String(pageRes && pageRes.body || "");
+            if (!pageHtml) return results;
+            var sizeEl = pageHtml.match(/<i[^>]*id="size"[^>]*>([\s\S]*?)<\/i>/i);
+            var fileSize = sizeEl ? cleanText(stripHtml(sizeEl[1])) : "";
+            var mergedQuality = quality || parseQuality(pageHtml + " " + fileSize);
+            var linkRe = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+            var match;
+            while ((match = linkRe.exec(pageHtml))) {
+                var link = match[1];
+                var text = cleanText(stripHtml(match[2])).toLowerCase();
+                if (!link || link.indexOf("#") === 0 || link.indexOf("javascript:") === 0) continue;
+                if (text.indexOf("login") !== -1 || text.indexOf("sign in") !== -1) continue;
+                if (text.indexOf("vpn") !== -1 || text.indexOf("how ?") !== -1 || text.indexOf("tutorial") !== -1) continue;
+                if (text.indexOf("idm") !== -1 || text.indexOf("google") !== -1) continue;
+                if (text.indexOf("telegram") !== -1 && text.indexOf("download") === -1) continue;
+                if (text.indexOf("advertise") !== -1) continue;
+                if (link.indexOf("tinyurl.com") !== -1) continue;
+                if (link.indexOf("google.com") !== -1) continue;
+                if (text.indexOf("create an account") !== -1) continue;
+                if (text.indexOf("watch online") !== -1) continue;
+                var absUrl = fixUrl(link, hubOrigin);
+                if (text.indexOf("download") !== -1 && absUrl) {
+                    var ln = text.replace(/\s+/g, " ").trim();
+                    results.push(toStreamResult(absUrl, source + " " + ln, mergedQuality));
+                } else if (text.indexOf("10gbps") !== -1 && absUrl) {
+                    results.push(toStreamResult(absUrl, source + " 10Gbps", mergedQuality));
+                } else if (link.indexOf("r2.dev") !== -1 || link.indexOf("cloudfront.net") !== -1) {
+                    results.push(toStreamResult(absUrl, source + " Direct", mergedQuality));
+                } else if (link.indexOf("http") === 0 && absUrl) {
+                    results.push(toStreamResult(absUrl, source, mergedQuality));
+                }
             }
             return dedupeStreams(results);
         } catch (_) {
@@ -982,7 +1082,7 @@
             return [toStreamResult(url, source, quality)];
         }
         if (url.indexOf("hubcloud") !== -1) {
-            return [toStreamResult(url, source, quality)];
+            return extractHubCloud(url, source, quality);
         }
         return [];
     }
@@ -1033,3 +1133,4 @@
     globalThis.load = load;
     globalThis.loadStreams = loadStreams;
 })();
+
