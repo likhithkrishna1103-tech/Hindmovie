@@ -116,8 +116,9 @@
                                 title: item.title,
                                 url: item.url,
                                 posterUrl: item.posterUrl,
-                                score: item.score,
-                                type: item.type
+                                score: item.score || undefined,
+                                type: item.type,
+                                headers: HEADERS
                             });
                         })
                     };
@@ -154,8 +155,9 @@
                     title: item.title,
                     url: item.url,
                     posterUrl: item.posterUrl,
-                    score: item.score,
-                    type: "anime"
+                    score: item.score || undefined,
+                    type: "anime",
+                    headers: HEADERS
                 });
             });
             cb({ success: true, data: results });
@@ -318,25 +320,25 @@
                 if (isMovie) {
                     episodes.push(new Episode(Object.assign({}, epBase, {
                         url: ep.id + "|" + slug + "|movie",
-                        dubStatus: "subbed"
+                        dubStatus: "sub"
                     })));
                 } else {
                     episodes.push(new Episode(Object.assign({}, epBase, {
                         url: ep.id + "|" + slug + "|sub",
-                        dubStatus: "subbed"
+                        dubStatus: "sub"
                     })));
                     if (hasDub) {
                         episodes.push(new Episode(Object.assign({}, epBase, {
                             url: ep.id + "|" + slug + "|dub",
-                            dubStatus: "dubbed"
+                            dubStatus: "dub"
                         })));
                     }
                 }
             }
 
             var syncData = {};
-            if (malId) syncData.mal = malId.toString();
-            if (anilistId) syncData.anilist = anilistId.toString();
+            if (malId) syncData.mal_id = malId.toString();
+            if (anilistId) syncData.anilist_id = anilistId.toString();
 
             var extras = extractBannerAndLogo(html);
 
@@ -344,14 +346,14 @@
                 title: title,
                 url: url,
                 posterUrl: poster,
-                type: isMovie ? "anime" : "series",
-                bannerUrl: extras.bannerUrl,
-                logoUrl: extras.logoUrl,
+                type: isMovie ? "movie" : "anime",
+                bannerUrl: extras.bannerUrl || undefined,
+                logoUrl: extras.logoUrl || undefined,
                 description: description,
                 year: year,
-                score: rating,
+                score: rating || undefined,
                 duration: duration,
-                status: status,
+                status: status || undefined,
                 tags: tags.length > 0 ? tags : undefined,
                 trailers: trailerUrl ? [new Trailer({ name: "Official Trailer", url: trailerUrl })] : undefined,
                 syncData: Object.keys(syncData).length > 0 ? syncData : undefined,
