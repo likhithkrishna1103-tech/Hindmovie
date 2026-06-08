@@ -21,6 +21,23 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anisuge.sky"
   },
   {
+    "packageName": "com.igris.repo.anidb",
+    "name": "AniDB",
+    "version": 1,
+    "baseUrl": "https://anidb.app",
+    "description": "AniDB anime streaming plugin - browse, search and stream from anidb.app",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anidb.sky"
+  },
+  {
     "packageName": "com.igris.repo.animedubhindi",
     "name": "AnimeDubHindi",
     "version": 2,
