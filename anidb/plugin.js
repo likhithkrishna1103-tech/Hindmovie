@@ -15,7 +15,17 @@
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
+        "Origin": BASE_URL,
         "Referer": BASE_URL + "/"
+    };
+
+    var API_HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Origin": BASE_URL,
+        "Referer": BASE_URL + "/",
+        "X-Requested-With": "XMLHttpRequest"
     };
 
     function stripHtml(str) {
@@ -25,7 +35,20 @@
     async function get(url, extraHeaders) {
         try {
             var headers = Object.assign({}, HEADERS, extraHeaders || {});
-            return await http_get(url, headers) || { body: "" };
+            var res = await http_get(url, headers);
+            if (!res) return { body: "" };
+            return { body: res.body || res.text || "" };
+        } catch (_) {
+            return { body: "" };
+        }
+    }
+
+    async function getApi(url, extraHeaders) {
+        try {
+            var headers = Object.assign({}, API_HEADERS, extraHeaders || {});
+            var res = await http_get(url, headers);
+            if (!res) return { body: "" };
+            return { body: res.body || res.text || "" };
         } catch (_) {
             return { body: "" };
         }
@@ -227,9 +250,7 @@
 
             if (siteId) {
                 try {
-                    var epRes = await get(BASE_URL + "/api/frontend/anime/" + siteId + "/episodes", {
-                        "X-Requested-With": "XMLHttpRequest"
-                    });
+                    var epRes = await getApi(BASE_URL + "/api/frontend/anime/" + siteId + "/episodes");
                     var epText = epRes.body || "";
                     try {
                         var epData = JSON.parse(epText);
@@ -238,9 +259,7 @@
 
                     if (episodesList.length > 0) {
                         var firstEpId = episodesList[0].id;
-                        var langRes = await get(BASE_URL + "/api/frontend/episode/" + firstEpId + "/languages", {
-                            "X-Requested-With": "XMLHttpRequest"
-                        });
+                        var langRes = await getApi(BASE_URL + "/api/frontend/episode/" + firstEpId + "/languages");
                         var langText = langRes.body || "";
                         try {
                             var langData = JSON.parse(langText);
@@ -453,10 +472,7 @@
 
             var langs = [];
             try {
-                var langRes = await get(BASE_URL + "/api/frontend/episode/" + episodeId + "/languages", {
-                    "X-Requested-With": "XMLHttpRequest",
-                    "Referer": BASE_URL + "/anime/" + slug
-                });
+                var langRes = await getApi(BASE_URL + "/api/frontend/episode/" + episodeId + "/languages");
                 var langData = JSON.parse(langRes.body || "{}");
                 langs = langData.languages || [];
             } catch (_) {}

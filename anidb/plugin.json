@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.anidb",
   "name": "AniDB",
-  "version": 1,
+  "version": 2,
   "baseUrl": "https://anidb.app",
   "description": "AniDB anime streaming plugin - browse, search and stream from anidb.app",
   "authors": [
