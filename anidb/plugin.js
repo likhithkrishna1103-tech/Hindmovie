@@ -11,38 +11,24 @@
         [BASE_URL + "/browse?q=&type=&status=Finished+Airing&season=&year=&genres=&sort=order_favorite&page=", "Finished Airing"]
     ];
 
+    var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
+
     var HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",
+        "User-Agent": USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Origin": BASE_URL,
+        "Accept-Language": "en-US,en;q=0.9",
         "Referer": BASE_URL + "/"
     };
 
     var API_HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",
+        "User-Agent": USER_AGENT,
         "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Origin": BASE_URL,
+        "Accept-Language": "en-US,en;q=0.9",
         "Referer": BASE_URL + "/",
         "X-Requested-With": "XMLHttpRequest"
     };
 
-    var _cfReady = false;
-    var _cfPromise = null;
-    async function _ensureCF() {
-        if (_cfReady) return;
-        if (_cfPromise) return _cfPromise;
-        _cfPromise = (async function() {
-            try {
-                if (typeof solveCaptcha !== "undefined") {
-                    await solveCaptcha("cloudflare", BASE_URL);
-                }
-            } catch (_) {}
-            _cfReady = true;
-        })();
-        return _cfPromise;
-    }
+
 
     function stripHtml(str) {
         return String(str || "").replace(/<[^>]+>/g, "").trim();
@@ -50,7 +36,6 @@
 
     async function get(url, extraHeaders) {
         try {
-            await _ensureCF();
             var headers = Object.assign({}, HEADERS, extraHeaders || {});
             var res = await http_get(url, headers);
             if (!res) return { body: "" };
@@ -62,7 +47,6 @@
 
     async function getApi(url, extraHeaders) {
         try {
-            await _ensureCF();
             var headers = Object.assign({}, API_HEADERS, extraHeaders || {});
             var res = await http_get(url, headers);
             if (!res) return { body: "" };
@@ -492,7 +476,7 @@
 
             var langs = [];
             try {
-                var langRes = await getApi(BASE_URL + "/api/frontend/episode/" + episodeId + "/languages");
+                var langRes = await getApi(BASE_URL + "/api/frontend/episode/" + episodeId + "/languages", { "Referer": BASE_URL + "/anime/" + slug });
                 var langData = JSON.parse(langRes.body || "{}");
                 langs = langData.languages || [];
             } catch (_) {}
