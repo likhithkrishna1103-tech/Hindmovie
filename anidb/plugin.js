@@ -28,12 +28,29 @@
         "X-Requested-With": "XMLHttpRequest"
     };
 
+    var _cfReady = false;
+    var _cfPromise = null;
+    async function _ensureCF() {
+        if (_cfReady) return;
+        if (_cfPromise) return _cfPromise;
+        _cfPromise = (async function() {
+            try {
+                if (typeof solveCaptcha !== "undefined") {
+                    await solveCaptcha("cloudflare", BASE_URL);
+                }
+            } catch (_) {}
+            _cfReady = true;
+        })();
+        return _cfPromise;
+    }
+
     function stripHtml(str) {
         return String(str || "").replace(/<[^>]+>/g, "").trim();
     }
 
     async function get(url, extraHeaders) {
         try {
+            await _ensureCF();
             var headers = Object.assign({}, HEADERS, extraHeaders || {});
             var res = await http_get(url, headers);
             if (!res) return { body: "" };
@@ -45,6 +62,7 @@
 
     async function getApi(url, extraHeaders) {
         try {
+            await _ensureCF();
             var headers = Object.assign({}, API_HEADERS, extraHeaders || {});
             var res = await http_get(url, headers);
             if (!res) return { body: "" };
