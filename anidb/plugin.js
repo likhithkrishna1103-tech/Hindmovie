@@ -48,6 +48,23 @@
     async function getApi(url, extraHeaders) {
         try {
             var headers = Object.assign({}, API_HEADERS, extraHeaders || {});
+            if (url.includes("/api/frontend/episode/")) {
+                var slug = "";
+                if (url.includes("/api/frontend/episode/")) {
+                    var match = url.match(/\/episode\/(\d+)\/languages/);
+                    if (match) {
+                        var episodeId = match[1];
+                        var tempUrl = url.replace("/languages", "");
+                        var slugMatch = tempUrl.match(/\/([^\/]+)$/);
+                        if (slugMatch) {
+                            slug = slugMatch[1];
+                        }
+                    }
+                }
+                if (slug) {
+                    headers["Referer"] = BASE_URL + "/anime/" + slug;
+                }
+            }
             var res = await http_get(url, headers);
             if (!res) return { body: "" };
             return { body: res.body || res.text || "" };
@@ -120,7 +137,7 @@
                                 posterUrl: item.posterUrl,
                                 score: item.score || undefined,
                                 type: item.type,
-                                headers: HEADERS
+                                headers: API_HEADERS
                             });
                         })
                     };
