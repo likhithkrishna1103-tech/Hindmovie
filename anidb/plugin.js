@@ -16,14 +16,11 @@
     var HEADERS = {
         "User-Agent": USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
         "Referer": BASE_URL + "/"
     };
 
     var API_HEADERS = {
         "User-Agent": USER_AGENT,
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
         "Referer": BASE_URL + "/",
         "X-Requested-With": "XMLHttpRequest"
     };
@@ -49,8 +46,8 @@
         try {
             var headers = Object.assign({}, API_HEADERS, extraHeaders || {});
             if (url.includes("/api/frontend/episode/")) {
-                var slug = "";
-                if (url.includes("/api/frontend/episode/")) {
+                if (url.includes("/languages")) {
+                    var slug = "";
                     var match = url.match(/\/episode\/(\d+)\/languages/);
                     if (match) {
                         var episodeId = match[1];
@@ -60,9 +57,9 @@
                             slug = slugMatch[1];
                         }
                     }
-                }
-                if (slug) {
-                    headers["Referer"] = BASE_URL + "/anime/" + slug;
+                    if (slug) {
+                        headers["Referer"] = BASE_URL + "/anime/" + slug;
+                    }
                 }
             }
             var res = await http_get(url, headers);
@@ -137,7 +134,7 @@
                                 posterUrl: item.posterUrl,
                                 score: item.score || undefined,
                                 type: item.type,
-                                headers: API_HEADERS
+                                headers: HEADERS
                             });
                         })
                     };
