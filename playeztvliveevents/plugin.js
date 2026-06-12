@@ -54,7 +54,8 @@
     }
 
     function trimToString(value) {
-        return typeof value === "string" ? value.trim() : String(value || "").trim();
+        if (value === null || value === undefined) return "";
+        return typeof value === "string" ? value.trim() : String(value).trim();
     }
 
     function normalizeBaseUrl(value) {
@@ -65,12 +66,14 @@
     }
 
     function extractResponseBody(response) {
+        if (!response) return "";
         if (typeof response === "string") return response;
         if (response && typeof response.body === "string") return response.body;
         return "";
     }
 
     function extractResponseStatus(response) {
+        if (!response) return 200;
         return response && typeof response.status !== "undefined" ? response.status : 200;
     }
 
@@ -83,8 +86,10 @@
     }
 
     function safeJsonParse(text) {
+        if (!text) return null;
+        
         try {
-            return JSON.parse(String(text || ""));
+            return JSON.parse(String(text));
         } catch (_) {
             return null;
         }
@@ -92,6 +97,8 @@
 
     function base64DecodeText(value) {
         const normalized = String(value || "");
+        if (!normalized) return "";
+        
         if (typeof atob === "function") {
             return atob(normalized);
         }
@@ -142,15 +149,27 @@
     }
 
     function decodePlayzSubstitutionPayload(value) {
+        if (!value) return "";
+        
         let restored = "";
-        for (const char of String(value || "")) {
+        for (const char of String(value)) {
             restored += PLAYZ_SUBSTITUTION_REVERSE[char] || char;
         }
         return base64DecodeText(restored);
     }
 
     async function mapWithConcurrency(items, limit, worker) {
-        const source = Array.isArray(items) ? items : [];
+        if (!Array.isArray(items)) {
+            console.error("Invalid items array for mapWithConcurrency");
+            return [];
+        }
+        
+        if (typeof worker !== "function") {
+            console.error("Invalid worker function for mapWithConcurrency");
+            return [];
+        }
+        
+        const source = items;
         const results = new Array(source.length);
         const maxWorkers = Math.max(1, Math.min(parseInt(limit, 10) || 1, source.length || 1));
         let nextIndex = 0;
@@ -256,36 +275,58 @@
     }
 
     async function postJson(url, payload, headers) {
+        if (!url || typeof url !== "string") {
+            throw new Error("Invalid URL for postJson");
+        }
+        
+        if (!payload || typeof payload !== "object") {
+            throw new Error("Invalid payload for postJson");
+        }
+        
         const body = JSON.stringify(payload);
-        if (typeof http_post === "function") {
-            return http_post(url, headers || {}, body);
+        try {
+            if (typeof http_post === "function") {
+                return http_post(url, headers || {}, body);
+            }
+            if (typeof fetch === "function") {
+                const response = await fetch(url, {
+                    method: "POST",
+                    headers,
+                    body
+                });
+                return {
+                    status: response.status,
+                    body: await response.text()
+                };
+            }
+            throw new Error("POST requests are not supported in this runtime");
+        } catch (error) {
+            console.error(`Failed to POST to ${url}: ${error && error.message ? error.message : String(error)}`);
+            throw error;
         }
-        if (typeof fetch === "function") {
-            const response = await fetch(url, {
-                method: "POST",
-                headers,
-                body
-            });
-            return {
-                status: response.status,
-                body: await response.text()
-            };
-        }
-        throw new Error("POST requests are not supported in this runtime");
     }
 
     async function fetchText(url, headers) {
-        if (typeof http_get === "function") {
-            return http_get(url, headers || {});
+        if (!url || typeof url !== "string") {
+            throw new Error("Invalid URL for fetchText");
         }
-        if (typeof fetch === "function") {
-            const response = await fetch(url, { headers: headers || {} });
-            return {
-                status: response.status,
-                body: await response.text()
-            };
+        
+        try {
+            if (typeof http_get === "function") {
+                return http_get(url, headers || {});
+            }
+            if (typeof fetch === "function") {
+                const response = await fetch(url, { headers: headers || {} });
+                return {
+                    status: response.status,
+                    body: await response.text()
+                };
+            }
+            throw new Error("GET requests are not supported in this runtime");
+        } catch (error) {
+            console.error(`Failed to fetch text from ${url}: ${error && error.message ? error.message : String(error)}`);
+            throw error;
         }
-        throw new Error("GET requests are not supported in this runtime");
     }
 
     async function fetchWithMethod(url, requestType, headers, body, bodyType) {
@@ -383,7 +424,11 @@
         };
 
         addUrl(activeBaseUrl);
-        (await fetchRemoteBaseUrls()).forEach(addUrl);
+        try {
+            (await fetchRemoteBaseUrls()).forEach(addUrl);
+        } catch (error) {
+            console.error(`Failed to fetch remote base URLs: ${error && error.message ? error.message : String(error)}`);
+        }
         addUrl(manifest && manifest.baseUrl);
         DEFAULT_BASE_URLS.forEach(addUrl);
         return urls;
@@ -426,15 +471,35 @@
     }
 
     async function fetchPlayzPayload(url) {
-        const response = await fetchText(url, buildPlayzHeaders(url));
-        if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) {
+        if (!url || typeof url !== "string") {
+            console.error("Invalid URL for fetchPlayzPayload");
             return "";
         }
-        return decryptPlayzPayload(extractResponseBody(response));
+        
+        try {
+            const response = await fetchText(url, buildPlayzHeaders(url));
+            if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) {
+                return "";
+            }
+            return decryptPlayzPayload(extractResponseBody(response));
+        } catch (error) {
+            console.error(`Failed to fetch payload from ${url}: ${error && error.message ? error.message : String(error)}`);
+            return "";
+        }
     }
 
     async function fetchPlayzJson(path) {
+        if (!path || typeof path !== "string") {
+            console.error("Invalid path for fetchPlayzJson");
+            return null;
+        }
+        
         const baseUrls = await getBaseUrls();
+        if (!baseUrls || !Array.isArray(baseUrls) || !baseUrls.length) {
+            console.error("No base URLs available for fetchPlayzJson");
+            return null;
+        }
+        
         for (const baseUrl of baseUrls) {
             try {
                 const finalUrl = /^https?:\/\//i.test(path) ? path : `${baseUrl}/${String(path || "").replace(/^\/+/, "")}`;
@@ -446,12 +511,16 @@
                 }
             } catch (error) {
                 console.error(`Failed to fetch ${path} from ${baseUrl}: ${error && error.message ? error.message : String(error)}`);
+                // Continue to next URL for recovery
+                continue;
             }
         }
         return null;
     }
 
     function normalizeHeaderName(key) {
+        if (!key) return "";
+        
         const lowered = trimToString(key).toLowerCase();
         if (lowered === "user-agent") return "User-Agent";
         if (lowered === "referer" || lowered === "referrer") return "Referer";
@@ -492,7 +561,7 @@
             keyid: ""
         };
 
-        if (!value.includes("|")) {
+        if (!value || !value.includes("|")) {
             return result;
         }
 
@@ -540,18 +609,24 @@
     }
 
     function mergeHeaders(left, right) {
-        return Object.assign({}, left || {}, right || {});
+        if (!left || typeof left !== "object") left = {};
+        if (!right || typeof right !== "object") right = {};
+        return Object.assign({}, left, right);
     }
 
     function decodeEscapedText(text) {
-        return String(text || "")
+        if (!text) return "";
+        
+        return String(text)
             .replace(/\\u0026/g, "&")
             .replace(/\\\//g, "/");
     }
 
     function tryDecodeReversedTokenPayload(text, key) {
+        if (!text || typeof text !== "string") return "";
+        
         try {
-            const reversed = String(text || "").split("").reverse().join("");
+            const reversed = String(text).split("").reverse().join("");
             const decoded = typeof atob === "function"
                 ? atob(reversed)
                 : Buffer.from(reversed, "base64").toString("utf8");
@@ -579,6 +654,8 @@
     }
 
     function extractJsonPlaybackUrl(text, key) {
+        if (!text) return "";
+        
         const normalizedKey = trimToString(key) || "playback_url";
         const data = safeJsonParse(text);
         if (data && typeof data === "object") {
@@ -591,12 +668,14 @@
 
         const escapedKey = normalizedKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const regex = new RegExp(`"${escapedKey}"\\s*:\\s*"([^"]+)"`, "i");
-        const match = regex.exec(String(text || ""));
+        const match = regex.exec(String(text));
         if (match && match[1]) return decodeEscapedText(match[1]);
         return "";
     }
 
     function extractDirectMediaUrl(text, preferredHost) {
+        if (!text) return "";
+        
         const patterns = [
             /https?:\/\/[^"'\\\s<>]+?\.(?:m3u8|mpd)(?:[^"'\\\s<>]*)/ig,
             /https?:\\\/\\\/[^"'\\\s<>]+?\.(?:m3u8|mpd)(?:[^"'\\\s<>]*)/ig,
@@ -605,7 +684,7 @@
         ];
 
         for (const pattern of patterns) {
-            const matches = String(text || "").match(pattern);
+            const matches = String(text).match(pattern);
             if (!matches || !matches.length) continue;
 
             for (const candidate of matches) {
@@ -634,11 +713,13 @@
     }
 
     function extractHtmlPackedSource(text) {
-        const sourceMatch = /player\.load\(\{[^}]*source:\s*([a-zA-Z0-9_]+)\(/i.exec(String(text || ""));
+        if (!text) return "";
+        
+        const sourceMatch = /player\.load\(\{[^}]*source:\s*([a-zA-Z0-9_]+)\(/i.exec(String(text));
         if (!sourceMatch || !sourceMatch[1]) return "";
 
         const functionPattern = new RegExp(`function\\s+${sourceMatch[1]}\\s*\\(\\)\\s*\\{([\\s\\S]*?)\\}`, "i");
-        const functionMatch = functionPattern.exec(String(text || ""));
+        const functionMatch = functionPattern.exec(String(text));
         if (!functionMatch || !functionMatch[1]) return "";
 
         const joinMatch = /\[([\s\S]*?)\]\.join/i.exec(functionMatch[1]);
@@ -653,7 +734,9 @@
     }
 
     function extractPlaybackUrlFromObfuscatedHtml(text) {
-        const html = String(text || "");
+        if (!text) return "";
+        
+        const html = String(text);
         const playbackVarMatch = /var\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*""\s*,\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*\[\s*\]/.exec(html);
         if (!playbackVarMatch) return "";
 
@@ -699,66 +782,86 @@
     }
 
     async function resolveEmbedToken(tokenConfig) {
+        if (!tokenConfig || typeof tokenConfig !== "object") {
+            return { url: "", headers: {} };
+        }
+        
         const request = splitUrlAndHeaders(tokenConfig.api || "");
         if (!request.url || request.url.includes("%s")) return { url: "", headers: {} };
 
-        const response = await fetchText(request.url, mergeHeaders({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-        }, request.headers));
-        if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) {
+        try {
+            const response = await fetchText(request.url, mergeHeaders({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+            }, request.headers));
+            if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) {
+                return { url: "", headers: {} };
+            }
+
+            const html = extractResponseBody(response);
+            let resolved = extractJsonPlaybackUrl(html, tokenConfig.link_key || "playback_url");
+            if (!resolved) resolved = extractPlaybackUrlFromObfuscatedHtml(html);
+            if (!resolved) resolved = extractHtmlPackedSource(html);
+
+            let preferredHost = "";
+            try {
+                preferredHost = trimToString(tokenConfig.url ? new URL(tokenConfig.url).hostname.replace(/^www\./i, "") : "");
+            } catch (_) {
+                preferredHost = "";
+            }
+            if (!resolved) resolved = extractDirectMediaUrl(html, preferredHost);
+
+            const parsed = splitUrlAndHeaders(resolved);
+            return {
+                url: parsed.url,
+                headers: mergeHeaders(request.headers, parsed.headers)
+            };
+        } catch (error) {
+            console.error(`Failed to resolve embed token: ${error && error.message ? error.message : String(error)}`);
             return { url: "", headers: {} };
         }
-
-        const html = extractResponseBody(response);
-        let resolved = extractJsonPlaybackUrl(html, tokenConfig.link_key || "playback_url");
-        if (!resolved) resolved = extractPlaybackUrlFromObfuscatedHtml(html);
-        if (!resolved) resolved = extractHtmlPackedSource(html);
-
-        let preferredHost = "";
-        try {
-            preferredHost = trimToString(tokenConfig.url ? new URL(tokenConfig.url).hostname.replace(/^www\./i, "") : "");
-        } catch (_) {
-            preferredHost = "";
-        }
-        if (!resolved) resolved = extractDirectMediaUrl(html, preferredHost);
-
-        const parsed = splitUrlAndHeaders(resolved);
-        return {
-            url: parsed.url,
-            headers: mergeHeaders(request.headers, parsed.headers)
-        };
     }
 
     async function resolveStructuredToken(tokenConfig, allowReversePayload) {
+        if (!tokenConfig || typeof tokenConfig !== "object") {
+            return { url: "", headers: {} };
+        }
+        
         const request = splitUrlAndHeaders(tokenConfig.api || "");
         if (!request.url || request.url.includes("%s")) return { url: "", headers: {} };
 
-        const response = await fetchWithMethod(
-            request.url,
-            tokenConfig.request_type || "get",
-            request.headers,
-            tokenConfig.request_body || "",
-            tokenConfig.request_body_type || "normal"
-        );
-        if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) {
+        try {
+            const response = await fetchWithMethod(
+                request.url,
+                tokenConfig.request_type || "get",
+                request.headers,
+                tokenConfig.request_body || "",
+                tokenConfig.request_body_type || "normal"
+            );
+            if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) {
+                return { url: "", headers: {} };
+            }
+
+            let resolved = extractJsonPlaybackUrl(extractResponseBody(response), tokenConfig.link_key || "playback_url");
+            if (!resolved && allowReversePayload) {
+                resolved = tryDecodeReversedTokenPayload(extractResponseBody(response), tokenConfig.link_key || "playback_url");
+            }
+            if (!resolved) return { url: "", headers: {} };
+
+            const parsed = splitUrlAndHeaders(resolved);
+            return {
+                url: parsed.url,
+                headers: mergeHeaders(request.headers, parsed.headers)
+            };
+        } catch (error) {
+            console.error(`Failed to resolve structured token: ${error && error.message ? error.message : String(error)}`);
             return { url: "", headers: {} };
         }
-
-        let resolved = extractJsonPlaybackUrl(extractResponseBody(response), tokenConfig.link_key || "playback_url");
-        if (!resolved && allowReversePayload) {
-            resolved = tryDecodeReversedTokenPayload(extractResponseBody(response), tokenConfig.link_key || "playback_url");
-        }
-        if (!resolved) return { url: "", headers: {} };
-
-        const parsed = splitUrlAndHeaders(resolved);
-        return {
-            url: parsed.url,
-            headers: mergeHeaders(request.headers, parsed.headers)
-        };
     }
 
     async function resolveTokenizedStream(entry) {
-        if (!entry || !entry.tokenApi) return null;
+        if (!entry || typeof entry !== "object") return null;
+        
+        if (!entry.tokenApi || typeof entry.tokenApi !== "string") return null;
 
         const tokenConfig = safeJsonParse(entry.tokenApi);
         if (!tokenConfig || typeof tokenConfig !== "object") return null;
@@ -780,6 +883,10 @@
     }
 
     function buildEventStatus(event) {
+        if (!event || typeof event !== "object") {
+            return "LIVE";
+        }
+        
         const now = Date.now();
         const start = parsePlayzUtcDateTime(event && event.date, event && event.time);
         const end = parsePlayzUtcDateTime(event && event.endDate, event && event.endTime);
@@ -791,6 +898,10 @@
     }
 
     function buildEventStatusPrefix(event) {
+        if (!event || typeof event !== "object") {
+            return "[LIVE]";
+        }
+        
         const status = buildEventStatus(event);
         if (status === "LIVE") return "[LIVE]";
         if (status === "UPCOMING") return "[SOON]";
@@ -831,6 +942,10 @@
     }
 
     function buildEventTitle(event) {
+        if (!event || typeof event !== "object") {
+            return "Live Event";
+        }
+        
         const teamA = trimToString(event && event.teamAName);
         const teamB = trimToString(event && event.teamBName);
         if (teamA && teamB) {
@@ -841,6 +956,10 @@
     }
 
     function buildEventPoster(event) {
+        if (!event || typeof event !== "object") {
+            return `${MATCH_CARD_API}?title=${encodeURIComponent("Live Event")}&teamA=${encodeURIComponent("Team A")}&teamB=${encodeURIComponent("Team B")}`;
+        }
+        
         const title = encodeURIComponent(trimToString(event && event.eventName));
         let url = `${MATCH_CARD_API}?title=${title}&teamA=${encodeURIComponent(trimToString(event && event.teamAName) || "Team A")}&teamB=${encodeURIComponent(trimToString(event && event.teamBName) || "Team B")}`;
         if (trimToString(event && event.teamAFlag)) url += "&teamAImg=" + encodeURIComponent(event.teamAFlag);
@@ -853,7 +972,7 @@
     }
 
     function parseEventEntry(rawEntry) {
-        if (!rawEntry) return null;
+        if (!rawEntry || typeof rawEntry !== "object") return null;
         const eventObject = rawEntry.event && typeof rawEntry.event === "string"
             ? safeJsonParse(rawEntry.event)
             : rawEntry;
@@ -879,6 +998,10 @@
     }
 
     function sortEvents(events) {
+        if (!Array.isArray(events)) {
+            return [];
+        }
+        
         const weight = {
             LIVE: 0,
             UPCOMING: 1,
@@ -906,17 +1029,31 @@
     }
 
     async function fetchPlayzEvents() {
-        const data = await fetchPlayzJson("events.txt");
-        if (!Array.isArray(data)) return [];
-        return sortEvents(data.map(parseEventEntry).filter(Boolean));
+        try {
+            const data = await fetchPlayzJson("events.txt");
+            if (!Array.isArray(data)) return [];
+            return sortEvents(data.map(parseEventEntry).filter(Boolean));
+        } catch (error) {
+            console.error(`Failed to fetch PlayZTV events: ${error && error.message ? error.message : String(error)}`);
+            return [];
+        }
     }
 
     async function fetchPlayzCategories() {
-        const data = await fetchPlayzJson("event_cats.txt");
-        return data && typeof data === "object" && !Array.isArray(data) ? data : {};
+        try {
+            const data = await fetchPlayzJson("event_cats.txt");
+            return data && typeof data === "object" && !Array.isArray(data) ? data : {};
+        } catch (error) {
+            console.error(`Failed to fetch PlayZTV categories: ${error && error.message ? error.message : String(error)}`);
+            return {};
+        }
     }
 
     function buildHomeItem(event) {
+        if (!event || typeof event !== "object") {
+            throw new Error("Invalid event data for buildHomeItem");
+        }
+        
         const displayTitle = buildEventTitle(event);
         const poster = buildEventPoster(event);
         return new MultimediaItem({
@@ -942,14 +1079,22 @@
     }
 
     function getStreamHost(url) {
+        if (!url || typeof url !== "string") {
+            return "";
+        }
+        
         try {
-            return new URL(String(url || "")).hostname.toLowerCase();
+            return new URL(String(url)).hostname.toLowerCase();
         } catch (_) {
             return "";
         }
     }
 
     function matchesHost(host, entries) {
+        if (!host || typeof host !== "string" || !Array.isArray(entries)) {
+            return false;
+        }
+        
         const normalized = trimToString(host).toLowerCase();
         return entries.some((entry) => normalized === entry || normalized.endsWith(`.${entry}`));
     }
@@ -990,22 +1135,46 @@
         }
     }
 
-    function parseVariantQuality(attributes) {
-        const resolution = trimToString(attributes && attributes.RESOLUTION);
+    function parseVariantQuality(attributes, isMpd = false) {
+        if (!attributes || typeof attributes !== "object") {
+            return 0;
+        }
+        
+        let resolution = trimToString(attributes && attributes.RESOLUTION);
+        if (!resolution && isMpd) {
+            const width = attributes && attributes.width;
+            const height = attributes && attributes.height;
+            if (width && height) {
+                resolution = `${width}x${height}`;
+            }
+        }
+        
         const resolutionMatch = /(\d+)\s*x\s*(\d+)/i.exec(resolution);
         if (resolutionMatch) return parseInt(resolutionMatch[2], 10) || 0;
 
-        const bandwidth = parseInt(attributes && (attributes["AVERAGE-BANDWIDTH"] || attributes.BANDWIDTH || "0"), 10);
+        let bandwidth = parseInt(attributes && (attributes["AVERAGE-BANDWIDTH"] || attributes.BANDWIDTH || "0"), 10);
+        if (!bandwidth && isMpd) {
+            bandwidth = attributes && attributes.bandwidth;
+        }
+        
         if (!bandwidth || bandwidth < 1) return 0;
+        if (bandwidth >= 20000000) return 8160;
+        if (bandwidth >= 10000000) return 4320;
         if (bandwidth >= 6000000) return 1080;
         if (bandwidth >= 3000000) return 720;
         if (bandwidth >= 1500000) return 480;
         if (bandwidth >= 800000) return 360;
-        return 240;
+        if (bandwidth >= 400000) return 240;
+        if (bandwidth >= 200000) return 144;
+        return 0;
     }
 
-    function buildVariantSource(baseSource, attributes, fallbackIndex) {
-        const quality = parseVariantQuality(attributes);
+    function buildVariantSource(baseSource, attributes, fallbackIndex, isMpd = false) {
+        if (!baseSource || typeof baseSource !== "string") {
+            baseSource = "";
+        }
+        
+        const quality = parseVariantQuality(attributes, isMpd);
         if (quality > 0) {
             return {
                 quality,
@@ -1014,6 +1183,16 @@
         }
 
         const bandwidth = parseInt(attributes && (attributes["AVERAGE-BANDWIDTH"] || attributes.BANDWIDTH || "0"), 10);
+        if (!bandwidth && isMpd) {
+            const mpdBandwidth = attributes && attributes.bandwidth;
+            if (mpdBandwidth) {
+                return {
+                    quality: 0,
+                    source: `${baseSource} ${Math.max(1, Math.round(mpdBandwidth / 1000))}kbps`
+                };
+            }
+        }
+        
         if (bandwidth > 0) {
             return {
                 quality: 0,
@@ -1091,17 +1270,22 @@
         return info;
     }
 
-    function buildVariantPlaybackUrl(variant) {
+function buildVariantPlaybackUrl(variant) {
         // Always return the direct variant URL.
         // Inline data: manifests (previously used to embed audio groups) crash
         // WinRT's AdaptiveMediaSource which only accepts http/https URIs, even
         // though hasExtension() matches .m3u8 inside the encoded data: body.
         // Audio group selection is handled by the player from the master manifest.
-        return trimToString(variant && variant.url);
-    }
+        if (!variant || typeof variant !== "object") {
+            return "";
+}
 
+        return trimToString(variant.url);
+    }
     function extractClearKeyPairFromJson(value) {
         const data = safeJsonParse(value);
+        if (!data || typeof data !== "object") return null;
+        
         const entries = data && Array.isArray(data.keys) ? data.keys : [];
         const firstEntry = entries.find((entry) => entry && (entry.k || entry.key) && (entry.kid || entry.keyid));
         if (!firstEntry) return null;
@@ -1131,7 +1315,7 @@
 
     function hexToBase64Url(hex) {
         const normalized = trimToString(hex).replace(/-/g, "");
-        if (!/^[0-9a-f]+$/i.test(normalized) || normalized.length % 2 !== 0) return "";
+        if (!normalized || !/^[0-9a-f]+$/i.test(normalized) || normalized.length % 2 !== 0) return "";
         const bytes = [];
         for (let index = 0; index < normalized.length; index += 2) {
             bytes.push(parseInt(normalized.slice(index, index + 2), 16));
@@ -1144,6 +1328,7 @@
     }
 
     async function extractDefaultKidFromMpd(streamUrl, headers) {
+        if (!streamUrl || typeof streamUrl !== "string") return "";
         if (!/\.mpd(?:$|[?#])/i.test(trimToString(streamUrl))) return "";
         try {
             const response = await fetchText(streamUrl, headers || {});
@@ -1181,6 +1366,16 @@
     }
 
     async function resolveStreamDrm(rawApi, parsed, streamUrl, baseHeaders) {
+        if (!parsed || typeof parsed !== "object") {
+            return {
+                headers: mergeHeaders({}, baseHeaders || {}),
+                drmType: "",
+                drmKey: "",
+                drmKid: "",
+                licenseUrl: ""
+            };
+        }
+        
         const streamHeaders = mergeHeaders({}, baseHeaders || {}, parsed && parsed.headers ? parsed.headers : {});
         let drmScheme = normalizeDrmScheme(parsed && parsed.drmScheme);
         let drmKey = normalizeDrmToken(parsed && parsed.key);
@@ -1203,13 +1398,17 @@
         }
 
         if ((!drmKey || !drmKid) && drmScheme === "clearkey" && licenseUrl && /\.mpd(?:$|[?#])/i.test(trimToString(streamUrl))) {
-            const mpdKid = await extractDefaultKidFromMpd(streamUrl, streamHeaders);
-            if (mpdKid) {
-                const fetchedKey = await fetchClearKeyFromLicenseServer(licenseUrl, mpdKid, streamHeaders);
-                if (fetchedKey) {
-                    drmKid = mpdKid;
-                    drmKey = fetchedKey;
+            try {
+                const mpdKid = await extractDefaultKidFromMpd(streamUrl, streamHeaders);
+                if (mpdKid) {
+                    const fetchedKey = await fetchClearKeyFromLicenseServer(licenseUrl, mpdKid, streamHeaders);
+                    if (fetchedKey) {
+                        drmKid = mpdKid;
+                        drmKey = fetchedKey;
+                    }
                 }
+            } catch (error) {
+                console.error(`Failed to resolve DRM from stream URL ${streamUrl}: ${error && error.message ? error.message : String(error)}`);
             }
         }
 
@@ -1223,6 +1422,10 @@
     }
 
     function createStreamResult(source, parsed, drmInfo, quality) {
+        if (!parsed || typeof parsed !== "object") {
+            throw new Error("Invalid parsed data for createStreamResult");
+        }
+        
         const streamHeaders = mergeHeaders({}, drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {}));
         const stream = new StreamResult({
             source,
@@ -1245,6 +1448,10 @@
     }
 
     function scoreStream(sourceLabel, parsed, rawApi, quality, isVariant) {
+        if (!parsed || typeof parsed !== "object") {
+            return 0;
+        }
+        
         const url = trimToString(parsed && parsed.url);
         const headers = parsed && parsed.headers && typeof parsed.headers === "object" ? parsed.headers : {};
         const source = trimToString(sourceLabel).toLowerCase();
@@ -1276,6 +1483,10 @@
     }
 
     function createRankedStream(source, parsed, drmInfo, quality, order, isVariant) {
+        if (!parsed || typeof parsed !== "object") {
+            throw new Error("Invalid parsed data for createRankedStream");
+        }
+        
         return {
             score: scoreStream(source, {
                 url: parsed.url,
@@ -1305,7 +1516,7 @@
                 const playbackUrl = buildVariantPlaybackUrl(variant);
                 if (!variant || !variant.url || !playbackUrl || seen[playbackUrl]) return;
                 seen[playbackUrl] = true;
-                const variantInfo = buildVariantSource(sourceLabel, variant.attributes || {}, index);
+                const variantInfo = buildVariantSource(sourceLabel, variant.attributes || {}, index, false);
                 streams.push(createStreamResult(variantInfo.source, {
                     url: playbackUrl,
                     headers: drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {})
@@ -1313,12 +1524,50 @@
             });
 
             return streams;
-        } catch (_) {
+        } catch (error) {
+            console.error(`Failed to expand HLS streams from ${parsed.url}: ${error && error.message ? error.message : String(error)}`);
+            return [];
+        }
+    }
+
+    async function expandMpdStreams(sourceLabel, parsed, drmInfo) {
+        if (!parsed || !parsed.url || !/\.mpd(?:$|[?#])/i.test(trimToString(parsed.url))) return [];
+
+        try {
+            const response = await fetchText(parsed.url, drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {}));
+            if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) return [];
+
+            const manifestText = trimToString(extractResponseBody(response));
+            if (!manifestText.startsWith("<?xml") || !manifestText.includes("<MPD")) return [];
+
+            const manifestInfo = parseMpdMasterPlaylist(manifestText, parsed.url);
+            const variants = manifestInfo && Array.isArray(manifestInfo.variants) ? manifestInfo.variants : [];
+            const seen = {};
+            const streams = [];
+
+            variants.forEach((variant, index) => {
+                const playbackUrl = buildVariantPlaybackUrl(variant);
+                if (!variant || !variant.url || !playbackUrl || seen[playbackUrl]) return;
+                seen[playbackUrl] = true;
+                const variantInfo = buildVariantSource(sourceLabel, variant.attributes || {}, index, true);
+                streams.push(createStreamResult(variantInfo.source, {
+                    url: playbackUrl,
+                    headers: drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {})
+                }, drmInfo, variantInfo.quality));
+            });
+
+            return streams;
+        } catch (error) {
+            console.error(`Failed to expand MPD streams from ${parsed.url}: ${error && error.message ? error.message : String(error)}`);
             return [];
         }
     }
 
     async function buildResolvedStream(entry) {
+        if (!entry || typeof entry !== "object") {
+            return null;
+        }
+        
         const tokenResolved = await resolveTokenizedStream(entry);
         if (tokenResolved && tokenResolved.url) {
             const parsedToken = splitUrlAndHeaders(tokenResolved.url);
@@ -1337,7 +1586,211 @@
         return parsed;
     }
 
+    function parseMpdMasterPlaylist(manifestText, manifestUrl) {
+        const info = {
+            variants: [],
+            version: "",
+            independentSegments: false,
+            mediaGroups: {
+                AUDIO: {},
+                SUBTITLES: {},
+                "CLOSED-CAPTIONS": {}
+            }
+        };
+        const lines = String(manifestText || "").split(/\r?\n/);
+        let currentAdaptationSet = null;
+        let currentRepresentation = null;
+
+        lines.forEach((rawLine) => {
+            const line = trimToString(rawLine);
+            if (!line) return;
+
+            if (line.includes("<AdaptationSet")) {
+                const adaptationSetMatch = line.match(/id="?(\d+)?"?/);
+                currentAdaptationSet = {
+                    id: adaptationSetMatch ? adaptationSetMatch[1] : null,
+                    mimeType: null,
+                    codecs: null,
+                    bandwidth: null,
+                    width: null,
+                    height: null,
+                    frameRate: null,
+                    audioSamplingRate: null,
+                    startWithSAP: null
+                };
+
+                const mimeTypeMatch = line.match(/mimeType="([^"]*)"/);
+                if (mimeTypeMatch) currentAdaptationSet.mimeType = mimeTypeMatch[1];
+
+                const codecsMatch = line.match(/codecs="([^"]*)"/);
+                if (codecsMatch) currentAdaptationSet.codecs = codecsMatch[1];
+
+                const bandwidthMatch = line.match(/bandwidth="?(\d+)?"?/);
+                if (bandwidthMatch) currentAdaptationSet.bandwidth = bandwidthMatch[1] ? parseInt(bandwidthMatch[1]) : null;
+
+                const widthMatch = line.match(/width="?(\d+)?"?/);
+                if (widthMatch) currentAdaptationSet.width = widthMatch[1] ? parseInt(widthMatch[1]) : null;
+
+                const heightMatch = line.match(/height="?(\d+)?"?/);
+                if (heightMatch) currentAdaptationSet.height = heightMatch[1] ? parseInt(heightMatch[1]) : null;
+
+                const frameRateMatch = line.match(/frameRate="([^"]*)"/);
+                if (frameRateMatch) currentAdaptationSet.frameRate = frameRateMatch[1];
+
+                const audioSamplingRateMatch = line.match(/audioSamplingRate="([^"]*)"/);
+                if (audioSamplingRateMatch) currentAdaptationSet.audioSamplingRate = audioSamplingRateMatch[1];
+
+                const startWithSAPMatch = line.match(/startWithSAP="?(\d+)?"?/);
+                if (startWithSAPMatch) currentAdaptationSet.startWithSAP = startWithSAPMatch[1] ? parseInt(startWithSAPMatch[1]) : null;
+            } else if (line.includes("<Representation")) {
+                currentRepresentation = {
+                    id: null,
+                    bandwidth: null,
+                    width: null,
+                    height: null,
+                    frameRate: null,
+                    audioSamplingRate: null,
+                    codecs: null,
+                    mimeType: null
+                };
+
+                const idMatch = line.match(/id="?(\d+)?"?/);
+                if (idMatch) currentRepresentation.id = idMatch[1] ? parseInt(idMatch[1]) : null;
+
+                const bandwidthMatch = line.match(/bandwidth="?(\d+)?"?/);
+                if (bandwidthMatch) currentRepresentation.bandwidth = bandwidthMatch[1] ? parseInt(bandwidthMatch[1]) : null;
+
+                const widthMatch = line.match(/width="?(\d+)?"?/);
+                if (widthMatch) currentRepresentation.width = widthMatch[1] ? parseInt(widthMatch[1]) : null;
+
+                const heightMatch = line.match(/height="?(\d+)?"?/);
+                if (heightMatch) currentRepresentation.height = heightMatch[1] ? parseInt(heightMatch[1]) : null;
+
+                const frameRateMatch = line.match(/frameRate="([^"]*)"/);
+                if (frameRateMatch) currentRepresentation.frameRate = frameRateMatch[1];
+
+                const audioSamplingRateMatch = line.match(/audioSamplingRate="([^"]*)"/);
+                if (audioSamplingRateMatch) currentRepresentation.audioSamplingRate = audioSamplingRateMatch[1];
+
+                const codecsMatch = line.match(/codecs="([^"]*)"/);
+                if (codecsMatch) currentRepresentation.codecs = codecsMatch[1];
+
+                const mimeTypeMatch = line.match(/mimeType="([^"]*)"/);
+                if (mimeTypeMatch) currentRepresentation.mimeType = mimeTypeMatch[1];
+
+                if (currentAdaptationSet) {
+                    currentAdaptationSet.representations = currentAdaptationSet.representations || [];
+                    currentAdaptationSet.representations.push(currentRepresentation);
+                }
+            } else if (line.includes("</Representation>")) {
+                currentRepresentation = null;
+            } else if (line.includes("</AdaptationSet>")) {
+                if (currentAdaptationSet && currentAdaptationSet.representations && currentAdaptationSet.representations.length > 0) {
+                    const baseUrl = manifestUrl;
+                    currentAdaptationSet.representations.forEach((representation, repIndex) => {
+                        const quality = parseMpdRepresentationQuality(representation);
+                        const source = buildMpdVariantSource("Stream", representation, currentAdaptationSet, repIndex);
+                        const playbackUrl = buildMpdVariantPlaybackUrl(representation, baseUrl);
+
+                        if (playbackUrl) {
+                            info.variants.push({
+                                url: playbackUrl,
+                                attributes: {
+                                    BANDWIDTH: representation.bandwidth,
+                                    RESOLUTION: representation.width && representation.height ? `${representation.width}x${representation.height}` : null,
+                                    FRAME_RATE: representation.frameRate,
+                                    AUDIO_SAMPLING_RATE: representation.audioSamplingRate,
+                                    CODECS: representation.codecs,
+                                    MIME_TYPE: representation.mimeType
+                                }
+                            });
+                        }
+                    });
+                }
+                currentAdaptationSet = null;
+            }
+        });
+
+        return info;
+    }
+
+    function buildMpdVariantSource(baseSource, representation, adaptationSet, index) {
+        const quality = parseMpdRepresentationQuality(representation);
+        if (quality > 0) {
+            return {
+                quality,
+                source: `${baseSource} ${quality}p`
+            };
+        }
+
+        const bandwidth = representation.bandwidth;
+        if (bandwidth > 0) {
+            return {
+                quality: 0,
+                source: `${baseSource} ${Math.max(1, Math.round(bandwidth / 1000))}kbps`
+            };
+        }
+
+        return {
+            quality: 0,
+            source: `${baseSource} Variant ${index + 1}`
+        };
+    }
+
+    function buildMpdVariantPlaybackUrl(representation, baseUrl) {
+        if (!representation || typeof representation !== "object") {
+            return "";
+        }
+
+        const segmentBase = representation.id ? `RepresentationID=${representation.id}` : "";
+        const baseURL = representation.baseURL || baseUrl;
+        const quality = representation.bandwidth ? `quality=${representation.bandwidth}` : "";
+
+        let playbackUrl = baseURL;
+        if (segmentBase) playbackUrl += `?${segmentBase}`;
+        if (quality) playbackUrl += (playbackUrl.includes("?") ? "&" : "?") + quality;
+
+        return playbackUrl;
+    }
+
+    function parseMpdRepresentationQuality(representation) {
+        if (!representation || typeof representation !== "object") {
+            return 0;
+        }
+
+        const resolution = representation.height;
+        if (resolution && resolution > 0) {
+            if (resolution >= 4320) return 8160;
+            if (resolution >= 2160) return 4320;
+            if (resolution >= 1080) return 1080;
+            if (resolution >= 720) return 720;
+            if (resolution >= 480) return 480;
+            if (resolution >= 360) return 360;
+            if (resolution >= 240) return 240;
+            if (resolution >= 144) return 144;
+        }
+
+        const bandwidth = representation.bandwidth;
+        if (bandwidth && bandwidth > 0) {
+            if (bandwidth >= 20000000) return 8160;
+            if (bandwidth >= 10000000) return 4320;
+            if (bandwidth >= 5000000) return 1080;
+            if (bandwidth >= 3000000) return 720;
+            if (bandwidth >= 1500000) return 480;
+            if (bandwidth >= 800000) return 360;
+            if (bandwidth >= 400000) return 240;
+            if (bandwidth >= 200000) return 144;
+        }
+
+        return 0;
+    }
+
     async function processStreamEntry(entry, index) {
+        if (!entry || typeof entry !== "object") {
+            console.error(`Invalid stream entry at index ${index}`);
+            return [];
+        }
+        
         const resolved = await buildResolvedStream(entry);
         if (!resolved || !resolved.url) return [];
 
@@ -1348,30 +1801,65 @@
             createRankedStream(sourceLabel, resolved, drmInfo, 0, index * 100, false)
         ];
 
-        const variants = await expandHlsStreams(sourceLabel, resolved, drmInfo);
-        variants.forEach((variant, variantIndex) => {
-            rankedStreams.push(createRankedStream(
-                trimToString(variant && variant.source) || sourceLabel,
-                {
-                    url: trimToString(variant && variant.url),
-                    headers: variant && variant.headers ? variant.headers : (drmInfo.headers || resolved.headers || {})
-                },
-                drmInfo,
-                typeof (variant && variant.quality) === "number" ? variant.quality : 0,
-                (index * 100) + variantIndex + 1,
-                true
-            ));
-        });
+        try {
+            const variants = await expandHlsStreams(sourceLabel, resolved, drmInfo);
+            variants.forEach((variant, variantIndex) => {
+                rankedStreams.push(createRankedStream(
+                    trimToString(variant && variant.source) || sourceLabel,
+                    {
+                        url: trimToString(variant && variant.url),
+                        headers: variant && variant.headers ? variant.headers : (drmInfo.headers || resolved.headers || {})
+                    },
+                    drmInfo,
+                    typeof (variant && variant.quality) === "number" ? variant.quality : 0,
+                    (index * 100) + variantIndex + 1,
+                    true
+                ));
+            });
+        } catch (error) {
+            console.error(`Failed to expand HLS streams for entry at index ${index}: ${error && error.message ? error.message : String(error)}`);
+        }
+
+        try {
+            const variants = await expandMpdStreams(sourceLabel, resolved, drmInfo);
+            variants.forEach((variant, variantIndex) => {
+                rankedStreams.push(createRankedStream(
+                    trimToString(variant && variant.source) || sourceLabel,
+                    {
+                        url: trimToString(variant && variant.url),
+                        headers: variant && variant.headers ? variant.headers : (drmInfo.headers || resolved.headers || {})
+                    },
+                    drmInfo,
+                    typeof (variant && variant.quality) === "number" ? variant.quality : 0,
+                    (index * 100) + variantIndex + 1,
+                    true
+                ));
+            });
+        } catch (error) {
+            console.error(`Failed to expand MPD streams for entry at index ${index}: ${error && error.message ? error.message : String(error)}`);
+        }
 
         return rankedStreams;
     }
 
     async function getHome(cb) {
+        if (typeof cb !== "function") {
+            throw new Error("Callback function is required");
+        }
+        
         try {
             const [events, categoryMeta] = await Promise.all([
                 fetchPlayzEvents(),
                 fetchPlayzCategories()
             ]);
+
+            if (!events || !Array.isArray(events)) {
+                return cb({
+                    success: false,
+                    errorCode: "INVALID_DATA",
+                    message: "Invalid events data format"
+                });
+            }
 
             if (!events.length) {
                 return cb({
@@ -1389,6 +1877,8 @@
 
             const categories = {};
             events.forEach((event) => {
+                if (!event || typeof event !== "object") return;
+                
                 const label = getCategoryLabel(event.category);
                 if (!orderedLabels.includes(label)) orderedLabels.push(label);
                 if (!categories[label]) categories[label] = [];
@@ -1413,12 +1903,22 @@
     }
 
     async function search(query, cb) {
+        if (typeof cb !== "function") {
+            throw new Error("Callback function is required");
+        }
+        
         try {
             const events = await fetchPlayzEvents();
+            if (!events || !Array.isArray(events)) {
+                return cb({ success: true, data: [] });
+            }
+            
             if (!events.length) return cb({ success: true, data: [] });
 
             const loweredQuery = trimToString(query).toLowerCase();
             const results = events.filter((event) => {
+                if (!event || typeof event !== "object") return false;
+                
                 const haystack = [
                     event.category,
                     event.eventName,
@@ -1435,8 +1935,16 @@
     }
 
     async function load(urlStr, cb) {
+        if (!urlStr || typeof urlStr !== "string") {
+            return cb({ success: false, errorCode: "INVALID_INPUT", message: "Invalid URL string" });
+        }
+        
         try {
             const data = JSON.parse(urlStr);
+            if (!data || typeof data !== "object") {
+                throw new Error("Invalid event data format");
+            }
+            
             const plotParts = [
                 trimToString(data.eventName) ? `Event: ${data.eventName}` : "",
                 trimToString(data.date) && trimToString(data.time) ? `Time: ${data.date} ${data.time} UTC` : ""
@@ -1461,14 +1969,22 @@
                     ]
                 })
             });
-        } catch (_) {
+        } catch (error) {
             cb({ success: false, errorCode: "PARSE_ERROR", message: "Invalid event data" });
         }
     }
 
     async function loadStreams(urlStr, cb) {
+        if (!urlStr || typeof urlStr !== "string") {
+            return cb({ success: false, errorCode: "INVALID_INPUT", message: "Invalid URL string" });
+        }
+        
         try {
             const data = JSON.parse(urlStr);
+            if (!data || typeof data !== "object") {
+                throw new Error("Invalid event data format");
+            }
+            
             const linksPath = trimToString(data && data.linksPath);
             if (!linksPath) {
                 return cb({ success: false, errorCode: "PARSE_ERROR", message: "Missing PlayZTV links path" });
