@@ -1,10 +1,23 @@
 {
-  "packageName": "com.igris.repo.animedubhindi",
-  "name": "AnimeDubHindi",
-  "version": 2,
-  "baseUrl": "https://www.animedubhindi.cc",
-  "description": "Hindi and multi-audio anime movies and series from AnimeDubHindi.",
-  "authors": ["IGRIS"],
-  "languages": ["hi", "en", "ja", "ta", "te", "ml", "bn", "kn"],
-  "categories": ["Anime"]
+    "packageName":  "com.igris.repo.animedubhindi",
+    "name":  "AnimeDubHindi",
+    "version":  3,
+    "baseUrl":  "https://www.animedubhindi.cc",
+    "description":  "Hindi and multi-audio anime movies and series from AnimeDubHindi.",
+    "authors":  [
+                    "IGRIS"
+                ],
+    "languages":  [
+                      "hi",
+                      "en",
+                      "ja",
+                      "ta",
+                      "te",
+                      "ml",
+                      "bn",
+                      "kn"
+                  ],
+    "categories":  [
+                       "Anime"
+                   ]
 }

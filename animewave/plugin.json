@@ -1,25 +1,43 @@
 {
-  "packageName": "com.igris.repo.animewave",
-  "name": "AnimeWave + AniKoto",
-  "version": 7,
-  "baseUrl": "https://animewave.to",
-  "domains": [
-    { "name": "animewave", "url": "https://animewave.to" },
-    { "name": "anikoto.net", "url": "https://anikoto.net" },
-    { "name": "anikototv.to", "url": "https://anikototv.to" },
-    { "name": "anikoto.cz", "url": "https://anikoto.cz" },
-    { "name": "anikoto.me", "url": "https://anikoto.me" },
-    { "name": "anikototv.se", "url": "https://anikototv.se" }
-  ],
-  "description": "A clone for hianime",
-  "authors": [
-    "IGRIS"
-  ],
-  "languages": [
-    "en",
-    "ja"
-  ],
-  "categories": [
-    "Anime"
-  ]
+    "packageName":  "com.igris.repo.animewave",
+    "name":  "AnimeWave + AniKoto",
+    "version":  8,
+    "baseUrl":  "https://animewave.to",
+    "domains":  [
+                    {
+                        "name":  "animewave",
+                        "url":  "https://animewave.to"
+                    },
+                    {
+                        "name":  "anikoto.net",
+                        "url":  "https://anikoto.net"
+                    },
+                    {
+                        "name":  "anikototv.to",
+                        "url":  "https://anikototv.to"
+                    },
+                    {
+                        "name":  "anikoto.cz",
+                        "url":  "https://anikoto.cz"
+                    },
+                    {
+                        "name":  "anikoto.me",
+                        "url":  "https://anikoto.me"
+                    },
+                    {
+                        "name":  "anikototv.se",
+                        "url":  "https://anikototv.se"
+                    }
+                ],
+    "description":  "A clone for hianime",
+    "authors":  [
+                    "IGRIS"
+                ],
+    "languages":  [
+                      "en",
+                      "ja"
+                  ],
+    "categories":  [
+                       "Anime"
+                   ]
 }

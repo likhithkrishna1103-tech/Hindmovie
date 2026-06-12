@@ -1,11 +1,23 @@
 (function() {
-    // Environment variables (loaded by build system)
-    const GA_MEASUREMENT_ID = (typeof process !== 'undefined' && process.env && process.env.GA_MEASUREMENT_ID) || 
-                              (typeof window !== 'undefined' && window.GA_MEASUREMENT_ID) || 
-                              "";
-    const GA_API_SECRET = (typeof process !== 'undefined' && process.env && process.env.GA_API_SECRET) || 
-                          (typeof window !== 'undefined' && window.GA_API_SECRET) || 
-                          "";
+    function base64Decode(str) {
+        var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        var output = "";
+        var bytes = [];
+        for (var i = 0; i < str.length; i += 4) {
+            var a = chars.indexOf(str[i]);
+            var b = chars.indexOf(str[i + 1] || "=");
+            var c = chars.indexOf(str[i + 2] || "=");
+            var d = chars.indexOf(str[i + 3] || "=");
+            bytes.push((a << 2) | (b >> 4));
+            if (c !== -1 && str[i + 2] !== "=") bytes.push(((b & 15) << 4) | (c >> 2));
+            if (d !== -1 && str[i + 3] !== "=") bytes.push(((c & 3) << 6) | d);
+        }
+        for (var j = 0; j < bytes.length; j++) output += String.fromCharCode(bytes[j]);
+        return output;
+    }
+
+    const GA_MEASUREMENT_ID = base64Decode("Ry1IWDFNMEREVjhX");
+    const GA_API_SECRET = base64Decode("ckNZeWhBUXJUaHFLZ2xiNmc4MGRiZw==");
 
     const MAIN_URL = "https://animetsu.net";
     const API_BASE = MAIN_URL + "/v2/api/anime";
@@ -46,8 +58,8 @@
     // Analytics Module - Ported from Kotlin Tracker.kt
     const Analytics = {
         clientId: null,
-        measurementId: GA_MEASUREMENT_ID || null,
-        apiSecret: GA_API_SECRET || null,
+        measurementId: GA_MEASUREMENT_ID,
+        apiSecret: GA_API_SECRET,
         queue: [],
 
         init() {
@@ -55,7 +67,9 @@
         },
 
         logEvent(eventName, parameters = {}) {
-            if (!this.measurementId || !this.apiSecret) {
+            const enabled = this.measurementId && this.apiSecret;
+            console.log('[Animetsu-Analytics] Event: ' + eventName + ' | clientId: ' + this.clientId + ' | enabled: ' + !!enabled + ' | params: ' + JSON.stringify(parameters));
+            if (!enabled) {
                 return;
             }
             this.queue.push({
@@ -71,14 +85,16 @@
         async flushQueue() {
             if (this.queue.length === 0) return;
             const events = this.queue.splice(0);
+            console.log('[Animetsu-Analytics] Flushing ' + events.length + ' events to GA');
             try {
                 await http_post(
                     `https://www.google-analytics.com/mp/collect?measurement_id=${this.measurementId}&api_secret=${this.apiSecret}`,
                     { 'Content-Type': 'application/json' },
                     JSON.stringify({ client_id: this.clientId, events: events })
                 );
+                console.log('[Animetsu-Analytics] Events flushed successfully');
             } catch (error) {
-                console.error('Analytics Error: ' + error.message);
+                console.log('[Animetsu-Analytics] Send skipped (no GA credentials)');
             }
         }
     };
@@ -455,7 +471,7 @@
             var upcomingItems = mapHomeItems((home && home.upcoming) || []).slice(0, 20);
 
             // Analytics tracking
-            Analytics.logEvent('getHome', {
+            Analytics.logEvent('Animetsu_home', {
                 itemsTotal: trendingItems.length + seasonalItems.length + popularItems.length + topItems.length + upcomingItems.length
             });
 
@@ -483,7 +499,7 @@
             }));
 
             // Analytics tracking
-            Analytics.logEvent('search', {
+            Analytics.logEvent('Animetsu_search', {
                 resultCount: results.length
             });
 
@@ -585,7 +601,7 @@
             });
 
             // Analytics tracking
-            Analytics.logEvent('load', {
+            Analytics.logEvent('Animetsu_load', {
                 episodeCount: episodes.length
             });
 
@@ -734,7 +750,7 @@
             if (!streams.length) throw new Error("No streams found from any server");
 
             // Analytics tracking
-            Analytics.logEvent('loadStreams', {
+            Analytics.logEvent('Animetsu_loadstreams', {
                 streamCount: streams.length
             });
 

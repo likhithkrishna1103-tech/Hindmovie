@@ -1,20 +1,20 @@
 {
-  "packageName": "com.igris.repo.cinestream",
-  "name": "CineStream",
-  "version": 24,
-  "baseUrl": "https://cinemeta-catalogs.strem.io",
-  "description": "CineMeta-powered catalog with an expanded CineStream source stack, including Stremio, direct OTT mirrors, and embedded stream resolvers.",
-  "authors": [
-    "IGRIS"
-  ],
-  "languages": [
-    "en",
-    "hi",
-    "ja"
-  ],
-  "categories": [
-    "Movies",
-    "Series",
-    "Anime"
-  ]
+    "packageName":  "com.igris.repo.cinestream",
+    "name":  "CineStream",
+    "version":  25,
+    "baseUrl":  "https://cinemeta-catalogs.strem.io",
+    "description":  "CineMeta-powered catalog with an expanded CineStream source stack, including Stremio, direct OTT mirrors, and embedded stream resolvers.",
+    "authors":  [
+                    "IGRIS"
+                ],
+    "languages":  [
+                      "en",
+                      "hi",
+                      "ja"
+                  ],
+    "categories":  [
+                       "Movies",
+                       "Series",
+                       "Anime"
+                   ]
 }

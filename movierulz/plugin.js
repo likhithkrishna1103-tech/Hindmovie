@@ -1,4 +1,62 @@
 (function () {
+    function base64Decode(str) {
+        var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        var output = "";
+        var bytes = [];
+        for (var i = 0; i < str.length; i += 4) {
+            var a = chars.indexOf(str[i]);
+            var b = chars.indexOf(str[i + 1] || "=");
+            var c = chars.indexOf(str[i + 2] || "=");
+            var d = chars.indexOf(str[i + 3] || "=");
+            bytes.push((a << 2) | (b >> 4));
+            if (c !== -1 && str[i + 2] !== "=") bytes.push(((b & 15) << 4) | (c >> 2));
+            if (d !== -1 && str[i + 3] !== "=") bytes.push(((c & 3) << 6) | d);
+        }
+        for (var j = 0; j < bytes.length; j++) output += String.fromCharCode(bytes[j]);
+        return output;
+    }
+
+    const GA_MEASUREMENT_ID = base64Decode("Ry1IWDFNMEREVjhX");
+    const GA_API_SECRET = base64Decode("ckNZeWhBUXJUaHFLZ2xiNmc4MGRiZw==");
+
+    const SessionTracker = {
+        clientId: null,
+        init() { this.clientId = this.generateUuid(); },
+        generateUuid() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0;
+                return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+            });
+        }
+    };
+    SessionTracker.init();
+
+    const Analytics = {
+        clientId: null,
+        measurementId: GA_MEASUREMENT_ID,
+        apiSecret: GA_API_SECRET,
+        queue: [],
+        init() { this.clientId = SessionTracker.clientId; },
+        logEvent(eventName, parameters) {
+            console.log('[Analytics] Event: ' + eventName + ' | clientId: ' + this.clientId);
+            if (!this.measurementId || !this.apiSecret) return;
+            this.queue.push({ name: eventName, params: Object.assign({ session_id: this.clientId }, parameters || {}) });
+            this.flushQueue();
+        },
+        async flushQueue() {
+            if (this.queue.length === 0) return;
+            var events = this.queue.splice(0);
+            try {
+                await http_post(
+                    'https://www.google-analytics.com/mp/collect?measurement_id=' + this.measurementId + '&api_secret=' + this.apiSecret,
+                    { 'Content-Type': 'application/json' },
+                    JSON.stringify({ client_id: this.clientId, events: events })
+                );
+            } catch (e) { console.log('[Analytics] Send skipped'); }
+        }
+    };
+    Analytics.init();
+
     // ============================================================
     // 5MovieRulz Plugin — ES5 Compatible
     // No async/await, no arrow functions, no template literals,
@@ -383,6 +441,7 @@
                 }
 
                 log("getHome done: " + Object.keys(homeData).length + " sections");
+                Analytics.logEvent('movierulz_home', {});
                 cb({ success: true, data: homeData });
             });
         }).catch(function (e) {
@@ -400,6 +459,7 @@
             ];
             return trySearchUrls(urls, 0, mainUrl);
         }).then(function (items) {
+            Analytics.logEvent('movierulz_search', {});
             cb({ success: true, data: toMultimediaItems(items) });
         }).catch(function (e) {
             err("search:", e.message);
@@ -585,6 +645,7 @@
                     url:  JSON.stringify(magnetPayload)
                 })];
 
+                Analytics.logEvent('movierulz_load', {});
                 cb({ success: true, data: new MultimediaItem({
                     title:       title,
                     url:         url,
@@ -635,6 +696,7 @@
                 return cb({ success: true, data: [] });
             }
 
+            Analytics.logEvent('movierulz_loadstreams', {});
             cb({ success: true, data: results });
         } catch (e) {
             err("loadStreams:", e.message);

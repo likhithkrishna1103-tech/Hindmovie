@@ -1,18 +1,18 @@
 {
-  "packageName": "com.igris.repo.piratexplay",
-  "name": "PirateXPlay",
-  "version": 4,
-  "baseUrl": "https://piratexplay.cc",
-  "description": "Movies, series, anime, and cartoons with faster multi-provider stream extraction.",
-  "authors": [
-    "IGRIS"
-  ],
-  "languages": [
-    "en",
-    "hi"
-  ],
-  "categories": [
-    "Movies",
-    "Series"
-  ]
+    "packageName":  "com.igris.repo.piratexplay",
+    "name":  "PirateXPlay",
+    "version":  5,
+    "baseUrl":  "https://piratexplay.cc",
+    "description":  "Movies, series, anime, and cartoons with faster multi-provider stream extraction.",
+    "authors":  [
+                    "IGRIS"
+                ],
+    "languages":  [
+                      "en",
+                      "hi"
+                  ],
+    "categories":  [
+                       "Movies",
+                       "Series"
+                   ]
 }

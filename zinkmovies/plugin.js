@@ -1,4 +1,62 @@
 (function () {
+    function base64Decode(str) {
+        var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        var output = "";
+        var bytes = [];
+        for (var i = 0; i < str.length; i += 4) {
+            var a = chars.indexOf(str[i]);
+            var b = chars.indexOf(str[i + 1] || "=");
+            var c = chars.indexOf(str[i + 2] || "=");
+            var d = chars.indexOf(str[i + 3] || "=");
+            bytes.push((a << 2) | (b >> 4));
+            if (c !== -1 && str[i + 2] !== "=") bytes.push(((b & 15) << 4) | (c >> 2));
+            if (d !== -1 && str[i + 3] !== "=") bytes.push(((c & 3) << 6) | d);
+        }
+        for (var j = 0; j < bytes.length; j++) output += String.fromCharCode(bytes[j]);
+        return output;
+    }
+
+    const GA_MEASUREMENT_ID = base64Decode("Ry1IWDFNMEREVjhX");
+    const GA_API_SECRET = base64Decode("ckNZeWhBUXJUaHFLZ2xiNmc4MGRiZw==");
+
+    const SessionTracker = {
+        clientId: null,
+        init() { this.clientId = this.generateUuid(); },
+        generateUuid() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0;
+                return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+            });
+        }
+    };
+    SessionTracker.init();
+
+    const Analytics = {
+        clientId: null,
+        measurementId: GA_MEASUREMENT_ID,
+        apiSecret: GA_API_SECRET,
+        queue: [],
+        init() { this.clientId = SessionTracker.clientId; },
+        logEvent(eventName, parameters) {
+            console.log('[Analytics] Event: ' + eventName + ' | clientId: ' + this.clientId);
+            if (!this.measurementId || !this.apiSecret) return;
+            this.queue.push({ name: eventName, params: Object.assign({ session_id: this.clientId }, parameters || {}) });
+            this.flushQueue();
+        },
+        async flushQueue() {
+            if (this.queue.length === 0) return;
+            var events = this.queue.splice(0);
+            try {
+                await http_post(
+                    'https://www.google-analytics.com/mp/collect?measurement_id=' + this.measurementId + '&api_secret=' + this.apiSecret,
+                    { 'Content-Type': 'application/json' },
+                    JSON.stringify({ client_id: this.clientId, events: events })
+                );
+            } catch (e) { console.log('[Analytics] Send skipped'); }
+        }
+    };
+    Analytics.init();
+
     const DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
     const FALLBACK_MAIN = "https://new7.zinkmovies.biz";
     const FALLBACK_HUBCLOUD = "https://hubcloud.foo";
@@ -467,6 +525,7 @@
             entries.forEach(function (entry) {
                 if (entry && entry.items && entry.items.length) data[entry.title] = entry.items;
             });
+            Analytics.logEvent('zinkmovies_home', {});
             cb({ success: true, data: data });
         } catch (error) {
             cb({ success: false, errorCode: "HOME_ERROR", message: String(error && error.message || error) });
@@ -482,6 +541,7 @@
                 const doc = await parseHtml(stripScripts(html));
                 items = qsa(doc, "article").map(function (article) { return parseCard(article, mainUrl); }).filter(Boolean);
             }
+            Analytics.logEvent('zinkmovies_search', {});
             cb({ success: true, data: items });
         } catch (error) {
             cb({ success: false, errorCode: "SEARCH_ERROR", message: String(error && error.message || error) });
@@ -631,6 +691,7 @@
             } else {
                 common.episodes = await extractSeriesEpisodes(page.document, pageUrl, basics, tmdb);
             }
+            Analytics.logEvent('zinkmovies_load', {});
             cb({ success: true, data: new MultimediaItem(common) });
         } catch (error) {
             cb({ success: false, errorCode: "LOAD_ERROR", message: String(error && error.message || error) });
@@ -883,6 +944,7 @@
             }).sort(function (a, b) {
                 return Number(b.quality || 0) - Number(a.quality || 0);
             });
+            Analytics.logEvent('zinkmovies_loadstreams', {});
             cb({ success: true, data: streams });
         } catch (error) {
             cb({ success: false, errorCode: "STREAM_ERROR", message: String(error && error.message || error) });

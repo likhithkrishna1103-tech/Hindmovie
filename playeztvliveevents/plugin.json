@@ -1,17 +1,17 @@
 {
-  "packageName": "com.igris.repo.playeztvliveevents",
-  "name": "Live Sports 🏏",
-  "version": 8,
-  "baseUrl": "https://adsflw.xyz",
-  "description": "Live sports from the PlayEZTV feed.",
-  "authors": [
-    "IGRIS"
-  ],
-  "languages": [
-    "en",
-    "hi"
-  ],
-  "categories": [
-    "LiveTv"
-  ]
+    "packageName":  "com.igris.repo.playeztvliveevents",
+    "name":  "Live Sports 🏏",
+    "version":  9,
+    "baseUrl":  "https://adsflw.xyz",
+    "description":  "Live sports from the PlayEZTV feed.",
+    "authors":  [
+                    "IGRIS"
+                ],
+    "languages":  [
+                      "en",
+                      "hi"
+                  ],
+    "categories":  [
+                       "LiveTv"
+                   ]
 }
