@@ -1,11 +1,11 @@
-(function () {
-    /**
-     * @typedef {Object} Response
-     * @property {boolean} success
-     * @property {any} [data]
-     * @property {string} [errorCode]
-     * @property {string} [message]
-     */
+(function() {
+    // Environment variables (loaded by build system)
+    const GA_MEASUREMENT_ID = (typeof process !== 'undefined' && process.env && process.env.GA_MEASUREMENT_ID) || 
+                              (typeof window !== 'undefined' && window.GA_MEASUREMENT_ID) || 
+                              "";
+    const GA_API_SECRET = (typeof process !== 'undefined' && process.env && process.env.GA_API_SECRET) || 
+                          (typeof window !== 'undefined' && window.GA_API_SECRET) || 
+                          "";
 
     const MAIN_URL = "https://animetsu.net";
     const API_BASE = MAIN_URL + "/v2/api/anime";
@@ -26,6 +26,64 @@
         "Accept": "image/avif,image/webp,image/png,image/jpeg,image/*,*/*;q=0.8",
         "Referer": MAIN_URL + "/"
     };
+
+    // SessionTracker - Ported from Kotlin Tracker.kt with UUID-based session ID
+    const SessionTracker = {
+        clientId: null,
+        init() {
+            this.clientId = this.generateUuid();
+        },
+        generateUuid() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0;
+                return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+            });
+        }
+    };
+
+    SessionTracker.init();
+
+    // Analytics Module - Ported from Kotlin Tracker.kt
+    const Analytics = {
+        clientId: null,
+        measurementId: GA_MEASUREMENT_ID || null,
+        apiSecret: GA_API_SECRET || null,
+        queue: [],
+
+        init() {
+            this.clientId = SessionTracker.clientId;
+        },
+
+        logEvent(eventName, parameters = {}) {
+            if (!this.measurementId || !this.apiSecret) {
+                return;
+            }
+            this.queue.push({
+                name: eventName,
+                params: Object.assign({
+                    engagement_time_msec: "1000",
+                    session_id: this.clientId
+                }, parameters)
+            });
+            this.flushQueue();
+        },
+
+        async flushQueue() {
+            if (this.queue.length === 0) return;
+            const events = this.queue.splice(0);
+            try {
+                await http_post(
+                    `https://www.google-analytics.com/mp/collect?measurement_id=${this.measurementId}&api_secret=${this.apiSecret}`,
+                    { 'Content-Type': 'application/json' },
+                    JSON.stringify({ client_id: this.clientId, events: events })
+                );
+            } catch (error) {
+                console.error('Analytics Error: ' + error.message);
+            }
+        }
+    };
+
+    Analytics.init();
 
     function httpJson(url, headers) {
         return http_get(url, headers || HEADERS).then(function (res) {
@@ -373,6 +431,7 @@
 
     async function getHome(cb) {
         try {
+            var startTime = Date.now();
             var home = await httpJson(API_BASE + "/home", HEADERS);
             var trendingEntries = ((home && home.trending) || []).slice(0, 20);
             var trendingFanartPromises = trendingEntries.map(function (entry) {
@@ -395,6 +454,11 @@
             var topItems = mapHomeItems((home && home.top) || []).slice(0, 20);
             var upcomingItems = mapHomeItems((home && home.upcoming) || []).slice(0, 20);
 
+            // Analytics tracking
+            Analytics.logEvent('getHome', {
+                itemsTotal: trendingItems.length + seasonalItems.length + popularItems.length + topItems.length + upcomingItems.length
+            });
+
             cb({
                 success: true,
                 data: {
@@ -412,10 +476,16 @@
 
     async function search(query, cb) {
         try {
+            var startTime = Date.now();
             var data = await httpJson(API_BASE + "/search/?query=" + encodeURIComponent(query), HEADERS);
             var results = uniqueByUrl(((data && data.results) || []).map(function (entry) {
                 return toMultimediaItem(entry);
             }));
+
+            // Analytics tracking
+            Analytics.logEvent('search', {
+                resultCount: results.length
+            });
 
             cb({ success: true, data: results });
         } catch (e) {
@@ -425,6 +495,7 @@
 
     async function load(url, cb) {
         try {
+            var startTime = Date.now();
             var animeMatch = String(url || "").match(/\/(?:anime|watch)\/([^/?#]+)/i);
             if (!animeMatch) throw new Error("Could not extract anime id from URL: " + url);
 
@@ -513,6 +584,11 @@
                 episodes: episodes
             });
 
+            // Analytics tracking
+            Analytics.logEvent('load', {
+                episodeCount: episodes.length
+            });
+
             cb({ success: true, data: item });
         } catch (e) {
             cb({ success: false, errorCode: "LOAD_ERROR", message: String(e.message || e) });
@@ -537,6 +613,7 @@
 
     async function loadStreams(url, cb) {
         try {
+            var startTime = Date.now();
             var parsed = parseEpisodeInput(url);
             var serverList = [];
             var streams = [];
@@ -655,6 +732,11 @@
             }
 
             if (!streams.length) throw new Error("No streams found from any server");
+
+            // Analytics tracking
+            Analytics.logEvent('loadStreams', {
+                streamCount: streams.length
+            });
 
             cb({ success: true, data: streams });
         } catch (e) {
