@@ -2,7 +2,7 @@
   {
     "packageName": "com.igris.repo.anisuge",
     "name": "AniSuge",
-    "version": 3,
+    "version": 4,
     "baseUrl": "https://anisuge.tv",
     "domains": [
       "https://anisuge.tv"
@@ -23,7 +23,7 @@
   {
     "packageName": "com.igris.repo.anidb",
     "name": "AniDB",
-    "version": 7,
+    "version": 8,
     "baseUrl": "https://anidb.app",
     "description": "AniDB anime streaming plugin - browse, search and stream from anidb.app",
     "authors": [
@@ -40,7 +40,7 @@
   {
     "packageName": "com.igris.repo.animedubhindi",
     "name": "AnimeDubHindi",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://www.animedubhindi.cc",
     "description": "Hindi and multi-audio anime movies and series from AnimeDubHindi.",
     "authors": [
@@ -64,7 +64,7 @@
   {
     "packageName": "com.igris.repo.animetsu",
     "name": "Animetsu",
-    "version": 13,
+    "version": 14,
     "baseUrl": "https://animetsu.net/",
     "description": "Clean anime picks with sub and dub.",
     "authors": [
@@ -82,7 +82,7 @@
   {
     "packageName": "com.igris.repo.animewave",
     "name": "AnimeWave + AniKoto",
-    "version": 7,
+    "version": 8,
     "baseUrl": "https://animewave.to",
     "domains": [
       {
@@ -126,7 +126,7 @@
   {
     "packageName": "com.igris.repo.castletv",
     "name": "Castle TV",
-    "version": 8,
+    "version": 9,
     "baseUrl": "https://example.com",
     "description": "Sharp movies and series in one place.",
     "authors": [
@@ -145,7 +145,7 @@
   {
     "packageName": "com.igris.repo.cinemacity",
     "name": "CinemaCity",
-    "version": 3,
+    "version": 4,
     "baseUrl": "https://cinemacity.cc",
     "description": "CinemaCity catalog with PlayerJS stream extraction and language-aware download links.",
     "authors": [
@@ -176,7 +176,7 @@
   {
     "packageName": "com.igris.repo.cinestream",
     "name": "CineStream",
-    "version": 24,
+    "version": 25,
     "baseUrl": "https://cinemeta-catalogs.strem.io",
     "description": "CineMeta-powered catalog with an expanded CineStream source stack, including Stremio, direct OTT mirrors, and embedded stream resolvers.",
     "authors": [
@@ -197,7 +197,7 @@
   {
     "packageName": "com.igris.repo.hdmovie2",
     "name": "HDMovie2",
-    "version": 4,
+    "version": 5,
     "baseUrl": "https://hdmovie2.restaurant",
     "description": "TMDB catalog with HDMovie2 stream resolution.",
     "authors": [
@@ -220,7 +220,7 @@
   {
     "packageName": "com.igris.repo.heartivetv",
     "name": "HeartiveTV",
-    "version": 3,
+    "version": 4,
     "baseUrl": "https://heartivetv.pages.dev",
     "description": "Heartive movies and shows",
     "authors": [
@@ -238,7 +238,7 @@
   {
     "packageName": "com.igris.repo.hindmoviez",
     "name": "HindMoviez",
-    "version": 9,
+    "version": 10,
     "baseUrl": "https://example.com",
     "description": "Trending movies and series, quickly.",
     "authors": [
@@ -261,7 +261,7 @@
   {
     "packageName": "com.igris.repo.movierulz",
     "name": "Movierulz",
-    "version": 5,
+    "version": 6,
     "baseUrl": "https://example.com",
     "description": "Fresh movie drops with fast links.",
     "authors": [
@@ -283,7 +283,7 @@
   {
     "packageName": "com.igris.repo.movies4u",
     "name": "Movies4U",
-    "version": 23,
+    "version": 24,
     "baseUrl": "https://new2.movies4u.style",
     "description": "Movie picks with straightforward stream links.",
     "authors": [
@@ -305,7 +305,7 @@
   {
     "packageName": "com.igris.repo.netmirror",
     "name": "NetMirror",
-    "version": 10,
+    "version": 11,
     "baseUrl": "https://net52.cc",
     "providers": [
       {
@@ -363,7 +363,7 @@
   {
     "packageName": "com.igris.repo.piratexplay",
     "name": "PirateXPlay",
-    "version": 4,
+    "version": 5,
     "baseUrl": "https://piratexplay.cc",
     "description": "Movies, series, anime, and cartoons with faster multi-provider stream extraction.",
     "authors": [
@@ -382,7 +382,7 @@
   {
     "packageName": "com.igris.repo.playeztvliveevents",
     "name": "Live Sports 🏏",
-    "version": 8,
+    "version": 9,
     "baseUrl": "https://adsflw.xyz",
     "description": "Live sports from the PlayEZTV feed.",
     "authors": [
@@ -400,7 +400,7 @@
   {
     "packageName": "com.igris.repo.playztv",
     "name": "PlayZTV",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://adsflw.xyz",
     "providers": [
       {
@@ -467,7 +467,7 @@
   {
     "packageName": "com.igris.repo.tokyoinsider",
     "name": "TokyoInsider",
-    "version": 7,
+    "version": 8,
     "baseUrl": "https://www.tokyoinsider.com",
     "description": "TMDB anime catalog with TokyoInsider links.",
     "authors": [
@@ -485,7 +485,7 @@
   {
     "packageName": "com.igris.repo.youtube",
     "name": "YouTube",
-    "version": 20,
+    "version": 21,
     "baseUrl": "https://www.youtube.com",
     "providers": [
       {
@@ -529,7 +529,7 @@
   {
     "packageName": "com.igris.repo.zinkmovies",
     "name": "Zinkmovies",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://new7.zinkmovies.biz",
     "description": "Zinkmovies movies, series, anime, and KDrama with HubCloud mirror resolution.",
     "authors": [
