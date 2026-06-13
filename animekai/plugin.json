@@ -1,0 +1,23 @@
+{
+  "packageName": "com.igris.repo.animekai",
+  "name": "AnimeKai",
+  "version": 2,
+  "baseUrl": "https://animekai.be",
+  "domains": [
+    {
+      "name": "animekai.be",
+      "url": "https://animekai.be"
+    }
+  ],
+  "description": "AnimeKai anime streaming plugin",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "ja"
+  ],
+  "categories": [
+    "Anime"
+  ]
+}
