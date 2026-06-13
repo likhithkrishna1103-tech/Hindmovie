@@ -38,7 +38,6 @@
         queue: [],
         init() { this.clientId = SessionTracker.clientId; },
         logEvent(eventName, parameters) {
-            console.log('[Analytics] Event: ' + eventName + ' | clientId: ' + this.clientId);
             if (!this.measurementId || !this.apiSecret) return;
             this.queue.push({ name: eventName, params: Object.assign({ session_id: this.clientId }, parameters || {}) });
             this.flushQueue();
@@ -52,7 +51,7 @@
                     { 'Content-Type': 'application/json' },
                     JSON.stringify({ client_id: this.clientId, events: events })
                 );
-            } catch (e) { console.log('[Analytics] Send skipped'); }
+            } catch (e) { /* silently skip */ }
         }
     };
     Analytics.init();
@@ -203,6 +202,12 @@
         "Cache-Control": "no-cache",
         "Referer": BASE_URL + "/"
     };
+    function getTitleLanguage() {
+        var id = String((typeof manifest !== "undefined" && manifest && manifest.providerId) || "english").toLowerCase();
+        if (id.indexOf("japan") !== -1) return "japanese";
+        return "english";
+    }
+
     var HOME_ROWS = [
         { name: "Trending", path: "/browse?keyword=&status[]=releasing&sort=trending" },
         { name: "Latest Episode", path: "/browse?keyword=&status[]=releasing&sort=updated_date" },
@@ -352,18 +357,33 @@
 
             var href = absoluteUrl(posterAnchor.attr("href"), BASE_URL);
             var title = titleAnchor.attr("title") || titleAnchor.textContent();
+            var japaneseTitle = titleAnchor.attr("data-jp") || "";
+            if (getTitleLanguage() === "japanese" && japaneseTitle) {
+                title = japaneseTitle;
+            }
             var imageNode = posterAnchor.find("img");
             var posterUrl = absoluteUrl(imageNode ? (imageNode.attr("data-src") || imageNode.attr("src")) : "", BASE_URL);
             var infoNode = card.find("div.info");
             var subNode = infoNode ? infoNode.find("span.sub") : null;
             var dubNode = infoNode ? infoNode.find("span.dub") : null;
-            var typeNode = infoNode ? infoNode.find("b") : null;
-            var typeText = (typeNode && typeNode.textContent()) || (card.find("span.fdi-item") ? card.find("span.fdi-item").textContent() : "");
+            var bNodes = infoNode ? infoNode.select("b") : [];
+            var typeText = "";
+            var episodeCount = "";
+            for (var b = 0; b < bNodes.length; b++) {
+                var text = bNodes[b].textContent();
+                if (/^(TV|MOVIE|OVA|ONA|SPECIAL)$/i.test(text.trim())) {
+                    typeText = text;
+                } else if (/^\d+$/.test(text.trim())) {
+                    episodeCount = text;
+                }
+            }
+            if (!typeText) typeText = bNodes.length > 0 ? bNodes[bNodes.length - 1].textContent() : "";
             var subCount = toInt(subNode ? subNode.textContent() : "");
             var dubCount = toInt(dubNode ? dubNode.textContent() : "");
 
             items.push(new MultimediaItem({
                 title: cleanText(title),
+                japaneseTitle: japaneseTitle || undefined,
                 url: href,
                 posterUrl: posterUrl,
                 type: guessType(typeText),
@@ -581,8 +601,13 @@
                 }));
             }
 
+            var displayTitle = title;
+            if (getTitleLanguage() === "japanese" && japaneseTitle) {
+                displayTitle = japaneseTitle;
+            }
+
             var item = new MultimediaItem({
-                title: title,
+                title: displayTitle,
                 japaneseTitle: japaneseTitle || undefined,
                 url: watchUrl,
                 posterUrl: posterUrl,
