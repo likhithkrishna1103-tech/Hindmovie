@@ -62,6 +62,30 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animedubhindi.sky"
   },
   {
+    "packageName": "com.igris.repo.animekai",
+    "name": "AnimeKai",
+    "version": 2,
+    "baseUrl": "https://animekai.be",
+    "domains": [
+      {
+        "name": "animekai.be",
+        "url": "https://animekai.be"
+      }
+    ],
+    "description": "AnimeKai anime streaming plugin",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animekai.sky"
+  },
+  {
     "packageName": "com.igris.repo.animetsu",
     "name": "Animetsu",
     "version": 14,
