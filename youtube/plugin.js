@@ -62,7 +62,7 @@
     var BASE_URL = String((typeof manifest !== "undefined" && manifest && manifest.baseUrl) || "https://www.youtube.com").replace(/\/+$/, "");
     var MOBILE_URL = "https://m.youtube.com";
     var YOUTUBEI_BASE = "https://www.youtube.com/youtubei/v1";
-    var YOUTUBEI_GAPIS_BASE = "https://www.youtube.com/youtubei/v1";
+    var YOUTUBEI_GAPIS_BASE = "https://youtubei.googleapis.com/youtubei/v1";
     var USER_AGENT = "com.google.android.youtube/21.03.36 (Linux; U; Android 13; en-IN) gzip";
     var ANDROID_CLIENT_VERSION = "21.03.36";
     var IOS_CLIENT_VERSION = "21.03.2";
@@ -1646,9 +1646,9 @@
         return stream;
     }
 
-    function buildNewPipeVideoOnlyStream(format, audioTracks, cpn, subtitles) {
+    function buildNewPipeVideoOnlyStream(format, sourceName, audioTracks, cpn, subtitles) {
         if (!audioTracks || !audioTracks.length) return null;
-        var stream = buildNewPipeStream(format, "YouTube Video", cpn, subtitles);
+        var stream = buildNewPipeStream(format, sourceName, cpn, subtitles);
         if (!stream) return null;
         stream.audioTracks = audioTracks;
         return stream;
@@ -2044,7 +2044,7 @@
             osName: "iOS",
             osVersion: IOS_USER_AGENT_VERSION.replace(/_/g, ".")
         }) : "";
-        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?key=" + encodeURIComponent(config.key) + "&prettyPrint=false&t=" + encodeURIComponent(generateTParameter()) + "&id=" + encodeURIComponent(videoId) + "&$fields=streamingData,captions,videoDetails,microformat", {
+        var res = await requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key) + "&id=" + encodeURIComponent(videoId), {
             context: mobileClientContext("IOS", IOS_CLIENT_VERSION, visitor, {
                 deviceMake: "Apple",
                 deviceModel: IOS_DEVICE_MODEL,
@@ -2056,6 +2056,7 @@
             contentCheckOk: true,
             racyCheckOk: true
         }, h);
+        return res;
     }
 
     async function tvPlayer(videoId, cpn) {
@@ -2079,7 +2080,7 @@
             contentCheckOk: true,
             racyCheckOk: true
         };
-        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?key=" + encodeURIComponent(config.key), payload, h);
+        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?key=" + encodeURIComponent(config.key) + "&id=" + encodeURIComponent(videoId), payload, h);
     }
 
     async function androidTestSuitePlayer(videoId, cpn) {
@@ -2102,7 +2103,7 @@
             contentCheckOk: true,
             racyCheckOk: true
         };
-        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?key=" + encodeURIComponent(config.key), payload, h);
+        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?key=" + encodeURIComponent(config.key) + "&id=" + encodeURIComponent(videoId), payload, h);
     }
 
     async function androidVrPlayer(videoId, cpn) {
@@ -2128,7 +2129,7 @@
             contentCheckOk: true,
             racyCheckOk: true
         };
-        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?key=" + encodeURIComponent(config.key), payload, h);
+        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?key=" + encodeURIComponent(config.key) + "&id=" + encodeURIComponent(videoId), payload, h);
     }
 
     async function webPlayer(videoId, cpn) {
@@ -2151,7 +2152,7 @@
             contentCheckOk: true,
             racyCheckOk: true
         };
-        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?key=" + encodeURIComponent(config.key), payload, h);
+        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key) + "&id=" + encodeURIComponent(videoId), payload, h);
     }
 
     function subtitleTracks(player) {
@@ -2230,7 +2231,7 @@
         var other = [];
         (items || []).forEach(function (item) {
             var source = String(item && item.source || "");
-            if (/^YouTube Video/i.test(source) && item && item.audioTracks && item.audioTracks.length) {
+            if (/^YouTube/i.test(source) && item && item.audioTracks && item.audioTracks.length) {
                 var quality = streamQuality(item);
                 var key = String(quality || source);
                 var existing = selectedByQuality[key];
@@ -2263,6 +2264,23 @@
         return url && !isExpiredStreamUrl(url) ? url : "";
     }
 
+    async function androidPlayer(videoId, cpn) {
+        var config = await getConfig();
+        var h = mobileJsonHeaders("3", ANDROID_CLIENT_VERSION, androidUserAgent());
+        var payload = {
+            context: mobileClientContext("ANDROID", ANDROID_CLIENT_VERSION, "", {
+                osName: "Android",
+                osVersion: "13",
+                androidSdkVersion: 33
+            }),
+            videoId: videoId,
+            cpn: cpn,
+            contentCheckOk: true,
+            racyCheckOk: true
+        };
+        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key) + "&id=" + encodeURIComponent(videoId), payload, h);
+    }
+
     async function hlsStreamsFromPlayer(player, subtitles) {
         var hlsUrl = hlsUrlFromPlayer(player);
         if (!hlsUrl) return [];
@@ -2285,8 +2303,9 @@
             var cpn = generateContentPlaybackNonce();
             console.log("[LOG] loadStreams: Fetching players for id: " + id);
             
-            var androidPromise = androidReelPlayer(id, cpn, false).catch(function (e) { console.log("[LOG] androidReelPlayer Error: " + e); return {}; });
-            var iosPromise = iosPlayer(id, generateContentPlaybackNonce(), false).catch(function (e) { console.log("[LOG] iosPlayer Error: " + e); return null; });
+            var androidPromise = androidPlayer(id, cpn).catch(function (e) { console.log("[LOG] androidPlayer Error: " + e); return {}; });
+            var androidReelPromise = androidReelPlayer(id, cpn, true).catch(function (e) { console.log("[LOG] androidReelPlayer Error: " + e); return {}; });
+            var iosPromise = iosPlayer(id, generateContentPlaybackNonce(), true).catch(function (e) { console.log("[LOG] iosPlayer Error: " + e); return null; });
             var tvPromise = tvPlayer(id, cpn).catch(function (e) { console.log("[LOG] tvPlayer Error: " + e); return null; });
             var testSuitePromise = androidTestSuitePlayer(id, cpn).catch(function (e) { console.log("[LOG] androidTestSuitePlayer Error: " + e); return null; });
             var vrPromise = androidVrPlayer(id, cpn).catch(function (e) { console.log("[LOG] androidVrPlayer Error: " + e); return null; });
@@ -2305,6 +2324,7 @@
             });
 
             var player = await androidPromise;
+            var reel = await androidReelPromise;
             var hlsBundle = await hlsBundlePromise;
             var ios = hlsBundle.ios;
             var tv = await tvPromise;
@@ -2312,10 +2332,9 @@
             var vr = await vrPromise;
             var web = await webPromise;
             
-            console.log("[LOG] loadStreams: Players fetched. Android valid: " + hasStreamingData(player) + ", iOS valid: " + hasStreamingData(ios) + ", TV valid: " + hasStreamingData(tv) + ", TS valid: " + hasStreamingData(testSuite) + ", VR valid: " + hasStreamingData(vr) + ", Web valid: " + hasStreamingData(web));
-
             var allPlayers = [
                 { player: player, name: "YouTube Android", ua: androidUserAgent() },
+                { player: reel, name: "YouTube Android Reel", ua: androidUserAgent() },
                 { player: ios, name: "YouTube iOS", ua: iosUserAgent() },
                 { player: tv, name: "YouTube TV", ua: TV_USER_AGENT },
                 { player: testSuite, name: "YouTube TS", ua: "Google-Test/1.0" },
@@ -2334,7 +2353,7 @@
                         webPlayer(id, cpn).catch(function () { return null; })
                     ]);
                     allPlayers = [
-                        { player: retried[0], name: "YouTube Android", ua: androidUserAgent() },
+                        { player: retried[0], name: "YouTube Android Reel", ua: androidUserAgent() },
                         { player: retried[1], name: "YouTube iOS", ua: iosUserAgent() },
                         { player: retried[2], name: "YouTube TV", ua: TV_USER_AGENT },
                         { player: retried[3], name: "YouTube TS", ua: "Google-Test/1.0" },
@@ -2399,7 +2418,7 @@
                         var key = sourceName + "_" + format.itag;
                         if (seenItags[key]) return;
                         seenItags[key] = true;
-                        var stream = buildNewPipeVideoOnlyStream(format, audioTracks, cpn, subs);
+                        var stream = buildNewPipeVideoOnlyStream(format, sourceName, audioTracks, cpn, subs);
                         if (stream) {
                             stream.headers["User-Agent"] = playerUA;
                             results.push(stream);
