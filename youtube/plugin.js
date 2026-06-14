@@ -62,7 +62,7 @@
     var BASE_URL = String((typeof manifest !== "undefined" && manifest && manifest.baseUrl) || "https://www.youtube.com").replace(/\/+$/, "");
     var MOBILE_URL = "https://m.youtube.com";
     var YOUTUBEI_BASE = "https://www.youtube.com/youtubei/v1";
-    var YOUTUBEI_GAPIS_BASE = "https://youtubei.googleapis.com/youtubei/v1";
+    var YOUTUBEI_GAPIS_BASE = "https://www.youtube.com/youtubei/v1";
     var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
     var ANDROID_CLIENT_VERSION = "21.03.36";
     var IOS_CLIENT_VERSION = "21.03.2";
@@ -1985,7 +1985,8 @@
 
     async function visitorDataForMobile(clientName, clientVersion, headersForClient, extra) {
         try {
-            var json = await requestJson(YOUTUBEI_GAPIS_BASE + "/visitor_id?prettyPrint=false", {
+            var config = await getConfig();
+            var json = await requestJson(YOUTUBEI_GAPIS_BASE + "/visitor_id?key=" + encodeURIComponent(config.key) + "&prettyPrint=false", {
                 context: mobileClientContext(clientName, clientVersion, "", extra)
             }, headersForClient);
             return json && json.responseContext && json.responseContext.visitorData || "";
@@ -2003,6 +2004,7 @@
     }
 
     async function androidReelPlayer(videoId, cpn, withVisitor) {
+        var config = await getConfig();
         var h = mobileJsonHeaders("3", ANDROID_CLIENT_VERSION, androidUserAgent());
         var visitor = withVisitor ? await visitorDataForMobile("ANDROID", ANDROID_CLIENT_VERSION, h, {
             osName: "Android",
@@ -2023,11 +2025,12 @@
             },
             disablePlayerResponse: false
         };
-        var json = await requestJson(YOUTUBEI_GAPIS_BASE + "/reel/reel_item_watch?prettyPrint=false&t=" + encodeURIComponent(generateTParameter()) + "&id=" + encodeURIComponent(videoId) + "&$fields=playerResponse", payload, h);
+        var json = await requestJson(YOUTUBEI_GAPIS_BASE + "/reel/reel_item_watch?key=" + encodeURIComponent(config.key) + "&prettyPrint=false&t=" + encodeURIComponent(generateTParameter()) + "&id=" + encodeURIComponent(videoId) + "&$fields=playerResponse", payload, h);
         return json && json.playerResponse || {};
     }
 
     async function iosPlayer(videoId, cpn, withVisitor) {
+        var config = await getConfig();
         var h = mobileJsonHeaders("5", IOS_CLIENT_VERSION, iosUserAgent());
         var visitor = withVisitor ? await visitorDataForMobile("IOS", IOS_CLIENT_VERSION, h, {
             deviceMake: "Apple",
@@ -2035,7 +2038,7 @@
             osName: "iOS",
             osVersion: IOS_USER_AGENT_VERSION.replace(/_/g, ".")
         }) : "";
-        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?prettyPrint=false&t=" + encodeURIComponent(generateTParameter()) + "&id=" + encodeURIComponent(videoId) + "&$fields=streamingData,captions,videoDetails,microformat", {
+        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?key=" + encodeURIComponent(config.key) + "&prettyPrint=false&t=" + encodeURIComponent(generateTParameter()) + "&id=" + encodeURIComponent(videoId) + "&$fields=streamingData,captions,videoDetails,microformat", {
             context: mobileClientContext("IOS", IOS_CLIENT_VERSION, visitor, {
                 deviceMake: "Apple",
                 deviceModel: IOS_DEVICE_MODEL,
@@ -2047,6 +2050,21 @@
             contentCheckOk: true,
             racyCheckOk: true
         }, h);
+    }
+
+    async function androidTestSuitePlayer(videoId, cpn) {
+        var config = await getConfig();
+        var h = mobileJsonHeaders("30", "1.9", androidUserAgent());
+        var payload = {
+            context: mobileClientContext("ANDROID_TESTSUITE", "1.9", "", {
+                androidSdkVersion: 30
+            }),
+            videoId: videoId,
+            cpn: cpn,
+            contentCheckOk: true,
+            racyCheckOk: true
+        };
+        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key) + "&prettyPrint=false&t=" + encodeURIComponent(generateTParameter()), payload, h);
     }
 
     function subtitleTracks(player) {
@@ -2178,6 +2196,7 @@
             var cpn = generateContentPlaybackNonce();
             var androidPromise = androidReelPlayer(id, cpn, false).catch(function () { return {}; });
             var iosPromise = iosPlayer(id, generateContentPlaybackNonce(), false).catch(function () { return null; });
+            var testSuitePromise = androidTestSuitePlayer(id, cpn).catch(function () { return null; });
             var hlsBundlePromise = iosPromise.then(async function (iosPlayerResult) {
                 var iosSubs = compactSubtitleTracks(subtitleTracks(iosPlayerResult));
                 return {
@@ -2192,16 +2211,20 @@
             var player = await androidPromise;
             var hlsBundle = await hlsBundlePromise;
             var ios = hlsBundle.ios;
+            var testSuite = await testSuitePromise;
 
             if (hasStreamingData(ios)) player = ios;
+            else if (hasStreamingData(testSuite)) player = testSuite;
             else if (!hasStreamingData(player)) {
                 try {
                     var retried = await Promise.all([
                         androidReelPlayer(id, cpn, true).catch(function () { return {}; }),
-                        iosPlayer(id, generateContentPlaybackNonce(), true).catch(function () { return null; })
+                        iosPlayer(id, generateContentPlaybackNonce(), true).catch(function () { return null; }),
+                        androidTestSuitePlayer(id, cpn).catch(function () { return null; })
                     ]);
                     if (hasStreamingData(retried[0])) player = retried[0];
                     ios = retried[1] || ios;
+                    if (hasStreamingData(retried[2]) && !hasStreamingData(player)) player = retried[2];
                     if (!hlsBundle.streams.length && hasStreamingData(ios)) {
                         var retrySubs = compactSubtitleTracks(subtitleTracks(ios));
                         hlsBundle = {
