@@ -177,40 +177,9 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.castletv.sky"
   },
   {
-    "packageName": "com.igris.repo.cinemacity",
-    "name": "CinemaCity",
-    "version": 4,
-    "baseUrl": "https://cinemacity.cc",
-    "description": "CinemaCity catalog with PlayerJS stream extraction and language-aware download links.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "en",
-      "hi",
-      "ta",
-      "te",
-      "ja",
-      "ko",
-      "es",
-      "fr",
-      "de",
-      "ar",
-      "pt",
-      "tr",
-      "it",
-      "pl"
-    ],
-    "categories": [
-      "Movies",
-      "Series"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.cinemacity.sky"
-  },
-  {
     "packageName": "com.igris.repo.cinestream",
     "name": "CineStream",
-    "version": 25,
+    "version": 26,
     "baseUrl": "https://cinemeta-catalogs.strem.io",
     "description": "CineMeta-powered catalog with an expanded CineStream source stack, including Stremio, direct OTT mirrors, and embedded stream resolvers.",
     "authors": [
@@ -254,7 +223,7 @@
   {
     "packageName": "com.igris.repo.heartivetv",
     "name": "HeartiveTV",
-    "version": 4,
+    "version": 5,
     "baseUrl": "https://heartivetv.pages.dev",
     "description": "Heartive movies and shows",
     "authors": [
@@ -499,27 +468,9 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztv.sky"
   },
   {
-    "packageName": "com.igris.repo.tokyoinsider",
-    "name": "TokyoInsider",
-    "version": 8,
-    "baseUrl": "https://www.tokyoinsider.com",
-    "description": "TMDB anime catalog with TokyoInsider links.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "en",
-      "ja"
-    ],
-    "categories": [
-      "Anime"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.tokyoinsider.sky"
-  },
-  {
     "packageName": "com.igris.repo.youtube",
     "name": "YouTube",
-    "version": 21,
+    "version": 22,
     "baseUrl": "https://www.youtube.com",
     "providers": [
       {
