@@ -1639,12 +1639,26 @@
         var quality = formatQuality(format);
         var codec = normalizeCodec((String(format.mimeType || "").match(/codecs="([^"]+)"/) || [])[1]);
         var label = cleanText(sourceName + (quality ? " " + quality + "p" : "") + (codec ? " " + codec : ""));
+        
+        var playerUA = USER_AGENT;
+        if (/iOS/i.test(sourceName)) playerUA = iosUserAgent();
+        else if (/TV/i.test(sourceName)) playerUA = "Mozilla/5.0 (Chromecast; Google TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.0 Safari/537.36";
+        
+        // Magic Proxy: Wrap URL with headers if it's device-restricted
+        var finalUrl = url;
+        if (/iOS|TV/i.test(sourceName)) {
+            finalUrl = "magic_proxy:" + base64Encode(JSON.stringify({
+                url: url,
+                headers: { "User-Agent": playerUA, "Referer": BASE_URL + "/" }
+            }));
+        }
+
         var stream = new StreamResult({
-            url: url,
+            url: finalUrl,
             source: label,
             quality: quality || undefined,
             headers: {
-                "User-Agent": USER_AGENT,
+                "User-Agent": playerUA,
                 "Referer": BASE_URL + "/"
             }
         });
@@ -2067,20 +2081,21 @@
 
     async function tvPlayer(videoId, cpn, withVisitor) {
         var config = await getConfig();
-        var h = mobileJsonHeaders("7", TV_CLIENT_VERSION, TV_USER_AGENT);
-        var visitor = withVisitor ? await visitorDataForMobile("TVHTML5", TV_CLIENT_VERSION, h, {
-            userAgent: TV_USER_AGENT,
+        var tvUA = "Mozilla/5.0 (Chromecast; Google TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.0 Safari/537.36";
+        var h = mobileJsonHeaders("7", "7.20230405.08.01", tvUA);
+        var visitor = withVisitor ? await visitorDataForMobile("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "7.20230405.08.01", h, {
+            userAgent: tvUA,
             clientScreen: "WATCH"
         }) : "";
         var payload = {
             context: {
                 client: {
-                    clientName: "TVHTML5",
-                    clientVersion: TV_CLIENT_VERSION,
+                    clientName: "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
+                    clientVersion: "7.20230405.08.01",
                     hl: LOCALE.hl,
                     gl: LOCALE.gl,
                     visitorData: visitor || undefined,
-                    userAgent: TV_USER_AGENT,
+                    userAgent: tvUA,
                     clientScreen: "WATCH"
                 },
                 user: { lockedSafetyMode: false },
@@ -2368,6 +2383,8 @@
             var vr = await vrPromise;
             var web = await webPromise;
             var embedded = await embeddedPromise;
+            
+            console.log("[LOG] loadStreams: Players status - Android: " + hasStreamingData(player) + ", Reel: " + hasStreamingData(reel) + ", iOS: " + hasStreamingData(ios) + ", TV: " + hasStreamingData(tv) + ", TS: " + hasStreamingData(testSuite) + ", VR: " + hasStreamingData(vr) + ", Web: " + hasStreamingData(web) + ", Embedded: " + hasStreamingData(embedded));
             
             var allPlayers = [
                 { player: player, name: "YouTube Android", ua: androidUserAgent() },
