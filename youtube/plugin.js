@@ -552,14 +552,18 @@
     function parseConfigFromHtml(html) {
         var key = (String(html || "").match(/"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"/) || [])[1]
             || (String(html || "").match(/"innertubeApiKey"\s*:\s*"([^"]+)"/) || [])[1]
+            || (String(html || "").match(/&quot;INNERTUBE_API_KEY&quot;:&quot;([^&]+)&quot;/) || [])[1]
             || fallbackInnertubeKey();
         var clientVersion = (String(html || "").match(/"INNERTUBE_CLIENT_VERSION"\s*:\s*"([^"]+)"/) || [])[1]
+            || (String(html || "").match(/&quot;INNERTUBE_CLIENT_VERSION&quot;:&quot;([^&]+)&quot;/) || [])[1]
             || "2.20240508.00.00";
-        var visitorData = (String(html || "").match(/"VISITOR_DATA"\s*:\s*"([^"]+)"/) || [])[1] || "";
+        var visitorData = (String(html || "").match(/"VISITOR_DATA"\s*:\s*"([^"]+)"/) || [])[1]
+            || (String(html || "").match(/&quot;VISITOR_DATA&quot;:&quot;([^&]+)&quot;/) || [])[1] || "";
         var sts = (String(html || "").match(/"sts"\s*:\s*(\d+)/) || [])[1]
             || (String(html || "").match(/sts\s*[:=]\s*(\d+)/) || [])[1]
             || (String(html || "").match(/"signatureTimestamp"\s*:\s*(\d+)/) || [])[1]
-            || "20224";
+            || (String(html || "").match(/&quot;sts&quot;:(\d+)/) || [])[1]
+            || "20240"; // Updated fallback to a more recent version
         return { key: key, clientVersion: clientVersion, visitorData: visitorData, sts: sts };
     }
 
@@ -1664,13 +1668,10 @@
         if (/iOS/i.test(sourceName)) playerUA = iosUserAgent();
         else if (/TV/i.test(sourceName)) playerUA = "Mozilla/5.0 (Chromecast; Google TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.0 Safari/537.36";
         
-        // Magic Proxy: Wrap URL with headers if it's device-restricted
+        // MAGIC_PROXY_v1 implementation
         var finalUrl = url;
-        if (/iOS|TV/i.test(sourceName)) {
-            finalUrl = "magic_proxy:" + base64Encode(JSON.stringify({
-                url: url,
-                headers: { "User-Agent": playerUA, "Referer": BASE_URL + "/" }
-            }));
+        if (/iOS|TV|VR/i.test(sourceName)) {
+            finalUrl = "MAGIC_PROXY_v1" + base64Encode(url);
         }
 
         var stream = new StreamResult({
