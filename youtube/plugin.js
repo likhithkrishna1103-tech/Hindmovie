@@ -2759,34 +2759,23 @@
 
             results = results.concat(hlsBundle.streams || []);
 
-            // Also parse Android player's HLS/DASH manifests for additional high-quality streams
-            for (var i = 0; i < allPlayers.length; i++) {
-                var item = allPlayers[i];
-                if (item.name.indexOf("Android") !== -1) {
-                    var p = item.player;
-                    var streaming = p.streamingData || {};
-                    var playerUA = item.ua;
-                    // For Android, return DASH manifest FIRST - ExoPlayer handles adaptive streaming natively with audio
-                    var dashUrl = streaming.dashManifestUrl || streaming.serverAbrStreamingUrl || "";
-                    if (dashUrl && !isExpiredStreamUrl(dashUrl)) {
-                        console.log("[LOG] " + item.name + " returning DASH manifest for native Android playback");
-                        // Insert at beginning so it's the first/preferred stream
-                        results.unshift(attachSubtitles(new StreamResult({
-                            url: dashUrl,
-                            source: item.name + " DASH (Adaptive)",
-                            quality: undefined,
-                            headers: { "User-Agent": playerUA, "Referer": BASE_URL + "/" }
-                        }), subs));
-                    }
-                    // Also parse HLS manifest if available (fallback)
-                    var hlsUrl = hlsUrlFromPlayer(p);
-                    if (hlsUrl) {
-                        var hlsStreams = await hlsVariantStreams(hlsUrl, subs);
-                        hlsStreams.forEach(function(s) { s.headers["User-Agent"] = playerUA; });
-                        results = results.concat(hlsStreams);
-                    }
+            // Add iOS HLS manifest as adaptive stream (proven working for Android/ExoPlayer)
+            if (hlsBundle.ios) {
+                var iosHlsUrl = hlsUrlFromPlayer(hlsBundle.ios);
+                if (iosHlsUrl && !isExpiredStreamUrl(iosHlsUrl)) {
+                    console.log("[LOG] Adding iOS HLS manifest for adaptive playback");
+                    results.unshift(attachSubtitles(new StreamResult({
+                        url: iosHlsUrl,
+                        source: "YouTube HLS (Adaptive)",
+                        quality: undefined,
+                        headers: { "User-Agent": iosUserAgent(), "Referer": BASE_URL + "/" }
+                    }), hlsBundle.subtitles || []));
                 }
             }
+
+            // HLS manifest from iOS player is already in hlsBundle.streams (proven working for adaptive playback)
+            // Individual video+audio streams from ANDROID_VR are in results with audioTracks attached
+            // No need for UMP DASH manifest - HLS is proven to work for adaptive playback on Android
 
             var seenUrls = {};
             results = results.filter(function (item) {
