@@ -428,14 +428,14 @@
             epList.sort(function(a, b) { return (a.number || 0) - (b.number || 0); });
             var allEpisodes = [];
             epList.forEach(function(ep) {
-                var epTitle = ep.title || "Episode " + ep.number;
+                var epTitle = String(ep.title || "") || "Episode " + ep.number;
                 // Sub episode
                 allEpisodes.push(new Episode({
                     name: epTitle,
                     url: BASE_URL + "/play/" + slug + "/" + ep.number,
                     season: 1,
                     episode: ep.number,
-                    description: ep.description || "",
+                    description: String(ep.description || ""),
                     posterUrl: ep.img || poster,
                     dubStatus: "sub",
                     headers: HEADERS
@@ -446,7 +446,7 @@
                     url: BASE_URL + "/play/" + slug + "/" + ep.number + "?dub=true",
                     season: 1,
                     episode: ep.number,
-                    description: ep.description || "",
+                    description: String(ep.description || ""),
                     posterUrl: ep.img || poster,
                     dubStatus: "dub",
                     headers: HEADERS
@@ -493,8 +493,8 @@
 
             // Sync data with external IDs
             var syncDataObj = {};
-            if (animeInfo.idMal) syncDataObj.mal = animeInfo.idMal;
-            if (animeInfo.anilistId) syncDataObj.anilist = animeInfo.anilistId;
+            if (animeInfo.idMal) syncDataObj.mal = String(animeInfo.idMal);
+            if (animeInfo.anilistId) syncDataObj.anilist = String(animeInfo.anilistId);
 
             var item = new MultimediaItem({
                 title: title,
@@ -509,7 +509,7 @@
                 duration: animeInfo.duration || 0,
                 status: status,
                 tags: genres,
-                contentRating: animeInfo.rating || "",
+                contentRating: String(animeInfo.rating || ""),
                 isAdult: animeInfo.isAdult || false,
                 cast: castList,
                 trailers: trailerList,
