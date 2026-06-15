@@ -1690,7 +1690,7 @@
                 return p1 + "n=" + transformN(p2);
             });
         }
-
+        
         var quality = formatQuality(format);
         var codec = normalizeCodec((String(format.mimeType || "").match(/codecs="([^"]+)"/) || [])[1]);
         var label = cleanText(sourceName + (quality ? " " + quality + "p" : "") + (codec ? " " + codec : ""));
@@ -1708,6 +1708,8 @@
                 "Referer": "https://www.youtube.com/"
             }
         });
+        // StreamResult may not accept quality in constructor - set it directly
+        if (quality) stream.quality = quality;
         if (subtitles && subtitles.length) stream.subtitles = subtitles;
         return stream;
     }
@@ -1991,6 +1993,67 @@
         });
         rows.push(variant.streamInf);
         rows.push(variant.url);
+        return rows.join("\n");
+    }
+
+    function buildHlsStream(variant, subtitles, compactMedia) {
+        if (!variant || !variant.url) return null;
+        var label = variant.quality ? ("YouTube " + variant.quality + "p") : "YouTube HLS";
+        if (variant.codec) label += " " + variant.codec;
+        var stream = new StreamResult({
+            url: magicM3u8(qualityMasterPlaylist(variant, compactMedia)),
+            source: label,
+            quality: variant.quality || undefined,
+            headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
+        });
+        if (subtitles && subtitles.length) stream.subtitles = subtitles;
+        return stream;
+    }
+
+    // Universal fix: Create merged HLS master playlist from individual video+audio streams
+    // Similar to cloudstream's qualityMasterPlaylist - creates a playlist that ExoPlayer can play with audio
+    function buildMergedHlsPlaylist(videoStreams, audioTracks, playerUA) {
+        if (!videoStreams || !videoStreams.length || !audioTracks || !audioTracks.length) return null;
+        
+        // Group video streams by quality (height)
+        var videoByQuality = {};
+        videoStreams.forEach(function(stream) {
+            var quality = stream.quality || 0;
+            if (!videoByQuality[quality] || (stream.source && stream.source.indexOf("H264") !== -1)) {
+                videoByQuality[quality] = stream;
+            }
+        });
+        
+        // Get best audio track (Opus preferred)
+        var bestAudio = audioTracks[0];
+        audioTracks.forEach(function(audio) {
+            if (audio.url && audio.url.indexOf("opus") !== -1) bestAudio = audio;
+        });
+        
+        if (!bestAudio || !bestAudio.url) return null;
+        
+        var rows = ["#EXTM3U", "#EXT-X-INDEPENDENT-SEGMENTS"];
+        
+        // Add audio rendition
+        var audioId = "audio-" + (bestAudio.lang || "und");
+        rows.push("#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"" + audioId + "\",NAME=\"" + (bestAudio.label || "Audio") + "\",LANGUAGE=\"" + (bestAudio.lang || "und") + "\",DEFAULT=YES,AUTOSELECT=YES,URI=\"" + bestAudio.url + "\"");
+        
+        // Add video variants with audio reference
+        Object.keys(videoByQuality).sort(function(a, b) { return parseInt(b, 10) - parseInt(a, 10); }).forEach(function(quality) {
+            var video = videoByQuality[quality];
+            if (!video || !video.url) return;
+            
+            var codec = "avc1.640028"; // H264 baseline
+            if (video.source && video.source.indexOf("VP9") !== -1) codec = "vp9";
+            else if (video.source && video.source.indexOf("AV1") !== -1) codec = "av01.0.05M.08";
+            
+            var bandwidth = quality * 100000; // rough estimate
+            var resolution = quality + "x" + Math.round(quality * 9 / 16);
+            
+            rows.push("#EXT-X-STREAM-INF:BANDWIDTH=" + bandwidth + ",RESOLUTION=" + resolution + ",CODECS=\"" + codec + ",opus\",AUDIO=\"" + audioId + "\"");
+            rows.push(video.url);
+        });
+        
         return rows.join("\n");
     }
 
@@ -2759,17 +2822,28 @@
 
             results = results.concat(hlsBundle.streams || []);
 
-            // Add iOS HLS manifest as adaptive stream (proven working for Android/ExoPlayer)
-            if (hlsBundle.ios) {
-                var iosHlsUrl = hlsUrlFromPlayer(hlsBundle.ios);
-                if (iosHlsUrl && !isExpiredStreamUrl(iosHlsUrl)) {
-                    console.log("[LOG] Adding iOS HLS manifest for adaptive playback");
+            // Universal fix: Create merged HLS master playlist from individual video+audio streams
+            // This works like cloudstream's qualityMasterPlaylist - creates a single HLS manifest
+            // that ExoPlayer can play with audio for ALL qualities (including 1080p+)
+            var allVideoStreams = [];
+            var allAudioTracks = [];
+            results.forEach(function(stream) {
+                if (stream.quality && stream.quality >= 720) allVideoStreams.push(stream);
+                if (stream.audioTracks) {
+                    stream.audioTracks.forEach(function(at) { allAudioTracks.push(at); });
+                }
+            });
+
+            if (allVideoStreams.length && allAudioTracks.length) {
+                var mergedPlaylist = buildMergedHlsPlaylist(allVideoStreams, allAudioTracks, USER_AGENT);
+                if (mergedPlaylist) {
+                    console.log("[LOG] Created merged HLS playlist for adaptive playback with audio");
                     results.unshift(attachSubtitles(new StreamResult({
-                        url: iosHlsUrl,
-                        source: "YouTube HLS (Adaptive)",
+                        url: magicM3u8(mergedPlaylist),
+                        source: "YouTube HLS (Adaptive, All Qualities)",
                         quality: undefined,
-                        headers: { "User-Agent": iosUserAgent(), "Referer": BASE_URL + "/" }
-                    }), hlsBundle.subtitles || []));
+                        headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL + "/" }
+                    }), subs));
                 }
             }
 
