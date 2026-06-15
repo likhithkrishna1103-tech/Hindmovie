@@ -38,6 +38,24 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anidb.sky"
   },
   {
+    "packageName": "com.igris.repo.anikage",
+    "name": "Anikage",
+    "version": 1,
+    "baseUrl": "https://anikage.cc",
+    "description": "Watch anime with sub/dub from Anikage",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anikage.sky"
+  },
+  {
     "packageName": "com.igris.repo.animedubhindi",
     "name": "AnimeDubHindi",
     "version": 3,
