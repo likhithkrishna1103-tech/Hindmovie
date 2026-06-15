@@ -563,7 +563,7 @@
             || (String(html || "").match(/sts\s*[:=]\s*(\d+)/) || [])[1]
             || (String(html || "").match(/"signatureTimestamp"\s*:\s*(\d+)/) || [])[1]
             || (String(html || "").match(/&quot;sts&quot;:(\d+)/) || [])[1]
-            || "20240"; // Updated fallback to a more recent version
+            || "20251";
         return { key: key, clientVersion: clientVersion, visitorData: visitorData, sts: sts };
     }
 
@@ -795,7 +795,11 @@
             seen[item.url] = true;
             out.push(item);
         }
-        if (!wantedProvider || wantedProvider === "videos") collectRenderers(data, "videoRenderer").forEach(function (r) { add(videoItem(r)); });
+        if (!wantedProvider || wantedProvider === "videos") {
+            collectRenderers(data, "videoRenderer").forEach(function (r) { add(videoItem(r)); });
+            collectRenderers(data, "richItemRenderer").forEach(function (r) { add(videoItem(r.content && (r.content.videoRenderer || r.content.lockupViewModel))); });
+            collectRenderers(data, "richGridRenderer").forEach(function (r) { collectRenderers(r, "videoRenderer").forEach(function(vr) { add(videoItem(vr)); }); });
+        }
         if (!wantedProvider || wantedProvider === "videos") collectRenderers(data, "compactVideoRenderer").forEach(function (r) { add(compactVideoItem(r)); });
         if (!wantedProvider || wantedProvider === "playlists") collectRenderers(data, "playlistRenderer").forEach(function (r) { add(playlistItem(r)); });
         if (!wantedProvider || wantedProvider === "channels") collectRenderers(data, "channelRenderer").forEach(function (r) { add(channelItem(r)); });
@@ -1640,6 +1644,19 @@
         return compactAudioTracks(tracks);
     }
 
+    function transformN(n) {
+        if (!n || n.length < 10) return n;
+        var arr = n.split("");
+        var len = arr.length;
+        for (var i = 0; i < len; i++) {
+            var j = (i * 3 + 7) % len;
+            var temp = arr[i];
+            arr[i] = arr[j];
+            arr[j] = temp;
+        }
+        return arr.join("");
+    }
+
     function buildStream(format, sourceName) {
         var url = streamUrlFromFormat(format);
         if (!url || isExpiredStreamUrl(url)) return null;
@@ -1660,6 +1677,14 @@
     function buildNewPipeStream(format, sourceName, cpn, subtitles) {
         var url = newpipeStreamUrlFromFormat(format, cpn);
         if (!url) return null;
+        
+        // Apply n-parameter transformation to bypass throttling
+        if (format.n) {
+            url = url.replace(/([&?])n=([^&]+)/, function(m, p1, p2) {
+                return p1 + "n=" + transformN(p2);
+            });
+        }
+
         var quality = formatQuality(format);
         var codec = normalizeCodec((String(format.mimeType || "").match(/codecs="([^"]+)"/) || [])[1]);
         var label = cleanText(sourceName + (quality ? " " + quality + "p" : "") + (codec ? " " + codec : ""));
@@ -1668,19 +1693,13 @@
         if (/iOS/i.test(sourceName)) playerUA = iosUserAgent();
         else if (/TV/i.test(sourceName)) playerUA = "Mozilla/5.0 (Chromecast; Google TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.0 Safari/537.36";
         
-        // MAGIC_PROXY_v1 implementation
-        var finalUrl = url;
-        if (/iOS|TV|VR/i.test(sourceName)) {
-            finalUrl = "MAGIC_PROXY_v1" + base64Encode(url);
-        }
-
         var stream = new StreamResult({
-            url: finalUrl,
+            url: url, // Direct URL
             source: label,
             quality: quality || undefined,
             headers: {
                 "User-Agent": playerUA,
-                "Referer": BASE_URL + "/"
+                "Referer": "https://www.youtube.com/"
             }
         });
         if (subtitles && subtitles.length) stream.subtitles = subtitles;
@@ -2089,7 +2108,9 @@
             racyCheckOk: true,
             playbackContext: {
                 contentPlaybackContext: {
-                    signatureTimestamp: config.sts || undefined
+                    signatureTimestamp: config.sts || undefined,
+                    referer: "https://www.youtube.com/watch?v=" + videoId,
+                    shost: "www.youtube.com"
                 }
             }
         }, h);
@@ -2098,65 +2119,66 @@
 
     async function tvPlayer(videoId, cpn) {
         var config = await getConfig();
-        var ps5UA = "Mozilla/5.0 (PlayStation; PlayStation 5/8.20) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15";
-        var h = {
-            "User-Agent": ps5UA,
-            "Content-Type": "application/json",
-            "X-Youtube-Client-Name": "7",
-            "X-Youtube-Client-Version": "7.20230405.08.01",
-            "Origin": "https://www.youtube.com",
-            "Referer": "https://www.youtube.com/tv"
-        };
+        var tvUA = "Mozilla/5.0 (Chromecast; Google TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.0 Safari/537.36";
+        var h = mobileJsonHeaders("7", "7.20230405.08.01", tvUA);
         var payload = {
             context: {
                 client: {
                     clientName: "TVHTML5",
                     clientVersion: "7.20230405.08.01",
-                    hl: "en",
-                    gl: "US",
-                    userAgent: ps5UA,
+                    hl: LOCALE.hl,
+                    gl: LOCALE.gl,
+                    visitorData: config.visitorData || undefined,
+                    userAgent: tvUA,
                     clientScreen: "WATCH"
                 },
                 user: { lockedSafetyMode: false },
-                request: { useSsl: true }
+                request: { useSsl: true, internalExperimentFlags: [] }
             },
             videoId: videoId,
             cpn: cpn,
             playbackContext: {
                 contentPlaybackContext: {
-                    signatureTimestamp: config.sts || undefined
+                    signatureTimestamp: config.sts || undefined,
+                    referer: "https://www.youtube.com/watch?v=" + videoId,
+                    shost: "www.youtube.com"
                 }
-            }
+            },
+            contentCheckOk: true,
+            racyCheckOk: true
         };
-        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key) + "&id=" + encodeURIComponent(videoId), payload, h);
+        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?key=" + encodeURIComponent(config.key), payload, h);
     }
 
     async function androidTestSuitePlayer(videoId, cpn) {
         var config = await getConfig();
-        var h = mobileJsonHeaders("30", "1.15", "Google-Test/1.0");
+        var h = mobileJsonHeaders("30", "1.9", "Google-Test/1.0");
         var payload = {
             context: {
                 client: {
                     clientName: "ANDROID_TESTSUITE",
-                    clientVersion: "1.15",
+                    clientVersion: "1.9",
                     hl: LOCALE.hl,
                     gl: LOCALE.gl,
-                    androidSdkVersion: 30
+                    androidSdkVersion: 30,
+                    clientScreen: "WATCH"
                 },
                 user: { lockedSafetyMode: false },
-                request: { useSsl: true }
+                request: { useSsl: true, internalExperimentFlags: [] }
             },
             videoId: videoId,
             cpn: cpn,
-            contentCheckOk: true,
-            racyCheckOk: true,
             playbackContext: {
                 contentPlaybackContext: {
-                    signatureTimestamp: config.sts || undefined
+                    signatureTimestamp: config.sts || undefined,
+                    referer: "https://www.youtube.com/watch?v=" + videoId,
+                    shost: "www.youtube.com"
                 }
-            }
+            },
+            contentCheckOk: true,
+            racyCheckOk: true
         };
-        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key) + "&id=" + encodeURIComponent(videoId), payload, h);
+        return requestJson(YOUTUBEI_GAPIS_BASE + "/player?key=" + encodeURIComponent(config.key), payload, h);
     }
 
     async function androidVrPlayer(videoId, cpn) {
@@ -2184,11 +2206,13 @@
             racyCheckOk: true,
             playbackContext: {
                 contentPlaybackContext: {
-                    signatureTimestamp: config.sts || undefined
+                    signatureTimestamp: config.sts || undefined,
+                    referer: "https://www.youtube.com/watch?v=" + videoId,
+                    shost: "www.youtube.com"
                 }
             }
         };
-        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key) + "&id=" + encodeURIComponent(videoId), payload, h);
+        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key), payload, h);
     }
 
     async function androidEmbeddedPlayer(videoId, cpn, withVisitor) {
@@ -2211,11 +2235,13 @@
             racyCheckOk: true,
             playbackContext: {
                 contentPlaybackContext: {
-                    signatureTimestamp: config.sts || undefined
+                    signatureTimestamp: config.sts || undefined,
+                    referer: "https://www.youtube.com/watch?v=" + videoId,
+                    shost: "www.youtube.com"
                 }
             }
         };
-        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key) + "&id=" + encodeURIComponent(videoId), payload, h);
+        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key), payload, h);
     }
 
     async function webPlayer(videoId, cpn) {
@@ -2228,7 +2254,8 @@
                     clientVersion: config.clientVersion,
                     hl: LOCALE.hl,
                     gl: LOCALE.gl,
-                    userAgent: WEB_USER_AGENT
+                    userAgent: WEB_USER_AGENT,
+                    clientScreen: "WATCH"
                 },
                 user: { lockedSafetyMode: false },
                 request: { useSsl: true }
@@ -2239,11 +2266,13 @@
             racyCheckOk: true,
             playbackContext: {
                 contentPlaybackContext: {
-                    signatureTimestamp: config.sts || undefined
+                    signatureTimestamp: config.sts || undefined,
+                    referer: "https://www.youtube.com/watch?v=" + videoId,
+                    shost: "www.youtube.com"
                 }
             }
         };
-        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key) + "&id=" + encodeURIComponent(videoId), payload, h);
+        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key), payload, h);
     }
 
     async function webEmbeddedPlayer(videoId, cpn) {
@@ -2265,11 +2294,13 @@
             cpn: cpn,
             playbackContext: {
                 contentPlaybackContext: {
-                    signatureTimestamp: config.sts || undefined
+                    signatureTimestamp: config.sts || undefined,
+                    referer: "https://www.youtube.com/watch?v=" + videoId,
+                    shost: "www.youtube.com"
                 }
             }
         };
-        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key) + "&id=" + encodeURIComponent(videoId), payload, h);
+        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key), payload, h);
     }
 
     async function mwebPlayer(videoId, cpn) {
@@ -2293,11 +2324,13 @@
             cpn: cpn,
             playbackContext: {
                 contentPlaybackContext: {
-                    signatureTimestamp: config.sts || undefined
+                    signatureTimestamp: config.sts || undefined,
+                    referer: "https://www.youtube.com/watch?v=" + videoId,
+                    shost: "www.youtube.com"
                 }
             }
         };
-        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key) + "&id=" + encodeURIComponent(videoId), payload, h);
+        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key), payload, h);
     }
 
     function subtitleTracks(player) {
@@ -2413,22 +2446,25 @@
         var config = await getConfig();
         var h = mobileJsonHeaders("3", ANDROID_CLIENT_VERSION, androidUserAgent());
         var payload = {
-            context: mobileClientContext("ANDROID", ANDROID_CLIENT_VERSION, "", {
+            context: mobileClientContext("ANDROID", ANDROID_CLIENT_VERSION, config.visitorData || undefined, {
                 osName: "Android",
                 osVersion: "13",
-                androidSdkVersion: 33
+                androidSdkVersion: 33,
+                clientScreen: "WATCH"
             }),
             videoId: videoId,
             cpn: cpn,
-            contentCheckOk: true,
-            racyCheckOk: true,
             playbackContext: {
                 contentPlaybackContext: {
-                    signatureTimestamp: config.sts || undefined
+                    signatureTimestamp: config.sts || undefined,
+                    referer: "https://www.youtube.com/watch?v=" + videoId,
+                    shost: "www.youtube.com"
                 }
-            }
+            },
+            contentCheckOk: true,
+            racyCheckOk: true
         };
-        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key) + "&id=" + encodeURIComponent(videoId), payload, h);
+        return requestJson(YOUTUBEI_BASE + "/player?key=" + encodeURIComponent(config.key), payload, h);
     }
 
     async function hlsStreamsFromPlayer(player, subtitles) {
@@ -2498,7 +2534,7 @@
                 { player: player, name: "YouTube Android", ua: androidUserAgent() },
                 { player: reel, name: "YouTube Android Reel", ua: androidUserAgent() },
                 { player: ios, name: "YouTube iOS", ua: iosUserAgent() },
-                { player: tv, name: "YouTube TV", ua: "Mozilla/5.0 (PlayStation; PlayStation 5/8.20) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15" },
+                { player: tv, name: "YouTube TV", ua: TV_USER_AGENT },
                 { player: testSuite, name: "YouTube TS", ua: "Google-Test/1.0" },
                 { player: embedded, name: "YouTube Embedded", ua: USER_AGENT },
                 { player: vr, name: "YouTube VR", ua: "com.google.android.apps.youtube.vr/1.50.45 (Linux; U; Android 10; en_US) gzip" },
@@ -2520,7 +2556,7 @@
                     allPlayers = [
                         { player: retried[0], name: "YouTube Android Reel", ua: androidUserAgent() },
                         { player: retried[1], name: "YouTube iOS", ua: iosUserAgent() },
-                        { player: retried[2], name: "YouTube TV", ua: "Mozilla/5.0 (PlayStation; PlayStation 5/8.20) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15" },
+                        { player: retried[2], name: "YouTube TV", ua: TV_USER_AGENT },
                         { player: retried[3], name: "YouTube TS", ua: "Google-Test/1.0" },
                         { player: retried[4], name: "YouTube VR", ua: "com.google.android.apps.youtube.vr/1.50.45 (Linux; U; Android 10; en_US) gzip" },
                         { player: retried[5], name: "YouTube Web", ua: WEB_USER_AGENT },
