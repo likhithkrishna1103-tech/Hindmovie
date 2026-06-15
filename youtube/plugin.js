@@ -1548,6 +1548,12 @@
         if (params.url) {
             var url = params.url;
             if (params.sp && params.s) url = appendQueryParam(url, params.sp, params.s);
+            // Apply n-parameter transformation if present in cipher
+            if (params.n) {
+                url = url.replace(/([&?])n=([^&]+)/, function(m, p1, p2) {
+                    return p1 + "n=" + transformN(p2);
+                });
+            }
             return url;
         }
         return "";
@@ -2023,6 +2029,124 @@
         }
     }
 
+    async function dashVariantStreams(mpdUrl, subtitles, playerUA) {
+        if (!mpdUrl) return [];
+        try {
+            var body = await requestText(mpdUrl, headers({
+                "Accept": "application/dash+xml,application/xml,*/*"
+            }), { noCache: true });
+            return parseDashVariants(body, mpdUrl).map(function (variant) {
+                return buildDashStream(variant, subtitles, playerUA);
+            }).filter(Boolean);
+        } catch (_) {
+            return [];
+        }
+    }
+
+    function parseDashVariants(mpdText, mpdUrl) {
+        var variants = [];
+        try {
+            var baseUrl = mpdUrl.substring(0, mpdUrl.lastIndexOf("/") + 1);
+            
+            // Simple regex-based XML parsing for DASH MPD
+            var periodRegex = /<Period[^>]*>([\s\S]*?)<\/Period>/gi;
+            var periodMatch;
+            while ((periodMatch = periodRegex.exec(mpdText)) !== null) {
+                var periodContent = periodMatch[1];
+                
+                var adaptationSetRegex = /<AdaptationSet[^>]*>([\s\S]*?)<\/AdaptationSet>/gi;
+                var adaptationMatch;
+                while ((adaptationMatch = adaptationSetRegex.exec(periodContent)) !== null) {
+                    var adaptationSet = adaptationMatch[0];
+                    var adaptationContent = adaptationMatch[1];
+                    
+                    var mimeTypeMatch = adaptationSet.match(/mimeType="([^"]+)"/);
+                    var mimeType = mimeTypeMatch ? mimeTypeMatch[1] : "";
+                    var isVideo = mimeType.indexOf("video/") !== -1;
+                    
+                    if (!isVideo) continue;
+                    
+                    var representationRegex = /<Representation[^>]*>([\s\S]*?)<\/Representation>/gi;
+                    var reprMatch;
+                    while ((reprMatch = representationRegex.exec(adaptationContent)) !== null) {
+                        var representation = reprMatch[0];
+                        var reprContent = reprMatch[1];
+                        
+                        var idMatch = representation.match(/id="([^"]+)"/);
+                        var id = idMatch ? idMatch[1] : "";
+                        
+                        var bandwidthMatch = representation.match(/bandwidth="([^"]+)"/);
+                        var bandwidth = bandwidthMatch ? parseInt(bandwidthMatch[1], 10) : 0;
+                        
+                        var widthMatch = representation.match(/width="([^"]+)"/);
+                        var width = widthMatch ? parseInt(widthMatch[1], 10) : 0;
+                        
+                        var heightMatch = representation.match(/height="([^"]+)"/);
+                        var height = heightMatch ? parseInt(heightMatch[1], 10) : 0;
+                        
+                        var codecsMatch = representation.match(/codecs="([^"]+)"/);
+                        var codecs = codecsMatch ? codecsMatch[1] : "";
+                        
+                        // Find BaseURL or SegmentTemplate media
+                        var mediaUrl = "";
+                        var baseUrlMatch = representation.match(/<BaseURL[^>]*>([^<]+)<\/BaseURL>/);
+                        if (baseUrlMatch) {
+                            mediaUrl = baseUrl + baseUrlMatch[1];
+                        } else {
+                            var segmentTemplateMatch = adaptationSet.match(/<SegmentTemplate[^>]*media="([^"]+)"/);
+                            if (segmentTemplateMatch) {
+                                mediaUrl = baseUrl + segmentTemplateMatch[1].replace(/\$[^\$]+\$/g, "");
+                            }
+                        }
+                        
+                        // Also check for SegmentBase/Initialization
+                        var initUrl = "";
+                        var initMatch = adaptationSet.match(/<Initialization[^>]*sourceURL="([^"]+)"/);
+                        if (initMatch) {
+                            initUrl = baseUrl + initMatch[1];
+                        }
+                        
+                        if (isVideo && (mediaUrl || initUrl)) {
+                            var quality = height || 0;
+                            var codecLabel = "";
+                            if (codecs.indexOf("avc1") !== -1 || codecs.indexOf("h264") !== -1) codecLabel = "H264";
+                            else if (codecs.indexOf("hev1") !== -1 || codecs.indexOf("hvc1") !== -1) codecLabel = "H265";
+                            else if (codecs.indexOf("vp09") !== -1 || codecs.indexOf("vp9") !== -1) codecLabel = "VP9";
+                            else if (codecs.indexOf("av01") !== -1) codecLabel = "AV1";
+
+                            variants.push({
+                                url: mediaUrl || initUrl,
+                                quality: quality,
+                                codec: codecLabel,
+                                bandwidth: bandwidth,
+                                codecs: codecs,
+                                mimeType: mimeType,
+                                id: id
+                            });
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.log("[LOG] DASH parse error: " + e);
+        }
+        return variants;
+    }
+
+    function buildDashStream(variant, subtitles, playerUA) {
+        if (!variant || !variant.url) return null;
+        var label = variant.quality ? ("YouTube DASH " + variant.quality + "p") : "YouTube DASH";
+        if (variant.codec) label += " " + variant.codec;
+        var stream = new StreamResult({
+            url: variant.url,
+            source: label,
+            quality: variant.quality || undefined,
+            headers: { "User-Agent": playerUA, "Referer": BASE_URL + "/" }
+        });
+        if (subtitles && subtitles.length) stream.subtitles = subtitles;
+        return stream;
+    }
+
     function mobileClientContext(clientName, clientVersion, visitorData, extra) {
         var client = Object.assign({
             clientName: clientName,
@@ -2444,9 +2568,10 @@
 
     async function androidPlayer(videoId, cpn) {
         var config = await getConfig();
-        var h = mobileJsonHeaders("3", ANDROID_CLIENT_VERSION, androidUserAgent());
+        // Use ANDROID_VR client (clientName: 29) which supports SABR/UMP and returns 1080p+ URLs
+        var h = mobileJsonHeaders("29", "1.65.10", "com.google.android.youtube/1.65.10 (Linux; U; Android 13; en-US) gzip");
         var payload = {
-            context: mobileClientContext("ANDROID", ANDROID_CLIENT_VERSION, config.visitorData || undefined, {
+            context: mobileClientContext("ANDROID_VR", "1.65.10", config.visitorData || undefined, {
                 osName: "Android",
                 osVersion: "13",
                 androidSdkVersion: 33,
@@ -2617,7 +2742,7 @@
 
                 (streaming.adaptiveFormats || []).forEach(function (format) {
                     if (sourceName.indexOf("Android") !== -1) {
-                        console.log("[LOG] " + sourceName + " format " + format.itag + " n: " + (format.n || "None") + " url: " + (format.url ? "Yes" : "No") + " cipher: " + (format.signatureCipher || format.cipher ? "Yes" : "No"));
+                        console.log("[LOG] " + sourceName + " format " + format.itag + " n: " + (format.n || "None") + " url: " + (format.url ? "Yes" : "No") + " cipher: " + (format.signatureCipher || format.cipher ? "Yes" : "No") + " mime: " + (format.mimeType || "none"));
                     }
                     if (itagType(format) === "video-only" || isVideoOnly(format)) {
                         var key = sourceName + "_" + format.itag;
@@ -2633,6 +2758,29 @@
             });
 
             results = results.concat(hlsBundle.streams || []);
+
+            // Also parse Android player's HLS/DASH manifests for additional high-quality streams
+            for (var i = 0; i < allPlayers.length; i++) {
+                var item = allPlayers[i];
+                if (item.name.indexOf("Android") !== -1) {
+                    var p = item.player;
+                    var streaming = p.streamingData || {};
+                    var playerUA = item.ua;
+                    // Parse HLS manifest if available
+                    var hlsUrl = hlsUrlFromPlayer(p);
+                    if (hlsUrl) {
+                        var hlsStreams = await hlsVariantStreams(hlsUrl, subs);
+                        hlsStreams.forEach(function(s) { s.headers["User-Agent"] = playerUA; });
+                        results = results.concat(hlsStreams);
+                    }
+                    // Parse DASH manifest - try dashManifestUrl first, then serverAbrStreamingUrl
+                    var dashUrl = streaming.dashManifestUrl || streaming.serverAbrStreamingUrl || "";
+                    if (dashUrl && !isExpiredStreamUrl(dashUrl)) {
+                        var dashStreams = await dashVariantStreams(dashUrl, subs, playerUA);
+                        results = results.concat(dashStreams);
+                    }
+                }
+            }
 
             var seenUrls = {};
             results = results.filter(function (item) {
