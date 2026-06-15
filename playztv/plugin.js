@@ -77,6 +77,15 @@
     ];
     const PLAYZ_AES_KEY = "bTVLbDVuazR4SzFrTjdwTg==";
     const PLAYZ_AES_IV = "azVLNG5NOG1LbE5MN2wxNQ==";
+    const PLAYZ_PRIMARY_AES_KEY = "Yi8xam1sNW5rNHg1azdwTg==";
+    const PLAYZ_PRIMARY_AES_IV = "MTRuTWs4bU41S2w1S0w3bA==";
+    const AES_JS_URL = "https://cdnjs.cloudflare.com/ajax/libs/aes-js/3.1.2/index.min.js";
+    const PLAYZ_SUBSTITUTION_FROM = "aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ";
+    const PLAYZ_SUBSTITUTION_TO = "fFgGjJkKaApPbBmMoOzZeEnNcCdDrRqQtTvVuUxXhHiIwWyYlLsS";
+    const PLAYZ_SUBSTITUTION_REVERSE = {};
+    for (let index = 0; index < PLAYZ_SUBSTITUTION_TO.length; index++) {
+        PLAYZ_SUBSTITUTION_REVERSE[PLAYZ_SUBSTITUTION_TO[index]] = PLAYZ_SUBSTITUTION_FROM[index];
+    }
     const DEFAULT_PLAYLIST_HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:78.0) Gecko/20100101 Firefox/78.0",
         Accept: "*/*",
@@ -174,6 +183,7 @@
 
     let activeBaseUrl = null;
     let remoteBaseUrlsPromise = null;
+    let aesJsPromise = null;
     let providerCatalogCache = {
         timestamp: 0,
         entries: null
@@ -359,7 +369,11 @@
         };
 
         addUrl(activeBaseUrl);
-        (await fetchRemoteBaseUrls()).forEach(addUrl);
+        try {
+            (await fetchRemoteBaseUrls()).forEach(addUrl);
+        } catch (error) {
+            console.error("Failed to fetch remote base URLs: " + (error && error.message ? error.message : String(error)));
+        }
         addUrl(manifest && manifest.baseUrl);
         DEFAULT_BASE_URLS.forEach(addUrl);
         return urls;
@@ -379,13 +393,165 @@
         return headers;
     }
 
+    function base64DecodeText(value) {
+        const normalized = String(value || "");
+        if (!normalized) return "";
+        
+        if (typeof atob === "function") {
+            return atob(normalized);
+        }
+        if (typeof Buffer !== "undefined") {
+            return Buffer.from(normalized, "base64").toString("utf8");
+        }
+        return "";
+    }
+
+    function base64DecodeBytes(value) {
+        let normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+        while (normalized.length % 4) normalized += "=";
+        try {
+            if (typeof Buffer !== "undefined") return new Uint8Array(Buffer.from(normalized, "base64"));
+        } catch (_) {}
+        const decoded = typeof atob === "function" ? atob(normalized) : "";
+        const bytes = new Uint8Array(decoded.length);
+        for (let index = 0; index < decoded.length; index++) {
+            bytes[index] = decoded.charCodeAt(index) & 255;
+        }
+        return bytes;
+    }
+
+    function bytesToUtf8(bytes) {
+        if (!bytes || !bytes.length) return "";
+        if (typeof TextDecoder !== "undefined") {
+            return new TextDecoder().decode(bytes);
+        }
+        let out = "";
+        for (let index = 0; index < bytes.length; index++) {
+            out += String.fromCharCode(bytes[index]);
+        }
+        try {
+            return decodeURIComponent(escape(out));
+        } catch (_) {
+            return out;
+        }
+    }
+
+    function stripPkcs7(bytes) {
+        if (!bytes || !bytes.length) return bytes || new Uint8Array(0);
+        const pad = bytes[bytes.length - 1];
+        if (!pad || pad > 16 || pad > bytes.length) return bytes;
+        for (let index = bytes.length - pad; index < bytes.length; index++) {
+            if (bytes[index] !== pad) return bytes;
+        }
+        return bytes.slice(0, bytes.length - pad);
+    }
+
+    function decodePlayzSubstitutionPayload(value) {
+        if (!value) return "";
+        
+        let restored = "";
+        for (const char of String(value)) {
+            restored += PLAYZ_SUBSTITUTION_REVERSE[char] || char;
+        }
+        return base64DecodeText(restored);
+    }
+
+    function decryptAesCbcWithNode(dataB64, keyB64, ivB64) {
+        if (typeof Buffer === "undefined" || typeof __crypto__ === "undefined" || !__crypto__.createDecipheriv) {
+            return "";
+        }
+
+        const key = Buffer.from(keyB64, "base64");
+        const iv = Buffer.from(ivB64, "base64");
+        const data = Buffer.from(dataB64, "base64");
+        const algorithm = key.length <= 16 ? "aes-128-cbc" : (key.length <= 24 ? "aes-192-cbc" : "aes-256-cbc");
+        const decipher = __crypto__.createDecipheriv(algorithm, key, iv);
+        return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
+    }
+
+    async function getAesJs() {
+        if (globalThis.aesjs) return globalThis.aesjs;
+        if (!aesJsPromise) {
+            aesJsPromise = (async () => {
+                const response = await fetchText(AES_JS_URL, {
+                    "User-Agent": "Mozilla/5.0",
+                    "Referer": "https://adsflw.xyz/"
+                });
+                const source = extractResponseBody(response);
+                if (!trimToString(source)) throw new Error("Failed to load AES runtime");
+                Function(String(source || ""))();
+                if (!globalThis.aesjs) throw new Error("AES runtime unavailable");
+                return globalThis.aesjs;
+            })();
+        }
+        return aesJsPromise;
+    }
+
+    async function decryptAesCbcWithWebCrypto(dataB64, keyB64, ivB64) {
+        if (!globalThis.crypto || !globalThis.crypto.subtle || typeof globalThis.crypto.subtle.importKey !== "function") {
+            return "";
+        }
+        const keyBytes = base64DecodeBytes(keyB64);
+        const ivBytes = base64DecodeBytes(ivB64);
+        const dataBytes = base64DecodeBytes(dataB64);
+        const imported = await globalThis.crypto.subtle.importKey("raw", keyBytes, { name: "AES-CBC" }, false, ["decrypt"]);
+        const plain = new Uint8Array(await globalThis.crypto.subtle.decrypt({ name: "AES-CBC", iv: ivBytes }, imported, dataBytes));
+        return trimToString(bytesToUtf8(stripPkcs7(plain)));
+    }
+
+    async function decryptAesCbcWithAesJs(dataB64, keyB64, ivB64) {
+        const aesjs = await getAesJs();
+        const keyBytes = base64DecodeBytes(keyB64);
+        const ivBytes = base64DecodeBytes(ivB64);
+        const dataBytes = base64DecodeBytes(dataB64);
+        const cipher = new aesjs.ModeOfOperation.cbc(keyBytes, ivBytes);
+        return trimToString(bytesToUtf8(stripPkcs7(cipher.decrypt(dataBytes))));
+    }
+
+    async function decryptAesCbc(dataB64, keyB64, ivB64) {
+        try {
+            if (globalThis.crypto && typeof globalThis.crypto.decryptAES === "function") {
+                const decrypted = await globalThis.crypto.decryptAES(dataB64, keyB64, ivB64);
+                if (trimToString(decrypted)) return trimToString(decrypted);
+            }
+        } catch (_) {
+            // Continue through the runtime fallbacks below.
+        }
+
+        try {
+            const decrypted = await decryptAesCbcWithWebCrypto(dataB64, keyB64, ivB64);
+            if (trimToString(decrypted)) return decrypted;
+        } catch (_) {}
+
+        try {
+            const decrypted = decryptAesCbcWithNode(dataB64, keyB64, ivB64);
+            if (trimToString(decrypted)) return trimToString(decrypted);
+        } catch (_) {}
+
+        try {
+            const decrypted = await decryptAesCbcWithAesJs(dataB64, keyB64, ivB64);
+            if (trimToString(decrypted)) return decrypted;
+        } catch (_) {}
+
+        return "";
+    }
+
     async function decryptPlayzPayload(body) {
         const raw = trimToString(body);
         if (!raw) return "";
         if (raw.startsWith("{") || raw.startsWith("[") || raw.startsWith("<")) return raw;
 
         try {
-            const decrypted = await crypto.decryptAES(raw.replace(/\s/g, ""), PLAYZ_AES_KEY, PLAYZ_AES_IV);
+            const primaryPayload = decodePlayzSubstitutionPayload(raw.replace(/\s/g, ""));
+            const decrypted = await decryptAesCbc(primaryPayload, PLAYZ_PRIMARY_AES_KEY, PLAYZ_PRIMARY_AES_IV);
+            const normalized = trimToString(decrypted);
+            if (normalized) return normalized;
+        } catch (_) {
+            // Fall back to the older PlayZTV payload format below.
+        }
+
+        try {
+            const decrypted = await decryptAesCbc(raw.replace(/\s/g, ""), PLAYZ_AES_KEY, PLAYZ_AES_IV);
             return trimToString(decrypted);
         } catch (_) {
             return "";
@@ -393,15 +559,35 @@
     }
 
     async function fetchPlayzPayload(url) {
-        const response = await fetchText(url, buildPlayzHeaders(url));
-        if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) {
+        if (!url || typeof url !== "string") {
+            console.error("Invalid URL for fetchPlayzPayload");
             return "";
         }
-        return decryptPlayzPayload(extractResponseBody(response));
+        
+        try {
+            const response = await fetchText(url, buildPlayzHeaders(url));
+            if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) {
+                return "";
+            }
+            return decryptPlayzPayload(extractResponseBody(response));
+        } catch (error) {
+            console.error("Failed to fetch payload from " + url + ": " + (error && error.message ? error.message : String(error)));
+            return "";
+        }
     }
 
     async function fetchPlayzJson(path) {
+        if (!path || typeof path !== "string") {
+            console.error("Invalid path for fetchPlayzJson");
+            return null;
+        }
+        
         const baseUrls = await getBaseUrls();
+        if (!baseUrls || !Array.isArray(baseUrls) || !baseUrls.length) {
+            console.error("No base URLs available for fetchPlayzJson");
+            return null;
+        }
+        
         for (const baseUrl of baseUrls) {
             try {
                 const finalUrl = /^https?:\/\//i.test(path) ? path : `${baseUrl}/${String(path || "").replace(/^\/+/, "")}`;

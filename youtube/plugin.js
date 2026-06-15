@@ -2793,6 +2793,9 @@
                     var key = sourceName + "_" + format.itag;
                     if (seenItags[key]) return;
                     seenItags[key] = true;
+                    if (sourceName.indexOf("Android") !== -1) {
+                        console.log("[LOG] " + sourceName + " muxed format itag=" + format.itag + " quality=" + (format.height || format.qualityLabel || "?") + " mime=" + (format.mimeType || "?"));
+                    }
                     var stream = buildNewPipeStream(format, sourceName, cpn, subs);
                     if (stream) {
                         stream.headers["User-Agent"] = playerUA;
@@ -2805,7 +2808,13 @@
 
                 (streaming.adaptiveFormats || []).forEach(function (format) {
                     if (sourceName.indexOf("Android") !== -1) {
-                        console.log("[LOG] " + sourceName + " format " + format.itag + " n: " + (format.n || "None") + " url: " + (format.url ? "Yes" : "No") + " cipher: " + (format.signatureCipher || format.cipher ? "Yes" : "No") + " mime: " + (format.mimeType || "none"));
+                        console.log("[LOG] " + sourceName + " format " + format.itag + " n: " + (format.n || "None") + " url: " + (format.url ? "Yes" : "No") + " cipher: " + (format.signatureCipher || format.cipher ? "Yes" : "No") + " mime: " + (format.mimeType || "none") + " init: " + (format.initUrl ? "Yes" : "No") + " mediaUrl: " + (format.mediaUrl ? "Yes" : "No") + " indexRange: " + (format.indexRange ? "Yes" : "No") + " initRange: " + (format.initRange ? "Yes" : "No"));
+                    }
+                    if (streaming.dashManifestUrl) {
+                        console.log("[LOG] " + sourceName + " has dashManifestUrl: " + String(streaming.dashManifestUrl).substring(0, 100) + "...");
+                    }
+                    if (streaming.hlsManifestUrl) {
+                        console.log("[LOG] " + sourceName + " has hlsManifestUrl: " + String(streaming.hlsManifestUrl).substring(0, 100) + "...");
                     }
                     if (itagType(format) === "video-only" || isVideoOnly(format)) {
                         var key = sourceName + "_" + format.itag;
