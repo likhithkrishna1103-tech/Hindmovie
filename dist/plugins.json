@@ -40,7 +40,7 @@
   {
     "packageName": "com.igris.repo.anikage",
     "name": "Anikage",
-    "version": 1,
+    "version": 2,
     "baseUrl": "https://anikage.cc",
     "description": "Watch anime with sub/dub from Anikage",
     "authors": [
