@@ -2766,18 +2766,24 @@
                     var p = item.player;
                     var streaming = p.streamingData || {};
                     var playerUA = item.ua;
-                    // Parse HLS manifest if available
+                    // For Android, return DASH manifest FIRST - ExoPlayer handles adaptive streaming natively with audio
+                    var dashUrl = streaming.dashManifestUrl || streaming.serverAbrStreamingUrl || "";
+                    if (dashUrl && !isExpiredStreamUrl(dashUrl)) {
+                        console.log("[LOG] " + item.name + " returning DASH manifest for native Android playback");
+                        // Insert at beginning so it's the first/preferred stream
+                        results.unshift(attachSubtitles(new StreamResult({
+                            url: dashUrl,
+                            source: item.name + " DASH (Adaptive)",
+                            quality: undefined,
+                            headers: { "User-Agent": playerUA, "Referer": BASE_URL + "/" }
+                        }), subs));
+                    }
+                    // Also parse HLS manifest if available (fallback)
                     var hlsUrl = hlsUrlFromPlayer(p);
                     if (hlsUrl) {
                         var hlsStreams = await hlsVariantStreams(hlsUrl, subs);
                         hlsStreams.forEach(function(s) { s.headers["User-Agent"] = playerUA; });
                         results = results.concat(hlsStreams);
-                    }
-                    // Parse DASH manifest - try dashManifestUrl first, then serverAbrStreamingUrl
-                    var dashUrl = streaming.dashManifestUrl || streaming.serverAbrStreamingUrl || "";
-                    if (dashUrl && !isExpiredStreamUrl(dashUrl)) {
-                        var dashStreams = await dashVariantStreams(dashUrl, subs, playerUA);
-                        results = results.concat(dashStreams);
                     }
                 }
             }
