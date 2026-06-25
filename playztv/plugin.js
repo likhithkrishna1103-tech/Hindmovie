@@ -2020,43 +2020,23 @@
                         var streamName = trimToString(link.name) || "Stream " + (i + 1);
                         if (!streamUrl) continue;
 
-                        // Try HLS expansion for m3u8 master playlists
-                        var expanded = false;
-                        if (shouldExpandHlsVariants(streamUrl)) {
-                            try {
-                                const tempChannel = {
-                                    url: streamUrl,
-                                    headers: baseHeaders,
-                                    providerLabel: streamName
-                                };
-                                const hlsVariants = await expandHlsStreams(tempChannel);
-                                if (Array.isArray(hlsVariants) && hlsVariants.length > 0) {
-                                    hlsVariants.forEach(function(v, vi) {
-                                        rankedStreams.push({
-                                            score: 1000 - i + (hlsVariants.length - vi),
-                                            order: i * 10 + vi,
-                                            stream: v
-                                        });
-                                    });
-                                    expanded = true;
-                                }
-                            } catch (_) {}
-                        }
-
-                        if (!expanded) {
-                            const quality = getQualityFromName(streamName);
-                            rankedStreams.push({
-                                score: 1000 - i,
-                                order: i,
-                                stream: createStreamResult(
-                                    { headers: baseHeaders },
-                                    streamName,
-                                    streamUrl,
-                                    baseHeaders,
-                                    quality
-                                )
-                            });
-                        }
+                        // Pass URLs directly — no HLS master expansion.
+                        // Custom providers serve VOD highlights with direct-playable
+                        // HLS URLs. Expanding master playlists into data-URI variants
+                        // breaks on multi-host CDNs (TikTok p16/p19) because MPV's
+                        // HTTP pool rejects cross-host segment requests.
+                        const quality = getQualityFromName(streamName);
+                        rankedStreams.push({
+                            score: 1000 - i,
+                            order: i,
+                            stream: createStreamResult(
+                                { headers: baseHeaders },
+                                streamName,
+                                streamUrl,
+                                baseHeaders,
+                                quality
+                            )
+                        });
                     }
 
                     if (!rankedStreams.length) {
