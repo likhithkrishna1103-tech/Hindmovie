@@ -1075,7 +1075,7 @@
         return channels;
     }
 
-    function createChannelItem(channel, prefixProvider) {
+    function createChannelItem(channel, prefixProvider, itemType) {
         const title = prefixProvider ? `${channel.providerLabel} · ${channel.title}` : channel.title;
         const poster = trimToString(channel.poster) || `https://placehold.co/400x600.png?text=${encodeURIComponent(channel.title)}`;
         const descriptionParts = [channel.providerLabel];
@@ -1087,7 +1087,7 @@
             title,
             url: JSON.stringify(channel),
             posterUrl: poster,
-            type: "livestream",
+            type: itemType || "livestream",
             description: descriptionParts.join(" · ")
         });
     }
@@ -1848,7 +1848,7 @@
                 if (!provider.channels.length) return;
                 if (config && config.merged) {
                     sections[provider.label] = provider.channels.map(function(channel) {
-                        return createChannelItem(channel, false);
+                        return createChannelItem(channel, false, "movie");
                     });
                 } else {
                     var customSections = buildSectionsFromChannels(provider.channels);
@@ -1967,7 +1967,7 @@
                     title: trimToString(channel.title) || "Live Channel",
                     url: urlStr,
                     posterUrl: poster,
-                    type: "livestream",
+                    type: channel.__customProvider ? "movie" : "livestream",
                     description,
                     episodes: [
                         new Episode({
