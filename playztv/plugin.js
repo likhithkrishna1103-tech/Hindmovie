@@ -1764,6 +1764,17 @@
         return score;
     }
 
+    function getQualityFromName(name) {
+        if (!name) return 0;
+        const q = trimToString(name).toLowerCase();
+        if (q.indexOf("4k") !== -1 || q.indexOf("2160") !== -1) return 2160;
+        if (q.indexOf("fhd") !== -1 || q.indexOf("fullhd") !== -1 || q.indexOf("1080") !== -1) return 1080;
+        if (q.indexOf("hd") !== -1) return 720;
+        if (q.indexOf("sd") !== -1 || q.indexOf("480") !== -1) return 480;
+        if (q.indexOf("360") !== -1) return 360;
+        return 0;
+    }
+
     async function expandHlsStreams(channel) {
         if (!channel || !shouldExpandHlsVariants(channel.url)) return [];
 
@@ -2002,21 +2013,52 @@
                         baseHeaders["User-Agent"] = channel.userAgent;
                     }
                     const rankedStreams = [];
-                    links.forEach(function(link, index) {
+
+                    for (let i = 0; i < links.length; i++) {
+                        const link = links[i];
                         var streamUrl = trimToString(link.link);
-                        var streamName = trimToString(link.name) || "Stream " + (index + 1);
-                        if (!streamUrl) return;
-                        rankedStreams.push({
-                            score: 100 - index,
-                            order: index,
-                            stream: {
-                                name: streamName,
-                                url: streamUrl,
-                                headers: baseHeaders,
-                                type: "hls"
-                            }
-                        });
-                    });
+                        var streamName = trimToString(link.name) || "Stream " + (i + 1);
+                        if (!streamUrl) continue;
+
+                        // Try HLS expansion for m3u8 master playlists
+                        var expanded = false;
+                        if (shouldExpandHlsVariants(streamUrl)) {
+                            try {
+                                const tempChannel = {
+                                    url: streamUrl,
+                                    headers: baseHeaders,
+                                    providerLabel: streamName
+                                };
+                                const hlsVariants = await expandHlsStreams(tempChannel);
+                                if (Array.isArray(hlsVariants) && hlsVariants.length > 0) {
+                                    hlsVariants.forEach(function(v, vi) {
+                                        rankedStreams.push({
+                                            score: 1000 - i + (hlsVariants.length - vi),
+                                            order: i * 10 + vi,
+                                            stream: v
+                                        });
+                                    });
+                                    expanded = true;
+                                }
+                            } catch (_) {}
+                        }
+
+                        if (!expanded) {
+                            const quality = getQualityFromName(streamName);
+                            rankedStreams.push({
+                                score: 1000 - i,
+                                order: i,
+                                stream: createStreamResult(
+                                    { headers: baseHeaders },
+                                    streamName,
+                                    streamUrl,
+                                    baseHeaders,
+                                    quality
+                                )
+                            });
+                        }
+                    }
+
                     if (!rankedStreams.length) {
                         return cb({ success: false, errorCode: "STREAM_ERROR", message: "No playable streams found" });
                     }
