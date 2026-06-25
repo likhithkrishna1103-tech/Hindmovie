@@ -18,7 +18,7 @@
     "categories": [
       "Anime"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anisuge.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.anisuge.sky"
   },
   {
     "packageName": "com.igris.repo.anidb",
@@ -35,7 +35,7 @@
     "categories": [
       "Anime"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anidb.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.anidb.sky"
   },
   {
     "packageName": "com.igris.repo.anikage",
@@ -53,7 +53,7 @@
     "categories": [
       "Anime"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anikage.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.anikage.sky"
   },
   {
     "packageName": "com.igris.repo.animedubhindi",
@@ -77,7 +77,7 @@
     "categories": [
       "Anime"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animedubhindi.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.animedubhindi.sky"
   },
   {
     "packageName": "com.igris.repo.animekai",
@@ -111,7 +111,7 @@
     "categories": [
       "Anime"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animekai.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.animekai.sky"
   },
   {
     "packageName": "com.igris.repo.animetsu",
@@ -129,7 +129,7 @@
     "categories": [
       "Anime"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animetsu.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.animetsu.sky"
   },
   {
     "packageName": "com.igris.repo.animewave",
@@ -173,7 +173,7 @@
     "categories": [
       "Anime"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animewave.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.animewave.sky"
   },
   {
     "packageName": "com.igris.repo.castletv",
@@ -192,7 +192,7 @@
       "Movies",
       "Series"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.castletv.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.castletv.sky"
   },
   {
     "packageName": "com.igris.repo.cinestream",
@@ -213,7 +213,7 @@
       "Series",
       "Anime"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.cinestream.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.cinestream.sky"
   },
   {
     "packageName": "com.igris.repo.hdmovie2",
@@ -236,7 +236,7 @@
       "Movies",
       "Series"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.hdmovie2.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.hdmovie2.sky"
   },
   {
     "packageName": "com.igris.repo.heartivetv",
@@ -254,7 +254,7 @@
       "Movies",
       "Series"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.heartivetv.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.heartivetv.sky"
   },
   {
     "packageName": "com.igris.repo.hindmoviez",
@@ -277,7 +277,7 @@
       "Movies",
       "Series"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.hindmoviez.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.hindmoviez.sky"
   },
   {
     "packageName": "com.igris.repo.movierulz",
@@ -299,7 +299,7 @@
     "categories": [
       "Movies"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.movierulz.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.movierulz.sky"
   },
   {
     "packageName": "com.igris.repo.movies4u",
@@ -321,7 +321,7 @@
     "categories": [
       "Movies"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.movies4u.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.movies4u.sky"
   },
   {
     "packageName": "com.igris.repo.netmirror",
@@ -379,7 +379,7 @@
       "Series",
       "Anime"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.netmirror.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.netmirror.sky"
   },
   {
     "packageName": "com.igris.repo.piratexplay",
@@ -398,7 +398,7 @@
       "Movies",
       "Series"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.piratexplay.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.piratexplay.sky"
   },
   {
     "packageName": "com.igris.repo.playeztvliveevents",
@@ -416,7 +416,7 @@
     "categories": [
       "LiveTv"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playeztvliveevents.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.playeztvliveevents.sky"
   },
   {
     "packageName": "com.igris.repo.playztv",
@@ -483,7 +483,7 @@
     "categories": [
       "Livestream"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztv.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.playztv.sky"
   },
   {
     "packageName": "com.igris.repo.youtube",
@@ -527,7 +527,7 @@
     "categories": [
       "Others"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.youtube.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.youtube.sky"
   },
   {
     "packageName": "com.igris.repo.zinkmovies",
@@ -553,6 +553,6 @@
       "Series",
       "Anime"
     ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.zinkmovies.sky"
+    "url": "https://github.com/likhithkrishna1103-tech/Hindmovie.git/dist/com.igris.repo.zinkmovies.sky"
   }
 ]

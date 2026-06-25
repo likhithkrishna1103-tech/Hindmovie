@@ -118,6 +118,14 @@
     const PLAYLIST_CACHE_TTL_MS = 5 * 60 * 1000;
     const PROVIDER_CATALOG_TTL_MS = 5 * 60 * 1000;
 
+    const CUSTOM_CATEGORY_ENTRIES = [
+        {
+            label: "FIFA WC26 Highlights",
+            api: "channels/RklGQSBXQyAyNiBIaWdobGlnaHRzMTc4MTIzMTU1MTMxMw.txt",
+            logo: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQB9Xr6kNvhqZrBtJJXsbecfqarPmb5QIP_IhOOZcvVZg&s=10"
+        }
+    ];
+
     const PLUGIN_CONFIGS = {
         "com.igris.repo.playztvsony": {
             merged: true,
@@ -1232,6 +1240,63 @@
         return Promise.all(config.providers.map((provider) => resolveProviderChannels(provider)));
     }
 
+    async function resolveCustomCategoryChannels(categoryEntry) {
+        try {
+            // Use fetchPlayzJson which resolves baseUrl and feeds back activeBaseUrl
+            const baseUrls = await getBaseUrls();
+            if (!Array.isArray(baseUrls) || !baseUrls.length) {
+                console.error("No base URLs for custom category " + categoryEntry.label);
+                return { label: categoryEntry.label, channels: [] };
+            }
+
+            let data = null;
+            for (var bi = 0; bi < baseUrls.length; bi++) {
+                var candidateUrl = baseUrls[bi] + "/" + categoryEntry.api.replace(/^\//, "");
+                try {
+                    var payload = await fetchPlayzPayload(candidateUrl);
+                    var parsed = safeJsonParse(payload);
+                    if (Array.isArray(parsed) && parsed.length) {
+                        activeBaseUrl = normalizeBaseUrl(baseUrls[bi]);
+                        data = parsed;
+                        break;
+                    }
+                } catch (_) {}
+            }
+            if (!Array.isArray(data) || !data.length) {
+                return { label: categoryEntry.label, channels: [] };
+            }
+
+            const channels = [];
+            for (let index = 0; index < data.length; index++) {
+                const entry = data[index];
+                const channelData = safeJsonParse(trimToString(entry && entry.channel));
+                if (!channelData || channelData.visible === false) continue;
+
+                const name = trimToString(channelData.name) || "Unknown";
+                const logo = trimToString(channelData.logo) || categoryEntry.logo || "";
+                const linksPath = trimToString(channelData.links) || "";
+
+                if (linksPath) {
+                    // Store just the path — loadStreams will resolve via fetchPlayzJson
+                    channels.push({
+                        title: name,
+                        group: categoryEntry.label,
+                        providerLabel: categoryEntry.label,
+                        url: linksPath,
+                        logo: logo,
+                        poster: logo,
+                        __customProvider: true
+                    });
+                }
+            }
+
+            return { label: categoryEntry.label, channels: channels };
+        } catch (error) {
+            console.error("Failed to resolve custom category " + categoryEntry.label + ": " + (error && error.message ? error.message : String(error)));
+            return { label: categoryEntry.label, channels: [] };
+        }
+    }
+
     function getStreamHost(url) {
         try {
             return new URL(String(url || "")).hostname.toLowerCase();
@@ -1773,6 +1838,29 @@
                 });
             }
 
+            // Resolve custom categories (FIFA WC26 Highlights etc.)
+            const customResults = await Promise.all(
+                CUSTOM_CATEGORY_ENTRIES.map(function(entry) {
+                    return resolveCustomCategoryChannels(entry);
+                })
+            );
+            customResults.forEach(function(provider) {
+                if (!provider.channels.length) return;
+                if (config && config.merged) {
+                    sections[provider.label] = provider.channels.map(function(channel) {
+                        return createChannelItem(channel, false);
+                    });
+                } else {
+                    var customSections = buildSectionsFromChannels(provider.channels);
+                    Object.keys(customSections).forEach(function(sectionName) {
+                        if (!sections[sectionName]) sections[sectionName] = [];
+                        customSections[sectionName].forEach(function(item) {
+                            sections[sectionName].push(item);
+                        });
+                    });
+                }
+            });
+
             const availableSections = Object.keys(sections).filter((sectionName) => Array.isArray(sections[sectionName]) && sections[sectionName].length);
             if (!availableSections.length) {
                 return cb({
@@ -1837,6 +1925,25 @@
                 });
             });
 
+            // Also search within custom categories (FIFA WC26 Highlights etc.)
+            const customResults = await Promise.all(
+                CUSTOM_CATEGORY_ENTRIES.map(function(entry) {
+                    return resolveCustomCategoryChannels(entry);
+                })
+            );
+            customResults.forEach(function(provider) {
+                provider.channels.forEach(function(channel) {
+                    const haystack = [
+                        channel.title,
+                        channel.group,
+                        channel.providerLabel
+                    ].filter(Boolean).join(" ").toLowerCase();
+                    if (haystack.includes(loweredQuery)) {
+                        results.push(createChannelItem(channel, false));
+                    }
+                });
+            });
+
             Analytics.logEvent('playztv_search', {});
             cb({ success: true, data: results });
         } catch (_) {
@@ -1885,6 +1992,43 @@
     async function loadStreams(urlStr, cb) {
         try {
             const channel = JSON.parse(urlStr);
+
+            // Handle custom provider channels (FIFA WC26 Highlights etc.)
+            if (channel.__customProvider) {
+                const links = await fetchPlayzJson(channel.url);
+                if (Array.isArray(links) && links.length) {
+                    const baseHeaders = mergeHeaders({}, channel.headers || {});
+                    if (trimToString(channel.userAgent) && !baseHeaders["User-Agent"]) {
+                        baseHeaders["User-Agent"] = channel.userAgent;
+                    }
+                    const rankedStreams = [];
+                    links.forEach(function(link, index) {
+                        var streamUrl = trimToString(link.link);
+                        var streamName = trimToString(link.name) || "Stream " + (index + 1);
+                        if (!streamUrl) return;
+                        rankedStreams.push({
+                            score: 100 - index,
+                            order: index,
+                            stream: {
+                                name: streamName,
+                                url: streamUrl,
+                                headers: baseHeaders,
+                                type: "hls"
+                            }
+                        });
+                    });
+                    if (!rankedStreams.length) {
+                        return cb({ success: false, errorCode: "STREAM_ERROR", message: "No playable streams found" });
+                    }
+                    rankedStreams.sort(function(left, right) {
+                        return right.score - left.score || left.order - right.order;
+                    });
+                    Analytics.logEvent('playztv_loadstreams', {});
+                    return cb({ success: true, data: rankedStreams.map(function(e) { return e.stream; }) });
+                }
+                return cb({ success: false, errorCode: "STREAM_ERROR", message: "No playable streams found for " + (channel.title || "this channel") });
+            }
+
             const baseHeaders = mergeHeaders({}, channel.headers || {});
             if (trimToString(channel.userAgent) && !baseHeaders["User-Agent"]) {
                 baseHeaders["User-Agent"] = channel.userAgent;
