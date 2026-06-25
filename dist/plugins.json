@@ -421,7 +421,7 @@
   {
     "packageName": "com.igris.repo.playztv",
     "name": "PlayZTV",
-    "version": 11,
+    "version": 12,
     "baseUrl": "https://adsflw.xyz",
     "providers": [
       {
