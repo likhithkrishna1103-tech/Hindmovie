@@ -64,7 +64,7 @@
 
     const DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
 
-    const DEFAULT_DOMAIN = "https://hindmoviez.icu";
+    const DEFAULT_DOMAIN = "https://hindmovie.icu";
 
     const SKIP_PATTERNS = [
         /t\.me\//i, /telegram\./i, /facebook\.com/i, /instagram\.com/i,
