@@ -259,7 +259,7 @@
   {
     "packageName": "com.igris.repo.hindmoviez",
     "name": "HindMoviez",
-    "version": 11,
+    "version": 12,
     "baseUrl": "https://hindmoviez.to",
     "description": "Trending movies and series, quickly.",
     "authors": [
@@ -279,24 +279,8 @@
     ],
     "domains": [
       {
-        "name": "hindmoviez.to",
-        "url": "https://hindmoviez.to"
-      },
-      {
-        "name": "hindmoviez.cafe",
-        "url": "https://hindmoviez.cafe"
-      },
-      {
-        "name": "hindmoviez.com",
-        "url": "https://hindmoviez.com"
-      },
-      {
-        "name": "hindmoviez.net",
-        "url": "https://hindmoviez.net"
-      },
-      {
-        "name": "hindmoviez.in",
-        "url": "https://hindmoviez.in"
+        "name": "hindmoviez.icu",
+        "url": "https://hindmoviez.icu"
       }
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.hindmoviez.sky"
