@@ -259,8 +259,8 @@
   {
     "packageName": "com.igris.repo.hindmoviez",
     "name": "HindMoviez",
-    "version": 12,
-    "baseUrl": "https://hindmoviez.to",
+    "version": 13,
+    "baseUrl": "https://hindmovie.icu",
     "description": "Trending movies and series, quickly.",
     "authors": [
       "IGRIS"
@@ -279,8 +279,8 @@
     ],
     "domains": [
       {
-        "name": "hindmoviez.icu",
-        "url": "https://hindmoviez.icu"
+        "name": "hindmovie.icu",
+        "url": "https://hindmovie.icu"
       }
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.hindmoviez.sky"
