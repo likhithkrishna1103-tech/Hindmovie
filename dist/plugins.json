@@ -259,8 +259,8 @@
   {
     "packageName": "com.igris.repo.hindmoviez",
     "name": "HindMoviez",
-    "version": 10,
-    "baseUrl": "https://example.com",
+    "version": 11,
+    "baseUrl": "https://hindmoviez.to",
     "description": "Trending movies and series, quickly.",
     "authors": [
       "IGRIS"
@@ -276,6 +276,28 @@
     "categories": [
       "Movies",
       "Series"
+    ],
+    "domains": [
+      {
+        "name": "hindmoviez.to",
+        "url": "https://hindmoviez.to"
+      },
+      {
+        "name": "hindmoviez.cafe",
+        "url": "https://hindmoviez.cafe"
+      },
+      {
+        "name": "hindmoviez.com",
+        "url": "https://hindmoviez.com"
+      },
+      {
+        "name": "hindmoviez.net",
+        "url": "https://hindmoviez.net"
+      },
+      {
+        "name": "hindmoviez.in",
+        "url": "https://hindmoviez.in"
+      }
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.hindmoviez.sky"
   },
@@ -304,7 +326,7 @@
   {
     "packageName": "com.igris.repo.movies4u",
     "name": "Movies4U",
-    "version": 24,
+    "version": 25,
     "baseUrl": "https://new2.movies4u.style",
     "description": "Movie picks with straightforward stream links.",
     "authors": [
@@ -320,6 +342,12 @@
     ],
     "categories": [
       "Movies"
+    ],
+    "domains": [
+      {
+        "name": "movies4u.style (Primary)",
+        "url": "https://new2.movies4u.style"
+      }
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.movies4u.sky"
   },
