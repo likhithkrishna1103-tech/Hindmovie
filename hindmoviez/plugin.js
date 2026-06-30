@@ -1,4 +1,4 @@
-(function () {
+(function() {
     function base64Decode(str) {
         var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         var output = "";
@@ -58,19 +58,13 @@
     Analytics.init();
 
     const DEBUG = false;
-    function log(...a)  { if (DEBUG) console.log("[HMZ]", ...a); }
+    function log(...a) { if (DEBUG) console.log("[HMZ]", ...a); }
     function warn(...a) { if (DEBUG) console.warn("[HMZ WARN]", ...a); }
-    function err(...a)  { console.error("[HMZ ERR]", ...a); }
+    function err(...a) { console.error("[HMZ ERR]", ...a); }
 
-    const DOMAINS_URL  = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
+    const DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
 
-    const FALLBACK_DOMAINS = [
-        "https://hindmoviez.to",
-        "https://hindmoviez.cafe",
-        "https://hindmoviez.com",
-        "https://hindmoviez.net",
-        "https://hindmoviez.in"
-    ];
+    const DEFAULT_DOMAIN = "https://hindmoviez.icu";
 
     const SKIP_PATTERNS = [
         /t\.me\//i, /telegram\./i, /facebook\.com/i, /instagram\.com/i,
@@ -87,7 +81,7 @@
     const httpCache = new Map();
     const inFlightGets = new Map();
     const streamCache = new Map();
-    const siteDomains = new Set(FALLBACK_DOMAINS.map(getOrigin));
+    const siteDomains = new Set([getOrigin(DEFAULT_DOMAIN)]);
 
     let cachedMainUrl = null;
     let cachedMainUrlAt = 0;
@@ -528,28 +522,22 @@
         if (!force && resolvingMainUrl) return resolvingMainUrl;
 
         resolvingMainUrl = (async () => {
-            const candidates = [];
+            let domain = null;
             try {
                 const res = await fetchWithRetry(DOMAINS_URL, { attempts: 2, ttl: DOMAIN_CACHE_TTL, force });
                 const d = JSON.parse(res.body);
-                const c = d.hindmoviez || d.hindmoviez_url;
-                if (c) candidates.push(c);
+                domain = d.hindmoviez || d.hindmoviez_url || null;
             } catch (e) {
                 err("domains.json:", e.message);
             }
 
-            candidates.push(...FALLBACK_DOMAINS);
-            for (const domain of unique(candidates)) {
-                if (await isHealthyDomain(domain)) {
-                    cachedMainUrl = domain.replace(/\/$/, "");
-                    cachedMainUrlAt = Date.now();
-                    siteDomains.add(getOrigin(cachedMainUrl));
-                    return cachedMainUrl;
-                }
+            if (!domain) {
+                domain = DEFAULT_DOMAIN;
             }
 
-            cachedMainUrl = FALLBACK_DOMAINS[0];
+            cachedMainUrl = domain.replace(/\/$/, "");
             cachedMainUrlAt = Date.now();
+            siteDomains.add(getOrigin(cachedMainUrl));
             return cachedMainUrl;
         })();
 
@@ -561,9 +549,6 @@
     }
 
     async function getMainUrl() {
-        if (typeof manifest !== "undefined" && manifest.baseUrl) {
-            return manifest.baseUrl.replace(/\/$/, "");
-        }
         return resolveMainUrl(false);
     }
 
@@ -985,7 +970,7 @@
                     try {
                         const epListRes = await siteRequest(season.episodeListUrl, { attempts: 2, ttl: HTTP_CACHE_TTL });
                         const epListHtml = epListRes.body;
-                        
+
                         const epRe = /<h3[^>]*>\s*<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
                         let epM;
                         const epList = [];
@@ -1092,7 +1077,7 @@
                                 links.push(link.href);
                             }
                         }
-                        
+
                         const signedLinks = [];
                         await pooledMap(links, 6, async (linkHref) => {
                             const signed = await signHshareUrl(linkHref);
