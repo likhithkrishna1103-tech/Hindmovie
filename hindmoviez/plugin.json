@@ -1,22 +1,29 @@
 {
-    "packageName":  "com.igris.repo.hindmoviez",
-    "name":  "HindMoviez",
-    "version":  10,
-    "baseUrl":  "https://example.com",
-    "description":  "Trending movies and series, quickly.",
-    "authors":  [
-                    "IGRIS"
-                ],
-    "languages":  [
-                      "hi",
-                      "en",
-                      "ta",
-                      "te",
-                      "ml",
-                      "kn"
-                  ],
-    "categories":  [
-                       "Movies",
-                       "Series"
-                   ]
+    "packageName": "com.igris.repo.hindmoviez",
+    "name": "HindMoviez",
+    "version": 11,
+    "baseUrl": "https://hindmoviez.to",
+    "description": "Trending movies and series, quickly.",
+    "authors": [
+        "IGRIS"
+    ],
+    "languages": [
+        "hi",
+        "en",
+        "ta",
+        "te",
+        "ml",
+        "kn"
+    ],
+    "categories": [
+        "Movies",
+        "Series"
+    ],
+    "domains": [
+        { "name": "hindmoviez.to", "url": "https://hindmoviez.to" },
+        { "name": "hindmoviez.cafe", "url": "https://hindmoviez.cafe" },
+        { "name": "hindmoviez.com", "url": "https://hindmoviez.com" },
+        { "name": "hindmoviez.net", "url": "https://hindmoviez.net" },
+        { "name": "hindmoviez.in", "url": "https://hindmoviez.in" }
+    ]
 }

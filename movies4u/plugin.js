@@ -60,7 +60,7 @@
     "use strict";
 
     var DEFAULT_BASE_URL = "https://new2.movies4u.style";
-    var DOMAINS_URL = "https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json";
+    var DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
     var TMDB_WORKER_API = "https://api.themoviedb.org/3";
     var TMDB_FALLBACK_API = "https://wild-surf-4a0d.phisher1.workers.dev";
     var TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original";
@@ -428,7 +428,7 @@
 
     function defaultHeaders(extra) {
         return Object.assign({
-            "Cookie": "xla=s4t",
+            "Cookie": "xla=s4t; ext_name=ojplmecpdpgccookcobabopnaifgidhf; cf_clearance=t8e4FnYNVLq5mnSM3STcq978u7YyAaAb_WiqmVmXkcI-1773985249-1.2.1.1-Sg.2ExY1ScnsVHPQ0nj5jSQ7aKuFzBaPOPn8WRH5i0JYxUTrGXNrowzFsl36zUeK9irU7RqVsRTLF9DoM25Rz1tyFLiGaVK6WlxZLkOyr0_xyAduok9mNr3ilfnSXx1FT6.g9jo4m2cAKY.AFbvLZ8AB.8VgL0Wv4BTn5EBGcKQo4s.grQTQ.Bd58bFWF0CQRYgxD0O2PrfIoveenO8wCQMqQ_R9h22MKBQdBqqLCgk",
             "User-Agent": "Mozilla/5.0"
         }, extra || {});
     }
@@ -495,6 +495,9 @@
     }
 
     function getMainUrl() {
+        if (typeof manifest !== "undefined" && manifest.baseUrl) {
+            return Promise.resolve(manifest.baseUrl.replace(/\/$/, ""));
+        }
         if (domainCache) return Promise.resolve(domainCache);
 
         return getJson(DOMAINS_URL, defaultHeaders()).catch(function () {
@@ -1034,7 +1037,7 @@
         if (/\/cdn-cgi\/challenge-platform\/|\/drive\/admin(?:[/?#]|$)|\/login(?:[/?#]|$)|t\.me\/|telegram|tinyurl\.com\/|winexch\.com/i.test(value)) return false;
         if (isDirectMediaUrl(value)) return true;
         if (looksLikeGoogleDriveUrl(value)) return true;
-        return /hubcloud\.|hubdrive\.|gamerxyt\.com\/hubcloud\.php|gdfli?x|gdlink|gofile\.io|m4ulinks\.com|filesdl\.|filepress\.|filebee|pixeldrain|buzzserver|streamtape|mediafire\.com|1fichier\.com|megaup\.net|multiup|validate\.multiup2\.workers\.dev|mdrive\.ink\/|vcloud\.zip|fastdl\.zip|instant\.busycdn\.xyz|rest\.awscdn\.rest|diskcdn/i.test(value);
+        return /hubcloud\.|hubdrive\.|gamerxyt\.com\/hubcloud\.php|gdfli?x|gdlink|gofile\.io|m4ulinks\.com|filesdl\.|filepress\.|filebee|pixeldrain|buzzserver|streamtape|mediafire\.com|1fichier\.com|megaup\.net|multiup|validate\.multiup2\.workers\.dev|mdrive\.ink\/|vcloud\.zip|fastdl\.zip|instant\.busycdn\.xyz|rest\.awscdn\.rest|diskcdn|shikshakdaak/i.test(value);
     }
 
     function isIgnoredAnchorLink(url) {
@@ -1044,7 +1047,7 @@
     function isRawExtractorCandidate(url) {
         var value = String(url || "");
         if (!/^https?:\/\//i.test(value) || isIgnoredAnchorLink(value)) return false;
-        return /m4ulinks\.com|filesdl\.|hubcloud\.|gamerxyt\.com\/hubcloud\.php|hubdrive\.|gdfli?x|gdlink|filepress\.|filebee|gofile\.io|mdrive\.ink\/|vcloud\.zip|fastdl\.zip|multiup|validate\.multiup2\.workers\.dev/i.test(value);
+        return /m4ulinks\.com|filesdl\.|hubcloud\.|gamerxyt\.com\/hubcloud\.php|hubdrive\.|gdfli?x|gdlink|filepress\.|filebee|gofile\.io|mdrive\.ink\/|vcloud\.zip|fastdl\.zip|multiup|validate\.multiup2\.workers\.dev|shikshakdaak/i.test(value);
     }
 
     function isWrapperOnlyExtractor(url) {
@@ -1812,7 +1815,7 @@
         if (looksLikeGoogleDriveUrl(url)) return resolveGoogleDrive(url);
         if (/m4ulinks\.com/i.test(url)) return withTimeout(resolveM4ulinks(url), 20000, "M4ULinks");
         if (/filesdl\./i.test(url)) return withTimeout(resolveFilesdl(url), 20000, "FilesDL");
-        if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php/i.test(url)) return withTimeout(resolveHubCloudWithFallback(url, refererLabel || "HubCloud"), 25000, "HubCloud");
+        if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php|shikshakdaak/i.test(url)) return withTimeout(resolveHubCloudWithFallback(url, refererLabel || "HubCloud"), 25000, "HubCloud");
         if (/hubdrive\./i.test(url)) return withTimeout(resolveHubDrive(url), 20000, "HubDrive");
         if (/filepress\.|filebee/i.test(url)) return withTimeout(resolveFilepress(url), 25000, "Filepress");
         if (/gdfli?x|gdlink/i.test(url)) return withTimeout(resolveGdflix(url), 25000, "GDFlix");
@@ -2007,6 +2010,7 @@
                         posterUrl: poster,
                         bannerUrl: bannerUrl,
                         logoUrl: logoUrl || undefined,
+                        logo: logoUrl || undefined,
                         type: "movie",
                         description: description,
                         year: year ? Number(year) : undefined,
@@ -2071,6 +2075,7 @@
                     posterUrl: poster,
                     bannerUrl: bannerUrl,
                     logoUrl: logoUrl || undefined,
+                    logo: logoUrl || undefined,
                     type: type,
                     description: description,
                     year: year ? Number(year) : undefined,

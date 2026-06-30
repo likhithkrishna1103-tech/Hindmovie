@@ -65,6 +65,7 @@
     const DOMAINS_URL  = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
 
     const FALLBACK_DOMAINS = [
+        "https://hindmoviez.to",
         "https://hindmoviez.cafe",
         "https://hindmoviez.com",
         "https://hindmoviez.net",
@@ -185,10 +186,118 @@
     }
 
     function cleanTitle(raw) {
-        return (raw || "")
-            .replace(/\b(480p|720p|1080p|4K|HDRip|BluRay|WEBRip|WEB-DL|DVDRip|HEVC|x264|x265|AAC|DD5\.1|ESub)\b/gi, "")
-            .replace(/\s{2,}/g, " ")
-            .trim() || "Unknown";
+        if (!raw) return "";
+        const match = raw.match(/S(\d+)[Ee](\d+)(?:-(\d+))?/i);
+        if (!match) {
+            return raw
+                .replace(/\b(480p|720p|1080p|4K|HDRip|BluRay|WEBRip|WEB-DL|DVDRip|HEVC|x264|x265|AAC|DD5\.1|ESub)\b/gi, "")
+                .replace(/\s{2,}/g, " ")
+                .trim() || "Unknown";
+        }
+        const season = parseInt(match[1], 10);
+        const epStart = parseInt(match[2], 10);
+        const epEnd = match[3] ? parseInt(match[3], 10) : null;
+        const showName = raw.substring(0, match.index).trim();
+        const episodes = epEnd !== null ? `Episodes ${epStart}–${epEnd}` : `Episode ${epStart}`;
+        return `${showName} Season ${season} | ${episodes}`;
+    }
+
+    const SECRET = "5e96085c56e0f54eda657790ac58d19b271479c504367fc9e6a6c33f1f824e6b";
+
+    function hmacSha256(keyStr, dataStr) {
+        function strToWords(str) {
+            const words = [];
+            for (let i = 0; i < str.length; i++) {
+                words[i >> 2] |= (str.charCodeAt(i) & 0xff) << (24 - (i % 4) * 8);
+            }
+            return words;
+        }
+        function wordsToHex(words) {
+            let hex = "";
+            for (let i = 0; i < words.length; i++) {
+                let h = (words[i] >>> 0).toString(16);
+                while (h.length < 8) h = "0" + h;
+                hex += h;
+            }
+            return hex;
+        }
+        function sha256Words(words, lenBits) {
+            const K = [
+                0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+                0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+                0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+                0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+                0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+                0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+                0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+                0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+            ];
+            const H = [
+                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+            ];
+            const totalWords = Math.ceil((lenBits + 65) / 512) * 16;
+            const w = new Array(totalWords).fill(0);
+            for (let i = 0; i < words.length; i++) w[i] = words[i];
+            w[lenBits >> 5] |= 0x80 << (24 - (lenBits % 32));
+            w[totalWords - 1] = lenBits;
+            for (let i = 0; i < totalWords; i += 16) {
+                const chunk = w.slice(i, i + 16);
+                const W = new Array(64);
+                for (let j = 0; j < 16; j++) W[j] = chunk[j];
+                for (let j = 16; j < 64; j++) {
+                    const s0 = ((W[j - 15] >>> 7) | (W[j - 15] << 25)) ^ ((W[j - 15] >>> 18) | (W[j - 15] << 14)) ^ (W[j - 15] >>> 3);
+                    const s1 = ((W[j - 2] >>> 17) | (W[j - 2] << 15)) ^ ((W[j - 2] >>> 19) | (W[j - 2] << 13)) ^ (W[j - 2] >>> 10);
+                    W[j] = (W[j - 16] + s0 + W[j - 7] + s1) | 0;
+                }
+                let a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+                for (let j = 0; j < 64; j++) {
+                    const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+                    const ch = (e & f) ^ (~e & g);
+                    const temp1 = (h + S1 + ch + K[j] + W[j]) | 0;
+                    const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+                    const maj = (a & b) ^ (a & c) ^ (b & c);
+                    const temp2 = (S0 + maj) | 0;
+                    h = g; g = f; f = e; e = (d + temp1) | 0; d = c; c = b; b = a; a = (temp1 + temp2) | 0;
+                }
+                H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+                H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+            }
+            return H;
+        }
+        let keyWords = strToWords(keyStr);
+        if (keyStr.length > 64) {
+            const h = sha256Words(keyWords, keyStr.length * 8);
+            keyWords = h.concat(new Array(8).fill(0));
+        } else {
+            while (keyWords.length < 16) keyWords.push(0);
+        }
+        const ipad = new Array(16);
+        const opad = new Array(16);
+        for (let i = 0; i < 16; i++) {
+            ipad[i] = keyWords[i] ^ 0x36363636;
+            opad[i] = keyWords[i] ^ 0x5c5c5c5c;
+        }
+        const dataWords = strToWords(dataStr);
+        const ipadData = ipad.concat(dataWords);
+        const innerHash = sha256Words(ipadData, 512 + dataStr.length * 8);
+        const opadInnerHash = opad.concat(innerHash);
+        const outerHash = sha256Words(opadInnerHash, 512 + 256);
+        return wordsToHex(outerHash);
+    }
+
+    function parseCredits(jsonText) {
+        if (!jsonText) return [];
+        const root = parseJsonSafe(jsonText);
+        if (!root || !Array.isArray(root.cast)) return [];
+        return root.cast.map(c => {
+            const name = c.name || c.original_name || "";
+            const profile = c.profile_path ? `https://image.tmdb.org/t/p/original${c.profile_path}` : null;
+            return {
+                name,
+                image: profile,
+                role: c.character || null
+            };
+        }).filter(actor => actor.name);
     }
 
     function qualityOf(s) {
@@ -358,15 +467,14 @@
     }
 
     async function signHshareUrl(url) {
-        const match = String(url || "").match(/^https?:\/\/hshare\.ink\/\?id=([^&#]+)/i);
+        const match = String(url || "").match(/^(https?:\/\/[^/]+)\/\?id=([^&#]+)/i);
         if (!match) return url;
-        const rawId = decodeURIComponent(match[1]);
-        const encodedId = toBase64Url(rawId);
-        const res = await postText("https://mvlink.site/wp-admin/admin-ajax.php", `action=hindshare_sign&d=${encodeURIComponent(encodedId)}`, {
-            "content-type": "application/x-www-form-urlencoded; charset=UTF-8"
-        });
-        const signedUrl = parseJsonSafe(res.body || "")?.data?.url;
-        return signedUrl || url;
+        const domain = match[1];
+        const rawId = decodeURIComponent(match[2].replace(/\+/g, "%2B"));
+        const t = Math.floor(Date.now() / 1000);
+        const encoded = toBase64Url(rawId);
+        const s = hmacSha256(SECRET, `${encoded}|${t}`).substring(0, 16);
+        return `${domain}/r.php?d=${encodeURIComponent(encoded)}&t=${t}&s=${s}`;
     }
 
     async function fetchFinal(url, maxHops = 5, opts = {}) {
@@ -453,6 +561,9 @@
     }
 
     async function getMainUrl() {
+        if (typeof manifest !== "undefined" && manifest.baseUrl) {
+            return manifest.baseUrl.replace(/\/$/, "");
+        }
         return resolveMainUrl(false);
     }
 
@@ -531,7 +642,7 @@
             ];
 
             const homeData = {};
-            const results = await pooledMap(sections, 3, async (section) => {
+            const results = await pooledMap(sections, 6, async (section) => {
                 const url = section.path ? `${mainUrl}/${section.path}` : mainUrl;
                 const res = await siteRequest(url, { attempts: 2, ttl: HTTP_CACHE_TTL });
                 return [section.name, parseArticles(res.body, mainUrl)];
@@ -633,6 +744,34 @@
         return unique(nestedResults.flat());
     }
 
+    async function extractGdshine(gdUrl, specs, fileSize) {
+        const id = String(gdUrl).replace(/[?#].*$/, "").split("/").filter(Boolean).pop();
+        if (!id) return [];
+        try {
+            const fileRes = await fetchWithRetry(`https://gdshine.org/api/files/s/${id}`, {
+                attempts: 2,
+                ttl: HTTP_CACHE_TTL,
+                allowBlocked: true
+            });
+            const fileData = parseJsonSafe(fileRes.body)?.data;
+            if (fileData?.id) {
+                const workerRes = await postJson(`https://gdshine.org/api/downloads/${fileData.id}/via-worker`, {});
+                const copyUrl = parseJsonSafe(workerRes.body)?.data?.copyUrl;
+                if (copyUrl && isGoodUrl(copyUrl)) {
+                    return [{
+                        url: copyUrl,
+                        quality: qualityOf(fileData.name),
+                        source: `[Gdshine] ${specs || specsLabel(fileData.name)}${fileSize ? `[${fileSize}]` : ""}`.trim(),
+                        headers: {}
+                    }];
+                }
+            }
+        } catch (e) {
+            err("extract gdshine failed:", e.message);
+        }
+        return [];
+    }
+
     async function extractPageStreams(pageUrl) {
         const key = String(pageUrl);
         const now = Date.now();
@@ -643,27 +782,7 @@
             pageUrl = await signHshareUrl(pageUrl);
 
             if (/gdshine\./i.test(pageUrl)) {
-                const id = String(pageUrl).replace(/[?#].*$/, "").split("/").filter(Boolean).pop();
-                if (id) {
-                    const fileRes = await fetchWithRetry(`https://gdshine.org/api/files/s/${id}`, {
-                        attempts: 2,
-                        ttl: HTTP_CACHE_TTL,
-                        allowBlocked: true
-                    });
-                    const fileData = parseJsonSafe(fileRes.body)?.data;
-                    if (fileData?.id) {
-                        const workerRes = await postJson(`https://gdshine.org/api/downloads/${fileData.id}/via-worker`, {});
-                        const copyUrl = parseJsonSafe(workerRes.body)?.data?.copyUrl;
-                        if (copyUrl && isGoodUrl(copyUrl)) {
-                            return [{
-                                url: copyUrl,
-                                quality: qualityOf(fileData.name),
-                                source: `[Gdshine]${specsLabel(fileData.name)}`.trim(),
-                                headers: {}
-                            }];
-                        }
-                    }
-                }
+                return await extractGdshine(pageUrl);
             }
 
             const { url: resolvedPageUrl, body } = await fetchFinal(pageUrl, 3, { ttl: HTTP_CACHE_TTL, allowBlocked: true });
@@ -687,7 +806,11 @@
                     return score(a.text) - score(b.text);
                 });
 
-            for (const btn of preferredBtns) {
+            const streams = [];
+            const results = await pooledMap(preferredBtns, 4, async (btn) => {
+                if (btn.href.includes("gdshine")) {
+                    return await extractGdshine(btn.href, specs, fileSize);
+                }
                 try {
                     const { url: btnPageUrl, body: btnBody } = await fetchFinal(btn.href, 4, { ttl: HTTP_CACHE_TTL, allowBlocked: true });
                     const heading = stripTags(btnBody.match(/<h2[^>]*>([\s\S]*?)<\/h2>/i)?.[1] || "");
@@ -696,23 +819,35 @@
                         ...parseAnchorsByClass(btnBody, "button", btnPageUrl),
                         ...parseAnchorsContainingButtonClass(btnBody, "button", btnPageUrl)
                     ].map(link => link && isGoodUrl(link.href) ? JSON.stringify(link) : null))
-                        .map(link => JSON.parse(link));
+                        .map(link => JSON.parse(link))
+                        .filter(Boolean);
 
-                    if (finalLinks.length > 0) {
-                        const link = finalLinks[0];
-                        return [{
-                            url: link.href,
-                            quality,
-                            source: `[${link.text || "HCloud"}]${specs}${fileSize ? `[${fileSize}]` : ""}`.trim(),
-                            headers: { Referer: btnPageUrl }
-                        }];
+                    const btnStreams = [];
+                    for (const link of finalLinks) {
+                        if (link.href.includes("gdshine")) {
+                            const gdshineStreams = await extractGdshine(link.href, specs, fileSize);
+                            btnStreams.push(...gdshineStreams);
+                        } else {
+                            btnStreams.push({
+                                url: link.href,
+                                quality,
+                                source: `[${link.text || "HCloud"}] ${specs}${fileSize ? `[${fileSize}]` : ""}`.trim(),
+                                headers: { Referer: btnPageUrl }
+                            });
+                        }
                     }
+                    return btnStreams;
                 } catch (e) {
                     err("extract btn page failed:", e.message);
+                    return [];
                 }
+            });
+
+            for (const r of results) {
+                if (r) streams.push(...r);
             }
 
-            return [];
+            return streams;
         })();
 
         streamCache.set(key, { value: job, expiresAt: now + STREAM_CACHE_TTL });
@@ -770,41 +905,233 @@
             const heading = stripTags(html.match(/<h1[^>]*class="entry-title"[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || "");
             const isSeries = /Season/i.test(heading);
 
+            let imdbId = null;
+            const imdbM = html.match(/href=["'][^"']*(?:imdb\.com)?\/title\/(tt\d+)[^"']*["']/i);
+            if (imdbM) imdbId = imdbM[1];
+
+            let tmdbId = null;
+            let castList = [];
+            let description = null;
+            let background = null;
+            let responseData = null;
+
+            if (imdbId) {
+                const [tmdbFindRes, cinemetaRes] = await Promise.allSettled([
+                    fetchWithRetry(`https://api.themoviedb.org/3/find/${imdbId}?api_key=1865f43a0549ca50d341dd9ab8b29f49&external_source=imdb_id`, { attempts: 2, ttl: HTTP_CACHE_TTL }),
+                    fetchWithRetry(`https://v3-cinemeta.strem.io/meta/${isSeries ? "series" : "movie"}/${imdbId}.json`, { attempts: 2, ttl: HTTP_CACHE_TTL })
+                ]);
+
+                if (tmdbFindRes.status === "fulfilled" && tmdbFindRes.value) {
+                    const findObj = parseJsonSafe(tmdbFindRes.value.body);
+                    if (findObj) {
+                        const movieRes = findObj.movie_results?.[0];
+                        const tvRes = findObj.tv_results?.[0];
+                        tmdbId = movieRes?.id || tvRes?.id || null;
+                    }
+                }
+
+                if (cinemetaRes.status === "fulfilled" && cinemetaRes.value) {
+                    responseData = parseJsonSafe(cinemetaRes.value.body);
+                    if (responseData?.meta) {
+                        description = responseData.meta.description || null;
+                        background = responseData.meta.background || null;
+                    }
+                }
+
+                if (tmdbId) {
+                    try {
+                        const tmdbmetatype = isSeries ? "tv" : "movie";
+                        const creditsRes = await fetchWithRetry(`https://api.themoviedb.org/3/${tmdbmetatype}/${tmdbId}/credits?api_key=1865f43a0549ca50d341dd9ab8b29f49&language=en-US`, { attempts: 2, ttl: HTTP_CACHE_TTL });
+                        castList = parseCredits(creditsRes.body);
+                    } catch (e) {
+                        err("TMDB credits failed:", e.message);
+                    }
+                }
+            }
+
+            const metaDescription = html.match(/<meta[^>]+property="og:description"[^>]+content="([^"]+)"/i)?.[1]
+                || html.match(/<meta[^>]+name="description"[^>]+content="([^"]+)"/i)?.[1];
+
+            let descriptionsFallback = null;
+            const storyMatch = html.match(/<h3[^>]*>.*?Storyline.*?<\/h3>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/i);
+            if (storyMatch) {
+                descriptionsFallback = stripTags(storyMatch[1]);
+            }
+            const plot = description || descriptionsFallback || metaDescription || "";
+
             if (isSeries) {
-                const episodes = await buildSeriesEpisodes(html, mainUrl);
+                const episodeUrlMap = new Map();
+                const h3Re = /<h3[^>]*>([\s\S]*?)<\/h3>/gi;
+                let h3m;
+                const seasons = [];
+                while ((h3m = h3Re.exec(html)) !== null) {
+                    const h3Text = stripTags(h3m[1]);
+                    const seasonMatch = h3Text.match(/Season\s*(\d+)/i);
+                    if (!seasonMatch) continue;
+                    const seasonNumber = parseInt(seasonMatch[1], 10);
+
+                    const indexAfterH3 = h3Re.lastIndex;
+                    const subHtml = html.substring(indexAfterH3, indexAfterH3 + 500);
+                    const aMatch = subHtml.match(/<a[^>]+href=["']([^"']+)["']/i);
+                    if (!aMatch) continue;
+
+                    const episodeListUrl = resolveUrl(aMatch[1], realUrl);
+                    if (episodeListUrl) {
+                        seasons.push({ seasonNumber, episodeListUrl });
+                    }
+                }
+
+                await pooledMap(seasons, 4, async (season) => {
+                    try {
+                        const epListRes = await siteRequest(season.episodeListUrl, { attempts: 2, ttl: HTTP_CACHE_TTL });
+                        const epListHtml = epListRes.body;
+                        
+                        const epRe = /<h3[^>]*>\s*<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+                        let epM;
+                        const epList = [];
+                        while ((epM = epRe.exec(epListHtml)) !== null) {
+                            const href = resolveUrl(epM[1], season.episodeListUrl);
+                            const epText = stripTags(epM[2]);
+                            const epMatch = epText.match(/Episode\s*(\d+)/i)
+                                || epText.match(/\bEp\.?\s*(\d+)/i)
+                                || epText.match(/\bE(\d+)\b/i);
+                            if (epMatch && href) {
+                                epList.push({
+                                    episodeNumber: parseInt(epMatch[1], 10),
+                                    href
+                                });
+                            }
+                        }
+
+                        await pooledMap(epList, 6, async (ep) => {
+                            const signedUrl = await signHshareUrl(ep.href);
+                            if (signedUrl) {
+                                const key = `${season.seasonNumber}_${ep.episodeNumber}`;
+                                if (!episodeUrlMap.has(key)) {
+                                    episodeUrlMap.set(key, []);
+                                }
+                                episodeUrlMap.get(key).push(signedUrl);
+                            }
+                        });
+                    } catch (e) {
+                        err("Failed to fetch episodes for season:", season.seasonNumber, e.message);
+                    }
+                });
+
+                const episodes = [];
+                for (const [key, urls] of episodeUrlMap.entries()) {
+                    const [seasonNumber, episodeNumber] = key.split("_").map(Number);
+                    const uniqueUrls = unique(urls);
+
+                    let epName = `Episode ${episodeNumber}`;
+                    let epPoster = null;
+                    let epDesc = null;
+                    let epReleased = null;
+
+                    if (responseData?.meta?.videos) {
+                        const metaEpisode = responseData.meta.videos.find(
+                            v => v.season === seasonNumber && v.episode === episodeNumber
+                        );
+                        if (metaEpisode) {
+                            epName = metaEpisode.name || metaEpisode.title || epName;
+                            epPoster = metaEpisode.thumbnail || null;
+                            epDesc = metaEpisode.overview || null;
+                            epReleased = metaEpisode.released || null;
+                        }
+                    }
+
+                    episodes.push(new Episode({
+                        name: epName,
+                        url: JSON.stringify(uniqueUrls),
+                        season: seasonNumber,
+                        episode: episodeNumber,
+                        posterUrl: epPoster,
+                        description: epDesc,
+                        date: epReleased
+                    }));
+                }
+                episodes.sort((a, b) => a.season !== b.season ? a.season - b.season : a.episode - b.episode);
+
                 cb({
                     success: true,
                     data: new MultimediaItem({
-                        title,
+                        title: responseData?.meta?.name || title,
                         url: realUrl,
                         posterUrl: poster,
-                        bannerUrl: poster,
+                        bannerUrl: background || poster,
+                        logoUrl: responseData?.meta?.logo || undefined,
                         type: "series",
-                        year: parseInt(releaseYear) || undefined,
-                        score: parseFloat(imdbRating) || undefined,
-                        genres: docGenres,
+                        year: parseInt(releaseYear) || (responseData?.meta?.year ? parseInt(responseData.meta.year) : undefined),
+                        score: parseFloat(imdbRating) || (responseData?.meta?.imdbRating ? parseFloat(responseData.meta.imdbRating) : undefined),
+                        genres: docGenres.length ? docGenres : (responseData?.meta?.genres || []),
+                        actors: castList,
+                        description: plot,
                         episodes
                     })
                 });
                 return;
             }
 
-            const pageUrls = await collectMovieLinks(html, mainUrl);
+            const maxbuttons = [];
+            const mbRe = /<a[^>]+class=["'][^"']*maxbutton[^"']*["'][^>]*?href=["']([^"']+)["']/gi;
+            let mbm;
+            while ((mbm = mbRe.exec(html)) !== null) {
+                maxbuttons.push(resolveUrl(mbm[1], realUrl));
+            }
+
+            const moviePageUrls = [];
+            if (maxbuttons.length > 0) {
+                const nestedResults = await pooledMap(unique(maxbuttons), 4, async (listUrl) => {
+                    try {
+                        const pageUrl = await rewriteToActiveDomain(listUrl);
+                        const { body } = await siteRequest(pageUrl, { attempts: 2, ttl: HTTP_CACHE_TTL });
+                        const content = body.match(/<div[^>]+class="[^"]*entry-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i)?.[1] || body;
+                        const links = [];
+                        for (const link of allHrefs(content, pageUrl)) {
+                            if (isGoodUrl(link.href) && /Get\s+Links/i.test(link.text)) {
+                                links.push(link.href);
+                            }
+                        }
+                        
+                        const signedLinks = [];
+                        await pooledMap(links, 6, async (linkHref) => {
+                            const signed = await signHshareUrl(linkHref);
+                            if (signed) signedLinks.push(signed);
+                        });
+
+                        return signedLinks;
+                    } catch (e) {
+                        err("Failed to collect movie links from:", listUrl, e.message);
+                        return [];
+                    }
+                });
+                moviePageUrls.push(...unique(nestedResults.flat()));
+            }
+
+            if (moviePageUrls.length === 0) {
+                const collected = await collectMovieLinks(html, mainUrl);
+                const signed = await pooledMap(collected, 6, signHshareUrl);
+                moviePageUrls.push(...unique(signed.filter(Boolean)));
+            }
+
             Analytics.logEvent('hindmoviez_load', {});
             cb({
                 success: true,
                 data: new MultimediaItem({
-                    title,
+                    title: responseData?.meta?.name || title,
                     url: realUrl,
                     posterUrl: poster,
-                    bannerUrl: poster,
+                    bannerUrl: background || poster,
+                    logoUrl: responseData?.meta?.logo || undefined,
                     type: "movie",
-                    year: parseInt(releaseYear) || undefined,
-                    score: parseFloat(imdbRating) || undefined,
-                    genres: docGenres,
+                    year: parseInt(releaseYear) || (responseData?.meta?.year ? parseInt(responseData.meta.year) : undefined),
+                    score: parseFloat(imdbRating) || (responseData?.meta?.imdbRating ? parseFloat(responseData.meta.imdbRating) : undefined),
+                    genres: docGenres.length ? docGenres : (responseData?.meta?.genres || []),
+                    actors: castList,
+                    description: plot,
                     episodes: [new Episode({
                         name: "Movie",
-                        url: JSON.stringify(pageUrls),
+                        url: JSON.stringify(unique(moviePageUrls)),
                         season: 1,
                         episode: 1
                     })]
@@ -824,7 +1151,7 @@
                 return;
             }
 
-            const extracted = await pooledMap(pageUrls, 4, extractPageStreams);
+            const extracted = await pooledMap(pageUrls, 6, extractPageStreams);
             const seenUrls = new Set();
             const results = [];
 
