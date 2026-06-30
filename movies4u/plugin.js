@@ -495,36 +495,14 @@
     }
 
     function getMainUrl() {
-        if (typeof manifest !== "undefined" && manifest.baseUrl) {
-            return Promise.resolve(manifest.baseUrl.replace(/\/$/, ""));
-        }
         if (domainCache) return Promise.resolve(domainCache);
 
         return getJson(DOMAINS_URL, defaultHeaders()).catch(function () {
             return {};
         }).then(function (json) {
-            var candidates = uniqueBy([
-                runtimeManifest.baseUrl,
-                DEFAULT_BASE_URL,
-                json && json.movies4u
-            ].map(normalizeBaseUrl).filter(Boolean), function (item) {
-                return item;
-            });
-
-            var current = Promise.resolve("");
-            for (var i = 0; i < candidates.length; i++) {
-                (function (candidate) {
-                    current = current.then(function (resolved) {
-                        if (resolved) return resolved;
-                        return validateMainUrl(candidate);
-                    });
-                })(candidates[i]);
-            }
-
-            return current.then(function (resolved) {
-                domainCache = resolved || normalizeBaseUrl(runtimeManifest.baseUrl) || DEFAULT_BASE_URL;
-                return domainCache;
-            });
+            var domain = (json && json.movies4u) || DEFAULT_BASE_URL;
+            domainCache = normalizeBaseUrl(domain);
+            return domainCache;
         });
     }
 
