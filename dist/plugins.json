@@ -310,7 +310,7 @@
   {
     "packageName": "com.igris.repo.movies4u",
     "name": "Movies4U",
-    "version": 26,
+    "version": 27,
     "baseUrl": "https://new2.movies4u.style",
     "description": "Movie picks with straightforward stream links.",
     "authors": [
