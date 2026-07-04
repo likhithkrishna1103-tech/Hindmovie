@@ -205,7 +205,7 @@
     function getTvType(format, type) {
         var ft = String(format || "").toUpperCase();
         if (ft === "MOVIE" || ft === "SPECIAL") return "movie";
-        if (ft === "OVA" || ft === "ONA") return "other";
+        if (ft === "OVA" || ft === "ONA") return "anime";
         return "series";
     }
 
@@ -247,7 +247,7 @@
                         url: res && (res.url || res.finalUrl) || item.url
                     };
                 });
-            } catch (_) {}
+            } catch (_) { }
         }
         return await Promise.all(items.map(function(item) {
             return http_get(item.url, item.headers || HEADERS).then(function(res) {
@@ -270,99 +270,119 @@
         return {};
     }
 
-    // ========== Categories ==========
-    var CATEGORIES = [
-        [BASE_URL + "/api/media/anime/advanced-search?sort=trending&per_page=25&include_adult=true&page=", "Trending"],
-        [BASE_URL + "/api/media/anime/advanced-search?sort=popularity&per_page=25&page=", "Popular"],
-        [BASE_URL + "/api/media/anime/advanced-search?sort=popularity&per_page=25&include_adult=true&formats=MOVIE&page=", "Popular Movies"],
-        [BASE_URL + "/api/media/anime/advanced-search?sort=popularity&per_page=25&include_adult=true&formats=OVA&page=", "Popular OVAs"],
-        [BASE_URL + "/api/media/anime/advanced-search?sort=updated&per_page=25&page=", "Latest Updates"]
-    ];
-
-    // ========== Data Parsing ==========
-    function animeResultToItem(result, extra) {
-        var title = (result.title && (result.title.english || result.title.romaji)) || "Unknown";
-        var poster = "";
-        if (result.coverImage) {
-            poster = result.coverImage.extraLarge || result.coverImage.large || result.coverImage.medium || "";
-        }
-        var banner = (extra && extra.fanart) || (extra && extra.bannerImage) || result.bannerImage || poster;
-        var logo = (extra && extra.clearLogo) || "";
-        var type = getTvType(result.format, result.type);
-        return new MultimediaItem({
-            title: title,
-            url: BASE_URL + "/api/media/anime/" + result.slug,
-            posterUrl: poster,
-            bannerUrl: banner,
-            logoUrl: logo,
-            type: type,
-            year: result.year || 0,
-            score: result.averageScore ? result.averageScore / 10 : 0,
-            headers: HEADERS
-        });
-    }
-
-    function mergeDetailExtra(item, detailData) {
-        var animeInfo = detailData.anime || {};
-        if (animeInfo.fanart || animeInfo.clearLogo || animeInfo.bannerImage) {
-            var slug = String(item.url || "").split("/").pop();
-            return new MultimediaItem({
-                title: item.title,
-                url: item.url,
-                posterUrl: item.posterUrl,
-                bannerUrl: animeInfo.fanart || animeInfo.bannerImage || item.bannerUrl,
-                logoUrl: animeInfo.clearLogo || "",
-                type: item.type,
-                year: item.year,
-                score: item.score,
-                tags: animeInfo.genres || [],
-                description: animeInfo.description ? stripHtml(animeInfo.description) : "",
-                headers: HEADERS
-            });
-        }
-        return item;
-    }
-
     // ========== Runtime Functions ==========
     async function getHome(cb) {
         try {
-            // Fetch all category listings in a single Dart-parallel batch
-            var catRequests = CATEGORIES.map(function(cat) { return { url: cat[0] + "1" }; });
-            var catResponses = await httpParallelGet(catRequests);
+            // Fetch home data from SvelteKit SSR __data.json
+            var res = await http_get(BASE_URL + "/__data.json", HEADERS);
+            var body = res && (res.body || res.text || "");
+            if (!body) {
+                cb({ success: false, errorCode: "GET_HOME_ERROR", message: "Empty response from __data.json" });
+                return;
+            }
+            var parsed = parseJsonSafe(body);
+            if (!parsed || !parsed.nodes || !parsed.nodes[1] || !parsed.nodes[1].data) {
+                cb({ success: false, errorCode: "GET_HOME_ERROR", message: "Invalid __data.json format" });
+                return;
+            }
 
-            // Parse all category results into items and associate with section names
-            var sectionResults = catResponses.map(function(res, idx) {
-                var data = parseResponseBody(res);
-                var results = (data && data.results) || [];
+            var arr = parsed.nodes[1].data;
+            var mapping = arr[0]; // { trendinganime: 1, seasonalanime: 222, ... }
+
+            // Resolve an anime from the compact SvelteKit array by its index
+            function resolveAnime(index) {
+                var obj = arr[index];
+                if (!obj || typeof obj !== 'object') return null;
+                var slug = arr[obj.slug] || "";
+                if (!slug) return null;
+                var titleObj = arr[obj.title] || {};
+                var title = arr[titleObj.english || titleObj.romaji || titleObj.userPreferred] || "Unknown";
+                var coverObj = arr[obj.coverImage] || {};
+                var poster = arr[coverObj.extraLarge] || arr[coverObj.large] || "";
+                var format = arr[obj.format] || "";
+                var score = arr[obj.averageScore] || 0;
+                var year = arr[obj.year] || 0;
+                return new MultimediaItem({
+                    title: title,
+                    url: BASE_URL + "/api/media/anime/" + slug,
+                    posterUrl: poster,
+                    type: getTvType(format),
+                    year: year,
+                    score: score ? score / 10 : 0,
+                    headers: HEADERS
+                });
+            }
+
+            // Resolve a spotlight item (has extra fields: banner, logo, description, genres)
+            function resolveSpotlight(index) {
+                var obj = arr[index];
+                if (!obj || typeof obj !== 'object') return null;
+                var slug = arr[obj.slug] || "";
+                if (!slug) return null;
+                var titleObj = arr[obj.title] || {};
+                var title = arr[titleObj.english || titleObj.romaji || titleObj.userPreferred] || "Unknown";
+                var coverObj = arr[obj.coverImage] || {};
+                var poster = arr[coverObj.extraLarge] || arr[coverObj.large] || "";
+                var format = arr[obj.format] || "";
+                var score = arr[obj.averageScore] || 0;
+                var banner = arr[obj.bannerImage] || poster;
+                var logo = arr[obj.clearLogo] || "";
+                var desc = obj.description && arr[obj.description] ? stripHtml(arr[obj.description]) : "";
+                var genreIndices = arr[obj.genres] || [];
+                var genres = [];
+                for (var gi = 0; gi < genreIndices.length; gi++) {
+                    var g = arr[genreIndices[gi]];
+                    if (g) genres.push(g);
+                }
+                return new MultimediaItem({
+                    title: title,
+                    url: BASE_URL + "/api/media/anime/" + slug,
+                    posterUrl: poster,
+                    bannerUrl: banner,
+                    logoUrl: logo,
+                    type: getTvType(format),
+                    year: arr[obj.year] || 0,
+                    score: score ? score / 10 : 0,
+                    tags: genres,
+                    description: desc,
+                    headers: HEADERS
+                });
+            }
+
+            // Resolve an array of anime indices into MultimediaItems
+            function resolveSection(sectionName) {
+                var idx = mapping[sectionName];
+                if (idx === undefined) return [];
+                var indices = arr[idx];
+                if (!Array.isArray(indices)) return [];
                 var items = [];
-                results.forEach(function(r) {
-                    var item = animeResultToItem(r);
-                    if (item && item.title) items.push(item);
-                });
-                return { name: CATEGORIES[idx][1], items: items };
-            });
-
-            // Enrich Trending section with detail API data (Dart-parallel)
-            if (sectionResults.length > 0 && sectionResults[0].items.length > 0) {
-                var trendingItems = sectionResults[0].items;
-                var detailReqs = trendingItems.map(function(item) {
-                    var slug = String(item.url || "").split("/").pop();
-                    return { url: BASE_URL + "/api/media/anime/" + slug };
-                });
-                var detailResps = await httpParallelGet(detailReqs);
-                var enriched = [];
-                detailResps.forEach(function(dr, idx) {
-                    var info = parseResponseBody(dr);
-                    var merged = mergeDetailExtra(trendingItems[idx], info);
-                    enriched.push(merged);
-                });
-                sectionResults[0].items = uniqueBy(enriched, function(i) { return i.url; });
+                for (var i = 0; i < indices.length; i++) {
+                    var item = resolveAnime(indices[i]);
+                    if (item) items.push(item);
+                }
+                return items;
             }
 
             var pageData = {};
-            sectionResults.forEach(function(sr) {
-                pageData[sr.name] = sr.items;
-            });
+            pageData["Featured"] = resolveSection("trendinganime");
+            pageData["Popular"] = resolveSection("seasonalanime");
+            pageData["Upcoming"] = resolveSection("upcominganime");
+            pageData["Popular Movies"] = resolveSection("popularmovies");
+            pageData["Favorites"] = resolveSection("favoriteanime");
+
+            // Build Featured section from spotlight items (with banners/logos/descriptions)
+            var spotlightIdx = mapping["spotlightItems"];
+            if (spotlightIdx !== undefined && Array.isArray(arr[spotlightIdx])) {
+                var spotlightIndices = arr[spotlightIdx];
+                var spotlightItems = [];
+                for (var si = 0; si < spotlightIndices.length; si++) {
+                    var slItem = resolveSpotlight(spotlightIndices[si]);
+                    if (slItem) spotlightItems.push(slItem);
+                }
+                if (spotlightItems.length > 0) {
+                    pageData["Trending"] = spotlightItems;
+                }
+            }
 
             Analytics.logEvent('anikage_home', {});
             cb({ success: true, data: pageData });
@@ -373,15 +393,38 @@
 
     async function search(query, cb) {
         try {
-            var url = BASE_URL + "/api/media/anime/advanced-search?per_page=25&page=1&query=" + encodeURIComponent(query);
-            var data = await apiGet(url);
+            // AniList GraphQL search — anikage has no server-side search REST endpoint
+            var anilistQuery = JSON.stringify({
+                query: "query ($search: String, $page: Int, $perPage: Int) { Page(page: $page, perPage: $perPage) { media(search: $search, type: ANIME, sort: SEARCH_MATCH) { id idMal title { romaji english native } coverImage { large extraLarge } format status season averageScore episodes year duration genres isAdult } } }",
+                variables: { search: query, page: 1, perPage: 25 }
+            });
+
+            var res = await http_post(
+                "https://graphql.anilist.co",
+                { "Content-Type": "application/json", "Accept": "application/json", "User-Agent": HEADERS["User-Agent"] },
+                anilistQuery
+            );
+
+            var data = parseJsonSafe(res && (res.body || res.text), {});
+            var mediaList = (data.data && data.data.Page && data.data.Page.media) || [];
+
             var results = [];
-            if (data && data.results && data.results.length) {
-                data.results.forEach(function(r) {
-                    var item = animeResultToItem(r);
-                    if (item && item.title) results.push(item);
-                });
+            for (var i = 0; i < mediaList.length; i++) {
+                var m = mediaList[i];
+                var title = (m.title && (m.title.english || m.title.romaji)) || "Unknown";
+                var poster = m.coverImage ? (m.coverImage.extraLarge || m.coverImage.large || "") : "";
+                results.push(new MultimediaItem({
+                    title: title,
+                    // Use anilistId — /api/media/anime/{id} works on anikage and load() resolves it
+                    url: BASE_URL + "/api/media/anime/" + m.id,
+                    posterUrl: poster,
+                    type: getTvType(m.format),
+                    year: m.year || 0,
+                    score: m.averageScore ? m.averageScore / 10 : 0,
+                    headers: HEADERS
+                }));
             }
+
             Analytics.logEvent('anikage_search', { query: query });
             cb({ success: true, data: results });
         } catch (e) {
@@ -400,7 +443,8 @@
             ];
             var loadResponses = await httpParallelGet(loadRequests);
 
-            var episodesData = parseResponseBody(loadResponses[0]);
+            var episodesResponse = parseResponseBody(loadResponses[0]);
+            var episodesData = episodesResponse.episodes || episodesResponse;
             var infoData = parseResponseBody(loadResponses[1]);
             var animeInfo = infoData.anime || {};
 
@@ -542,7 +586,7 @@
                 epNumber = parseInt(parts[playIdx + 2], 10) || 1;
             }
             isDub = url.indexOf("dub=true") !== -1;
-        } catch (_) {}
+        } catch (_) { }
         return { slug: slug, epNumber: epNumber, isDub: isDub };
     }
 
@@ -557,7 +601,8 @@
 
             // Fetch available servers
             var serversUrl = BASE_URL + "/api/media/anime/" + slug + "/episodes/" + epNumber + "/servers?lang=" + lang;
-            var serversData = await apiGet(serversUrl);
+            var serversResponse = await apiGet(serversUrl);
+            var serversData = serversResponse.servers || serversResponse;
 
             var providers = [];
             if (Array.isArray(serversData) && serversData.length > 0) {
