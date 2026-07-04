@@ -118,8 +118,8 @@
             posterUrl: poster,
             type: guessType(anime.type),
             description: cleanHtml(anime.ani_description || ""),
-            year: anime.ani_year || undefined,
-            score: anime.score || undefined,
+            year: anime.ani_year ? Number(anime.ani_year) : undefined,
+            score: anime.score ? Number(anime.score) : undefined,
             status: getStatus(anime.ani_status),
             tags: genres.length ? genres : undefined,
             trailers: trailerUrl ? [new Trailer({ name: "Trailer", url: trailerUrl })] : undefined,
@@ -281,7 +281,7 @@
             if (episodesData && Array.isArray(episodesData)) {
                 for (var e = 0; e < episodesData.length; e++) {
                     var ep = episodesData[e];
-                    var epNum = ep.ep_id || (e + 1);
+                    var epNum = ep.ep_id ? Number(ep.ep_id) : (e + 1);
                     var epTitle = ep.ep_title ? cleanHtml(ep.ep_title) : ("Episode " + epNum);
                     episodes.push(new Episode({
                         name: epTitle,
@@ -311,8 +311,8 @@
             var title = cleanHtml(animeDetail.title_english || animeDetail.title || "");
             var genres = animeDetail.genres ? animeDetail.genres.split(",").map(function(g) { return g.trim(); }).filter(Boolean) : [];
             var trailerUrl = animeDetail.trailer || undefined;
-            var score = animeDetail.score || undefined;
-            var year = animeDetail.ani_year || undefined;
+            var score = animeDetail.score ? Number(animeDetail.score) : undefined;
+            var year = animeDetail.ani_year ? Number(animeDetail.ani_year) : undefined;
 
             var item = new MultimediaItem({
                 title: title,
