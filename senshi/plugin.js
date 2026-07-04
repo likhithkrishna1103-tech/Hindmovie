@@ -118,8 +118,8 @@
             posterUrl: poster,
             type: guessType(anime.type),
             description: cleanHtml(anime.ani_description || ""),
-            year: anime.ani_year || undefined,
-            score: anime.score || undefined,
+            year: anime.ani_year ? String(anime.ani_year) : undefined,
+            score: anime.score ? String(anime.score) : undefined,
             status: getStatus(anime.ani_status),
             tags: genres.length ? genres : undefined,
             trailers: trailerUrl ? [new Trailer({ name: "Trailer", url: trailerUrl })] : undefined,
@@ -286,8 +286,8 @@
                     episodes.push(new Episode({
                         name: epTitle,
                         url: JSON.stringify({ mal_id: malId, episode: epNum }),
-                        season: 1,
-                        episode: epNum,
+                        season: "1",
+                        episode: String(epNum),
                         posterUrl: absUrl(animeDetail.anime_picture),
                         description: ep.filler ? "Filler" : undefined,
                         headers: { "Referer": BASE_URL + "/" },
@@ -300,8 +300,8 @@
                 episodes.push(new Episode({
                     name: "Episode " + initialEp,
                     url: JSON.stringify({ mal_id: malId, episode: initialEp }),
-                    season: 1,
-                    episode: initialEp,
+                    season: "1",
+                    episode: String(initialEp),
                     posterUrl: absUrl(animeDetail.anime_picture),
                     headers: { "Referer": BASE_URL + "/" },
                     dubStatus: "sub"
@@ -320,8 +320,8 @@
                 posterUrl: absUrl(animeDetail.anime_picture),
                 type: guessType(animeDetail.type),
                 description: cleanHtml(animeDetail.ani_description || ""),
-                year: year,
-                score: score,
+                year: year ? String(year) : undefined,
+                score: score ? String(score) : undefined,
                 status: getStatus(animeDetail.ani_status),
                 tags: genres.length ? genres : undefined,
                 trailers: trailerUrl ? [new Trailer({ name: "Trailer", url: trailerUrl })] : undefined,
@@ -375,7 +375,6 @@
                         streams.push(new StreamResult({
                             url: e.url,
                             source: "Senshi " + status,
-                            quality: 0,
                             headers: streamHeaders
                         }));
                     }
@@ -384,7 +383,6 @@
                         streams.push(new StreamResult({
                             url: e.server2,
                             source: "Senshi " + status + " (Alt)",
-                            quality: 0,
                             headers: streamHeaders
                         }));
                     }
@@ -393,7 +391,6 @@
                         streams.push(new StreamResult({
                             url: e.serverFM,
                             source: "Senshi " + status + " (FM)",
-                            quality: 0,
                             headers: streamHeaders
                         }));
                     }
@@ -402,7 +399,6 @@
                         streams.push(new StreamResult({
                             url: e.download,
                             source: "Senshi " + status + " (DL)",
-                            quality: 0,
                             headers: streamHeaders
                         }));
                     }
