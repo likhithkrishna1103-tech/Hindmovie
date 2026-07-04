@@ -118,8 +118,8 @@
             posterUrl: poster,
             type: guessType(anime.type),
             description: cleanHtml(anime.ani_description || ""),
-            year: anime.ani_year ? String(anime.ani_year) : undefined,
-            score: anime.score ? String(anime.score) : undefined,
+            year: anime.ani_year || undefined,
+            score: anime.score || undefined,
             status: getStatus(anime.ani_status),
             tags: genres.length ? genres : undefined,
             trailers: trailerUrl ? [new Trailer({ name: "Trailer", url: trailerUrl })] : undefined,
@@ -286,8 +286,8 @@
                     episodes.push(new Episode({
                         name: epTitle,
                         url: JSON.stringify({ mal_id: malId, episode: epNum }),
-                        season: "1",
-                        episode: String(epNum),
+                        season: 1,
+                        episode: epNum,
                         posterUrl: absUrl(animeDetail.anime_picture),
                         description: ep.filler ? "Filler" : undefined,
                         headers: { "Referer": BASE_URL + "/" },
@@ -300,8 +300,8 @@
                 episodes.push(new Episode({
                     name: "Episode " + initialEp,
                     url: JSON.stringify({ mal_id: malId, episode: initialEp }),
-                    season: "1",
-                    episode: String(initialEp),
+                    season: 1,
+                    episode: initialEp,
                     posterUrl: absUrl(animeDetail.anime_picture),
                     headers: { "Referer": BASE_URL + "/" },
                     dubStatus: "sub"
@@ -320,15 +320,15 @@
                 posterUrl: absUrl(animeDetail.anime_picture),
                 type: guessType(animeDetail.type),
                 description: cleanHtml(animeDetail.ani_description || ""),
-                year: year ? String(year) : undefined,
-                score: score ? String(score) : undefined,
+                year: year,
+                score: score,
                 status: getStatus(animeDetail.ani_status),
                 tags: genres.length ? genres : undefined,
                 trailers: trailerUrl ? [new Trailer({ name: "Trailer", url: trailerUrl })] : undefined,
                 cast: animeDetail.studios ? [new Actor({ name: cleanHtml(animeDetail.studios), role: "Studio" })] : undefined,
                 recommendations: [],
                 headers: { "Referer": BASE_URL + "/" },
-                syncData: { mal_id: malId },
+                syncData: { mal_id: String(malId) },
                 episodes: episodes
             });
 

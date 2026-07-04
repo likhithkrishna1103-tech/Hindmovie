@@ -639,7 +639,7 @@
                         var sub = sourceData.subtitles[t];
                         if (sub.file) {
                             subtitleTracks.push({
-                                url: PROXY_URL + "/vtt/" + sub.file,
+                                url: PROXY_URL + "/stream/" + sub.file,
                                 label: sub.label || lang
                             });
                         }
