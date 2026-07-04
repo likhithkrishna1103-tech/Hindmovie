@@ -1,14 +1,14 @@
 {
   "packageName": "com.igris.repo.senshi",
   "name": "Senshi",
-  "version": 4,
+  "version": 5,
   "baseUrl": "https://senshi.live",
   "description": "Senshi plugin for ZORO",
   "authors": [
     "Igris"
   ],
   "languages": [
-    "en", "jn"
+    "en", "ja"
   ],
   "categories": [
     "Anime"
