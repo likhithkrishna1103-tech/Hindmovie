@@ -21,23 +21,6 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anisuge.sky"
   },
   {
-    "packageName": "com.igris.repo.anidb",
-    "name": "AniDB",
-    "version": 8,
-    "baseUrl": "https://anidb.app",
-    "description": "AniDB anime streaming plugin - browse, search and stream from anidb.app",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "ja"
-    ],
-    "categories": [
-      "Anime"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anidb.sky"
-  },
-  {
     "packageName": "com.igris.repo.anikage",
     "name": "Anikage",
     "version": 5,
@@ -78,40 +61,6 @@
       "Anime"
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animedubhindi.sky"
-  },
-  {
-    "packageName": "com.igris.repo.animekai",
-    "name": "AnimeKai",
-    "version": 4,
-    "baseUrl": "https://animekai.be",
-    "domains": [
-      {
-        "name": "animekai.be",
-        "url": "https://animekai.be"
-      }
-    ],
-    "providers": [
-      {
-        "id": "english",
-        "name": "Animekai with English titles"
-      },
-      {
-        "id": "japanese",
-        "name": "Animekai with Japanese titles"
-      }
-    ],
-    "description": "AnimeKai anime streaming plugin",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "en",
-      "ja"
-    ],
-    "categories": [
-      "Anime"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animekai.sky"
   },
   {
     "packageName": "com.igris.repo.animetsu",
@@ -500,7 +449,7 @@
   {
     "packageName": "com.igris.repo.senshi",
     "name": "Senshi",
-    "version": 4,
+    "version": 5,
     "baseUrl": "https://senshi.live",
     "description": "Senshi plugin for ZORO",
     "authors": [
@@ -508,7 +457,7 @@
     ],
     "languages": [
       "en",
-      "jn"
+      "ja"
     ],
     "categories": [
       "Anime"
