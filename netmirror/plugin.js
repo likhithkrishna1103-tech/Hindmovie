@@ -1221,7 +1221,8 @@
             var apiBase = await resolveApiUrl();
             var res = await requestGet(apiBase + "/newtv/player.php?id=" + encodeURIComponent(id), buildNewTvHeaders(config.playerOtt, { "Usertoken": "" }));
             var json = parseJsonSafe(res.body, {});
-            if (json.status !== "ok" || !json.video_link) return cb({ success: true, data: [] });
+            if (json.status !== "ok" && json.status !== "otp") return cb({ success: true, data: [] });
+            if (!json.video_link) return cb({ success: true, data: [] });
             var referer = json.referer || apiBase;
             var streamHeaders = {
                 "User-Agent": NEWTV_USER_AGENT,
