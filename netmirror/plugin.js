@@ -1,4 +1,4 @@
-(function () {
+(function() {
     function base64Decode(str) {
         var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         var output = "";
@@ -78,11 +78,11 @@
             playerOtt: "nf",
             prefix: "",
             search: true,
-            poster: function (id) { return IMG_BASE + "/poster/v/" + id + ".jpg"; },
-            background: function (id) { return IMG_BASE + "/poster/v/" + id + ".jpg"; },
-            initialEpisodePoster: function (id) { return IMG_BASE + "/poster/v/150/" + id + ".jpg"; },
-            episodePoster: function (id) { return IMG_BASE + "/epimg/150/" + id + ".jpg"; },
-            suggestPoster: function (id) { return IMG_BASE + "/poster/v/" + id + ".jpg"; }
+            poster: function(id) { return IMG_BASE + "/poster/v/" + id + ".jpg"; },
+            background: function(id) { return IMG_BASE + "/poster/v/" + id + ".jpg"; },
+            initialEpisodePoster: function(id) { return IMG_BASE + "/poster/v/150/" + id + ".jpg"; },
+            episodePoster: function(id) { return IMG_BASE + "/epimg/150/" + id + ".jpg"; },
+            suggestPoster: function(id) { return IMG_BASE + "/poster/v/" + id + ".jpg"; }
         },
         prime: {
             id: "prime",
@@ -91,11 +91,11 @@
             playerOtt: "pv",
             prefix: "/pv",
             search: true,
-            poster: function (id) { return IMG_BASE + "/pv/v/" + id + ".jpg"; },
-            background: function (id) { return IMG_BASE + "/pv/h/" + id + ".jpg"; },
-            initialEpisodePoster: function (id) { return IMG_BASE + "/pv/v/" + id + ".jpg"; },
-            episodePoster: function (id) { return IMG_BASE + "/pvepimg/" + id + ".jpg"; },
-            suggestPoster: function (id) { return IMG_BASE + "/pv/v/" + id + ".jpg"; }
+            poster: function(id) { return IMG_BASE + "/pv/v/" + id + ".jpg"; },
+            background: function(id) { return IMG_BASE + "/pv/h/" + id + ".jpg"; },
+            initialEpisodePoster: function(id) { return IMG_BASE + "/pv/v/" + id + ".jpg"; },
+            episodePoster: function(id) { return IMG_BASE + "/pvepimg/" + id + ".jpg"; },
+            suggestPoster: function(id) { return IMG_BASE + "/pv/v/" + id + ".jpg"; }
         },
         hotstar: {
             id: "hotstar",
@@ -104,11 +104,11 @@
             playerOtt: "hs",
             prefix: "/hs",
             search: true,
-            poster: function (id) { return IMG_BASE + "/hs/v/" + id + ".jpg"; },
-            background: function (id) { return IMG_BASE + "/hs/h/" + id + ".jpg"; },
-            initialEpisodePoster: function (id) { return IMG_BASE + "/hsepimg/150/" + id + ".jpg"; },
-            episodePoster: function (id) { return IMG_BASE + "/hsepimg/" + id + ".jpg"; },
-            suggestPoster: function (id) { return IMG_BASE + "/hs/v/" + id + ".jpg"; }
+            poster: function(id) { return IMG_BASE + "/hs/v/" + id + ".jpg"; },
+            background: function(id) { return IMG_BASE + "/hs/h/" + id + ".jpg"; },
+            initialEpisodePoster: function(id) { return IMG_BASE + "/hsepimg/150/" + id + ".jpg"; },
+            episodePoster: function(id) { return IMG_BASE + "/hsepimg/" + id + ".jpg"; },
+            suggestPoster: function(id) { return IMG_BASE + "/hs/v/" + id + ".jpg"; }
         },
         disney: null,
         marvel: null,
@@ -252,10 +252,10 @@
         var input = String(value || "");
         try {
             if (typeof btoa === "function") return btoa(input);
-        } catch (_) {}
+        } catch (_) { }
         try {
             if (typeof Buffer !== "undefined") return Buffer.from(input, "utf8").toString("base64");
-        } catch (_) {}
+        } catch (_) { }
         return "";
     }
 
@@ -263,16 +263,16 @@
         var input = String(value || "");
         try {
             if (typeof atob === "function") return atob(input);
-        } catch (_) {}
+        } catch (_) { }
         try {
             if (typeof Buffer !== "undefined") return Buffer.from(input, "base64").toString("utf8");
-        } catch (_) {}
+        } catch (_) { }
         return "";
     }
 
     function randomUuid() {
         if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-        return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+        return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c) {
             var r = Math.random() * 16 | 0;
             var v = c === "x" ? r : (r & 3 | 8);
             return v.toString(16);
@@ -286,7 +286,7 @@
 
     function cookieHeader(cookies) {
         var rows = [];
-        Object.keys(cookies || {}).forEach(function (key) {
+        Object.keys(cookies || {}).forEach(function(key) {
             var value = cookies[key];
             if (typeof value !== "undefined" && value !== null && value !== "") rows.push(key + "=" + value);
         });
@@ -296,7 +296,7 @@
     function withHeaders(base, extra) {
         var out = Object.assign({}, base || {});
         extra = extra || {};
-        Object.keys(extra).forEach(function (key) {
+        Object.keys(extra).forEach(function(key) {
             if (typeof extra[key] !== "undefined") out[key] = extra[key];
         });
         return out;
@@ -323,12 +323,12 @@
         var out = {};
         if (!headers) return out;
         if (typeof headers.forEach === "function") {
-            headers.forEach(function (value, key) {
+            headers.forEach(function(value, key) {
                 out[String(key).toLowerCase()] = value;
             });
             return out;
         }
-        Object.keys(headers).forEach(function (key) {
+        Object.keys(headers).forEach(function(key) {
             out[String(key).toLowerCase()] = headers[key];
         });
         return out;
@@ -350,30 +350,30 @@
         var body = await res.text();
         var headersOut = {};
         if (res.headers && res.headers.forEach) {
-            res.headers.forEach(function (value, key) { headersOut[key] = value; });
+            res.headers.forEach(function(value, key) { headersOut[key] = value; });
         }
         return { status: res.status, body: body, headers: headersOut, url: res.url || url };
     }
 
     async function httpParallelGet(requests, fallbackLimit) {
-        var items = Array.isArray(requests) ? requests.filter(function (item) { return item && item.url; }) : [];
+        var items = Array.isArray(requests) ? requests.filter(function(item) { return item && item.url; }) : [];
         if (!items.length) return [];
         if (typeof http_parallel === "function") {
             try {
-                var responses = await http_parallel(items.map(function (item) {
+                var responses = await http_parallel(items.map(function(item) {
                     return {
                         method: "GET",
                         url: item.url,
                         headers: item.headers || {}
                     };
                 }));
-                return items.map(function (item, index) {
+                return items.map(function(item, index) {
                     return normalizeResponse(responses && responses[index], item.url);
                 });
-            } catch (_) {}
+            } catch (_) { }
         }
-        return await mapConcurrent(items, fallbackLimit || HOME_TITLE_CONCURRENCY, function (item) {
-            return requestGet(item.url, item.headers || {}).catch(function () {
+        return await mapConcurrent(items, fallbackLimit || HOME_TITLE_CONCURRENCY, function(item) {
+            return requestGet(item.url, item.headers || {}).catch(function() {
                 return { status: 599, body: "", headers: {}, url: item.url };
             });
         });
@@ -389,19 +389,19 @@
                     body: body || "",
                     redirect: "manual"
                 });
-                var text = await fetchRes.text().catch(function () { return ""; });
+                var text = await fetchRes.text().catch(function() { return ""; });
                 return {
                     status: fetchRes.status,
                     body: text,
                     headers: normalizeHeaders(fetchRes.headers),
                     url: fetchRes.url || url
                 };
-            } catch (_) {}
+            } catch (_) { }
         }
         try {
             res = await http_post(url, headers || {}, body || "");
             if (res && (res.body || res.headers)) return normalizeResponse(res, url);
-        } catch (_) {}
+        } catch (_) { }
         res = await http_post(url, body || "", headers || {});
         return normalizeResponse(res, url);
     }
@@ -413,7 +413,7 @@
                 var ax = await axios.post(url, body || "", {
                     headers: headers || {},
                     maxRedirects: 0,
-                    validateStatus: function () { return true; },
+                    validateStatus: function() { return true; },
                     responseType: "text"
                 });
                 out.push({
@@ -422,7 +422,7 @@
                     headers: normalizeHeaders(ax.headers),
                     url: url
                 });
-            } catch (_) {}
+            } catch (_) { }
         }
         if (typeof fetch === "function") {
             try {
@@ -434,19 +434,19 @@
                 });
                 out.push({
                     status: fetchRes.status,
-                    body: await fetchRes.text().catch(function () { return ""; }),
+                    body: await fetchRes.text().catch(function() { return ""; }),
                     headers: normalizeHeaders(fetchRes.headers),
                     url: fetchRes.url || url
                 });
-            } catch (_) {}
+            } catch (_) { }
         }
         if (typeof http_post === "function") {
             try {
                 out.push(normalizeResponse(await http_post(url, headers || {}, body || ""), url));
-            } catch (_) {}
+            } catch (_) { }
             try {
                 out.push(normalizeResponse(await http_post(url, body || "", headers || {}), url));
-            } catch (_) {}
+            } catch (_) { }
         }
         return out;
     }
@@ -497,11 +497,11 @@
         if (typeof http_post === "function") {
             try {
                 cookie = extractCookie(normalizeResponse(await http_post(MAIN_URL + "/verify.php", headers, body), MAIN_URL + "/verify.php").headers, "t_hash_t");
-            } catch (_) {}
+            } catch (_) { }
             if (!cookie) {
                 try {
                     cookie = extractCookie(normalizeResponse(await http_post(MAIN_URL + "/verify.php", body, headers), MAIN_URL + "/verify.php").headers, "t_hash_t");
-                } catch (_) {}
+                } catch (_) { }
             }
         }
         if (!cookie) {
@@ -753,10 +753,10 @@
             var parsed = parseHlsMaster(masterUrl, res.body);
             if (!parsed) return [];
             var streams = [];
-            parsed.variants.forEach(function (variant) {
+            parsed.variants.forEach(function(variant) {
                 streams.push.apply(streams, buildExpandedHlsStreams(variant, parsed.media, source, headers, referer));
             });
-            return streams.sort(function (a, b) {
+            return streams.sort(function(a, b) {
                 var q = Number(b.quality || 0) - Number(a.quality || 0);
                 if (q) return q;
                 return String(a.source || "").localeCompare(String(b.source || ""));
@@ -781,7 +781,7 @@
 
     function runtimeToMinutes(runtime) {
         var total = 0;
-        String(runtime || "").split(/\s+/).forEach(function (part) {
+        String(runtime || "").split(/\s+/).forEach(function(part) {
             var hours = part.match(/^(\d+)h$/i);
             var minutes = part.match(/^(\d+)m$/i);
             if (hours) total += parseInt(hours[1], 10) * 60;
@@ -802,8 +802,8 @@
 
     function decodeHtml(value) {
         return String(value || "")
-            .replace(/&#(\d+);/g, function (_, n) { return String.fromCodePoint(parseInt(n, 10)); })
-            .replace(/&#x([0-9a-f]+);/gi, function (_, n) { return String.fromCodePoint(parseInt(n, 16)); })
+            .replace(/&#(\d+);/g, function(_, n) { return String.fromCodePoint(parseInt(n, 10)); })
+            .replace(/&#x([0-9a-f]+);/gi, function(_, n) { return String.fromCodePoint(parseInt(n, 16)); })
             .replace(/&nbsp;/gi, " ")
             .replace(/&amp;/gi, "&")
             .replace(/&quot;/gi, "\"")
@@ -997,7 +997,7 @@
             var url = MAIN_URL + "/mobile" + config.prefix + "/episodes.php?s=" + encodeURIComponent(seasonId) + "&series=" + encodeURIComponent(seriesId) + "&t=" + unixTime() + "&page=" + pg;
             var res = await requestGet(url, pageHeaders(config, token, MAIN_URL + "/home"));
             var json = parseJsonSafe(res.body, {});
-            (json.episodes || []).forEach(function (row) {
+            (json.episodes || []).forEach(function(row) {
                 if (row && row.id) episodes.push(buildEpisode(config, title, row));
             });
             if (Number(json.nextPageShow || 0) === 0) break;
@@ -1017,19 +1017,19 @@
 
     async function fetchEpisodePagesFast(config, token, title, seriesId, tasks) {
         var episodes = [];
-        var pending = (tasks || []).filter(function (task) { return task && task.seasonId; });
+        var pending = (tasks || []).filter(function(task) { return task && task.seasonId; });
         var seen = {};
         while (pending.length) {
             var batch = pending.splice(0, EPISODE_PAGE_CONCURRENCY);
-            var requests = batch.map(function (task) {
+            var requests = batch.map(function(task) {
                 var key = String(task.seasonId) + ":" + String(task.page || 1);
                 seen[key] = true;
                 return episodePageRequest(config, token, seriesId, task.seasonId, task.page || 1);
             });
             var responses = await httpParallelGet(requests, EPISODE_PAGE_CONCURRENCY);
-            requests.forEach(function (req, index) {
+            requests.forEach(function(req, index) {
                 var json = parseJsonSafe(responses[index] && responses[index].body, {});
-                (json.episodes || []).forEach(function (row) {
+                (json.episodes || []).forEach(function(row) {
                     if (row && row.id) episodes.push(buildEpisode(config, title, row));
                 });
                 if (Number(json.nextPageShow || 0) !== 0) {
@@ -1048,7 +1048,7 @@
         async function worker() {
             while (index < items.length) {
                 var i = index++;
-                out[i] = await fn(items[i], i).catch(function () { return null; });
+                out[i] = await fn(items[i], i).catch(function() { return null; });
             }
         }
         var workers = [];
@@ -1074,7 +1074,7 @@
                     resolvedApiUrl = decodeBase64String(json.token_hash).replace(/\/+$/, "");
                     if (resolvedApiUrl) return resolvedApiUrl;
                 }
-            } catch (_) {}
+            } catch (_) { }
         }
         throw new Error("Failed to resolve NewTV API base URL");
     }
@@ -1103,9 +1103,9 @@
             var sections = parseHomeSectionsFast(config, res.body);
             if (!Object.keys(sections).length) {
                 var doc = await parseDocument(res.body);
-                qsa(doc, ".tray-container, #top10").forEach(function (section) {
+                qsa(doc, ".tray-container, #top10").forEach(function(section) {
                     var title = nodeText(qs(section, "h2, span")) || "Home";
-                    var items = qsa(section, "article, .top10-post").map(function (node) {
+                    var items = qsa(section, "article, .top10-post").map(function(node) {
                         return mapHomeCard(config, node);
                     }).filter(Boolean);
                     if (items.length) sections[title] = items;
@@ -1127,7 +1127,7 @@
             var url = MAIN_URL + "/mobile" + config.prefix + "/search.php?s=" + encodeURIComponent(query || "") + "&t=" + unixTime();
             var res = await requestGet(url, pageHeaders(config, token, MAIN_URL + "/home"));
             var json = parseJsonSafe(res.body, {});
-            var items = (json.searchResult || []).map(function (row) {
+            var items = (json.searchResult || []).map(function(row) {
                 return mapSearchResult(config, row);
             }).filter(Boolean);
             Analytics.logEvent('netmirror_search', {});
@@ -1164,7 +1164,7 @@
                     episode: 1
                 }));
             } else {
-                rawEpisodes.filter(Boolean).forEach(function (row) {
+                rawEpisodes.filter(Boolean).forEach(function(row) {
                     episodes.push(new Episode(Object.assign({}, buildEpisode(config, title, row), {
                         posterUrl: config.initialEpisodePoster(row.id)
                     })));
@@ -1174,37 +1174,37 @@
                 if (Number(data.nextPageShow || 0) === 1 && data.nextPageSeason) {
                     tasks.push({ seasonId: data.nextPageSeason, page: 2 });
                 }
-                (data.season || []).slice(0, Math.max(0, (data.season || []).length - 1)).forEach(function (season) {
+                (data.season || []).slice(0, Math.max(0, (data.season || []).length - 1)).forEach(function(season) {
                     if (season && season.id) tasks.push({ seasonId: season.id, page: 1 });
                 });
                 var extra = await fetchEpisodePagesFast(config, token, title, id, tasks);
-                extra.forEach(function (ep) {
+                extra.forEach(function(ep) {
                     if (ep) episodes.push(ep);
                 });
             }
 
             var genres = String(data.genre || "").split(",").map(trim).filter(Boolean);
             var cast = String(data.cast || "").split(",").map(trim).filter(Boolean).slice(0, 30).map(buildActor);
-            var recommendations = (data.suggest || []).map(function (row) {
+            var recommendations = (data.suggest || []).map(function(row) {
                 return row && row.id ? buildItem(config, row.id, "", "series", config.suggestPoster(row.id)) : null;
             }).filter(Boolean);
 
             var item = new MultimediaItem({
-                    title: title,
-                    url: payload({ providerId: config.id, id: id, title: title }),
-                    posterUrl: config.poster(id),
-                    bannerUrl: config.background(id),
-                    type: isMovie ? "movie" : "series",
-                    description: trim(data.desc),
-                    year: numberFrom(data.year),
-                    score: parseFloat(String(data.match || "").replace(/IMDb/i, "").trim()) || undefined,
-                    duration: runtimeToMinutes(data.runtime),
-                    contentRating: trim(data.ua) || undefined,
-                    cast: cast,
-                    tags: genres,
-                    recommendations: recommendations,
-                    episodes: episodes
-                });
+                title: title,
+                url: payload({ providerId: config.id, id: id, title: title }),
+                posterUrl: config.poster(id),
+                bannerUrl: config.background(id),
+                type: isMovie ? "movie" : "series",
+                description: trim(data.desc),
+                year: numberFrom(data.year),
+                score: parseFloat(String(data.match || "").replace(/IMDb/i, "").trim()) || undefined,
+                duration: runtimeToMinutes(data.runtime),
+                contentRating: trim(data.ua) || undefined,
+                cast: cast,
+                tags: genres,
+                recommendations: recommendations,
+                episodes: episodes
+            });
             loadCache[loadKey] = { time: Date.now(), data: item };
             Analytics.logEvent('netmirror_load', {});
             cb({ success: true, data: item });
@@ -1230,13 +1230,44 @@
                 "Referer": referer,
                 "Cookie": "hd=on"
             };
-            var streams = await expandNewTvHlsStreams(json.video_link, config.name, streamHeaders, referer);
-            var maxQuality = maxStreamQuality(streams);
-            var adaptiveLabel = maxQuality ? (config.name + " Auto [" + maxQuality + "p]") : (config.name + " Auto");
+            // but the audio MEDIA entries point to the REAL content on s20 CDN.
+            // Extract the real content URL from the audio MEDIA entry with DEFAULT=YES.
+            var realUrl = json.video_link;
+            try {
+                var masterBody = await requestGet(json.video_link, streamHeaders);
+                if (masterBody && masterBody.body && masterBody.body.length > 50) {
+                    var audioMatch = null;
+                    var lines = String(masterBody.body).split("\n");
+                    for (var i = 0; i < lines.length; i++) {
+                        var line = lines[i];
+                        if (line.indexOf("TYPE=AUDIO") >= 0) {
+                            if (audioMatch === null) {
+                                var m = line.match(/URI="([^"]+)"/);
+                                if (m) audioMatch = [null, m[1]];
+                            }
+                            if (line.indexOf("DEFAULT=YES") >= 0) {
+                                var m = line.match(/URI="([^"]+)"/);
+                                if (m) { audioMatch = m; break; }
+                            }
+                        }
+                    }
+                    if (audioMatch) { realUrl = audioMatch[1]; }
+                    // Handle protocol-relative URLs (starting with //)
+                    if (realUrl && realUrl.indexOf("//") === 0) {
+                        realUrl = "https:" + realUrl;
+                    }
+                    // Validate extracted URL - fall back to original if malformed (empty domain)
+                    if (realUrl && realUrl.match(/:\/\/\//)) {
+                        realUrl = json.video_link;
+                    }
+                }
+            } catch (_) { }
             Analytics.logEvent('netmirror_loadstreams', {});
-            cb({ success: true, data: streams.concat([
-                buildDirectHlsStream(json.video_link, adaptiveLabel, maxQuality, streamHeaders)
-            ]) });
+            cb({
+                success: true, data: [
+                    buildDirectHlsStream(realUrl, config.name + " Auto", 0, streamHeaders)
+                ]
+            });
         } catch (e) {
             cb({ success: false, errorCode: "CNCVERSE_STREAMS_FAILED", message: String(e && e.message || e) });
         }
