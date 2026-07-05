@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.Istreamflare",
+  "name": "Istreamflare",
+  "version": 1,
+  "baseUrl": "https://example.com",
+  "description": "Istreamflare plugin for ZORO",
+  "authors": [
+    "Igris"
+  ],
+  "languages": [
+    "en", "ta", "te", "hi", "ml", "kn"
+  ],
+  "categories": [
+    "Movies", "Series"
+  ]
+}

@@ -227,7 +227,7 @@
         try {
             var payload = { page: 1, limit: 50 };
             if (query && query.trim()) {
-                payload.keyword = query.trim();
+                payload.searchTerm = query.trim();
             }
             var json = await httpPostJson(BASE_URL + "/anime/filter", payload);
             var items = [];
