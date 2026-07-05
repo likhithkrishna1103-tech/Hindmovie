@@ -449,7 +449,7 @@
   {
     "packageName": "com.igris.repo.senshi",
     "name": "Senshi",
-    "version": 7,
+    "version": 8,
     "baseUrl": "https://senshi.live",
     "description": "Senshi plugin for ZORO",
     "authors": [
