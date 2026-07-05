@@ -247,35 +247,22 @@
         try {
             var match = url.match(/\/watch\/([^\/]+)(?:\/(\d+))?/);
             if (!match) throw new Error("Invalid senshi URL: " + url);
-            var idOrPublic = match[1];
+            var publicId = match[1];
             var initialEp = parseInt(match[2], 10) || 1;
 
-            var animeDetail = null;
-            var malId = null;
+            // Fetch anime by public_id (the site's native resolution endpoint)
+            var animeData = await httpGetJson(BASE_URL + "/anime/" + encodeURIComponent(publicId));
+            if (!animeData || !animeData.id) throw new Error("Anime not found: " + publicId);
 
-            var searchResult = await httpPostJson(BASE_URL + "/anime/filter", { page: 1, limit: 200 });
-            if (searchResult && searchResult.data && Array.isArray(searchResult.data)) {
-                for (var s = 0; s < searchResult.data.length; s++) {
-                    var candidate = searchResult.data[s];
-                    if (candidate.public_id === idOrPublic || String(candidate.id) === idOrPublic) {
-                        animeDetail = candidate;
-                        malId = candidate.id;
-                        break;
-                    }
-                }
-            }
+            var malId = animeData.id;
+            var title = cleanHtml(animeData.title_english || animeData.title || "");
+            var poster = absUrl(animeData.anime_picture);
+            var genres = animeData.genres ? animeData.genres.split(",").map(function(g) { return g.trim(); }).filter(Boolean) : [];
+            var trailerUrl = animeData.trailer || undefined;
+            var score = animeData.score ? Number(animeData.score) : undefined;
+            var year = animeData.ani_year ? Number(animeData.ani_year) : undefined;
 
-            if (!animeDetail) {
-                var searchByName = await httpPostJson(BASE_URL + "/anime/filter", { page: 1, limit: 10, keyword: idOrPublic });
-                if (searchByName && searchByName.data && Array.isArray(searchByName.data) && searchByName.data.length) {
-                    animeDetail = searchByName.data[0];
-                    malId = animeDetail.id;
-                }
-            }
-
-            if (!animeDetail) throw new Error("Anime not found: " + idOrPublic);
-            if (!malId) malId = animeDetail.id;
-
+            // Fetch episodes by mal_id
             var episodesData = await httpGetJson(BASE_URL + "/episodes/" + malId);
             var episodes = [];
             if (episodesData && Array.isArray(episodesData)) {
@@ -288,7 +275,7 @@
                         url: JSON.stringify({ mal_id: malId, episode: epNum }),
                         season: 1,
                         episode: epNum,
-                        posterUrl: absUrl(animeDetail.anime_picture),
+                        posterUrl: poster,
                         description: ep.filler ? "Filler" : undefined,
                         headers: { "Referer": BASE_URL + "/" },
                         dubStatus: "sub"
@@ -302,31 +289,42 @@
                     url: JSON.stringify({ mal_id: malId, episode: initialEp }),
                     season: 1,
                     episode: initialEp,
-                    posterUrl: absUrl(animeDetail.anime_picture),
+                    posterUrl: poster,
                     headers: { "Referer": BASE_URL + "/" },
                     dubStatus: "sub"
                 }));
             }
 
-            var title = cleanHtml(animeDetail.title_english || animeDetail.title || "");
-            var genres = animeDetail.genres ? animeDetail.genres.split(",").map(function(g) { return g.trim(); }).filter(Boolean) : [];
-            var trailerUrl = animeDetail.trailer || undefined;
-            var score = animeDetail.score ? Number(animeDetail.score) : undefined;
-            var year = animeDetail.ani_year ? Number(animeDetail.ani_year) : undefined;
+            // Fetch recommendations
+            var recs = [];
+            var recData = await httpGetJson(BASE_URL + "/anime/" + encodeURIComponent(publicId) + "/recommended");
+            if (recData && Array.isArray(recData)) {
+                for (var r = 0; r < recData.length; r++) {
+                    var rec = recData[r];
+                    if (!rec) continue;
+                    recs.push(new MultimediaItem({
+                        title: cleanHtml(rec.title_english || rec.title || ""),
+                        url: BASE_URL + "/watch/" + (rec.public_id || rec.id) + "/1",
+                        posterUrl: absUrl(rec.anime_picture),
+                        type: "anime",
+                        headers: { "Referer": BASE_URL + "/" }
+                    }));
+                }
+            }
 
             var item = new MultimediaItem({
                 title: title,
                 url: url,
-                posterUrl: absUrl(animeDetail.anime_picture),
-                type: guessType(animeDetail.type),
-                description: cleanHtml(animeDetail.ani_description || ""),
+                posterUrl: poster,
+                type: guessType(animeData.type),
+                description: cleanHtml(animeData.ani_description || ""),
                 year: year,
                 score: score,
-                status: getStatus(animeDetail.ani_status),
+                status: getStatus(animeData.ani_status),
                 tags: genres.length ? genres : undefined,
                 trailers: trailerUrl ? [new Trailer({ name: "Trailer", url: trailerUrl })] : undefined,
-                cast: animeDetail.studios ? [new Actor({ name: cleanHtml(animeDetail.studios), role: "Studio" })] : undefined,
-                recommendations: [],
+                cast: animeData.studios ? [new Actor({ name: cleanHtml(animeData.studios), role: "Studio" })] : undefined,
+                recommendations: recs,
                 headers: { "Referer": BASE_URL + "/" },
                 syncData: { mal_id: String(malId) },
                 episodes: episodes
