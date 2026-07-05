@@ -337,6 +337,22 @@
         }
     }
 
+    function normalizeSubtitles(tracks) {
+        if (!tracks || !Array.isArray(tracks) || !tracks.length) return [];
+        var out = [];
+        var seen = {};
+        for (var i = 0; i < tracks.length; i++) {
+            var t = tracks[i];
+            var url = t.url || t.file || t.src || "";
+            if (!url || seen[url]) continue;
+            seen[url] = true;
+            var label = t.label || t.name || t.lang || t.language || "English";
+            var lang = t.language || t.srclang || t.lang || "en";
+            out.push({ url: url, label: label, lang: lang });
+        }
+        return out;
+    }
+
     async function loadStreams(data, cb) {
         try {
             var malId = null;
@@ -369,37 +385,35 @@
                         "Referer": BASE_URL + "/"
                     };
 
-                    if (e.url) {
-                        streams.push(new StreamResult({
-                            url: e.url,
-                            source: "Senshi " + status,
-                            headers: streamHeaders
-                        }));
+                    // Try to get subtitle tracks for this stream
+                    var subtitles = normalizeSubtitles(e.subtitles || e.tracks);
+                    // If no subtitles from API, try sub_filemoon.json from the stream server
+                    if (!subtitles.length && e.masked_base_url) {
+                        try {
+                            var subData = await httpGetJson(e.masked_base_url + "/sub_filemoon.json");
+                            if (subData && Array.isArray(subData)) {
+                                subtitles = normalizeSubtitles(subData);
+                            }
+                        } catch (_) {}
                     }
 
-                    if (e.server2) {
-                        streams.push(new StreamResult({
-                            url: e.server2,
-                            source: "Senshi " + status + " (Alt)",
+                    function addStream(url, srcSuffix) {
+                        if (!url) return;
+                        var stream = new StreamResult({
+                            url: url,
+                            source: "Senshi " + status + (srcSuffix || ""),
                             headers: streamHeaders
-                        }));
+                        });
+                        if (subtitles.length) {
+                            stream.subtitles = subtitles;
+                        }
+                        streams.push(stream);
                     }
 
-                    if (e.serverFM) {
-                        streams.push(new StreamResult({
-                            url: e.serverFM,
-                            source: "Senshi " + status + " (FM)",
-                            headers: streamHeaders
-                        }));
-                    }
-
-                    if (e.download) {
-                        streams.push(new StreamResult({
-                            url: e.download,
-                            source: "Senshi " + status + " (DL)",
-                            headers: streamHeaders
-                        }));
-                    }
+                    addStream(e.url);
+                    addStream(e.server2, " (Alt)");
+                    addStream(e.serverFM, " (FM)");
+                    addStream(e.download, " (DL)");
                 }
             }
 
