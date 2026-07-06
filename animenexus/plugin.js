@@ -70,7 +70,7 @@
     // ─── Cookie / Session Management ─────────────────────────────────────────────
     var SESSION_COOKIE = null;
     var COOKIE_PROMISE = null;
-    var SHOW_CACHE = {};  // id → { poster, backdrop, background, logo } from list endpoints
+    var SHOW_CACHE = {};  // id → { name, description, poster, backdrop, background, logo } from list endpoints
 
     function parsecookie(res) {
         if (!res || !res.headers) return null;
@@ -131,6 +131,15 @@
         try { return JSON.parse(res && res.body ? res.body : "{}"); } catch (e) { return {}; }
     }
 
+    async function apiPost(path, extraHeaders, body) {
+        await ensureCookie();
+        var url = path.indexOf("http") === 0 ? path : (path.indexOf(APP_URL) === 0 ? path : APP_URL + path);
+        var res = await http_post(url, mergeHeaders(extraHeaders), body || "");
+        var c = parsecookie(res);
+        if (c) SESSION_COOKIE = c;
+        try { return JSON.parse(res && res.body ? res.body : "{}"); } catch (e) { return {}; }
+    }
+
     // ─── URL Payload Encoding ────────────────────────────────────────────────────
     function base64Encode(value) {
         value = String(value || "");
@@ -152,16 +161,19 @@
     }
 
     // ─── Proxy Helper ────────────────────────────────────────────────────────────
-    function proxifyStream(url) {
+    function proxifyStream(url, extraHeaders) {
         var headers = { "User-Agent": USER_AGENT, "Referer": APP_URL + "/", "Origin": APP_URL };
         if (SESSION_COOKIE) headers["Cookie"] = SESSION_COOKIE;
+        if (extraHeaders) {
+            for (var k in extraHeaders) {
+                if (extraHeaders.hasOwnProperty(k)) headers[k] = extraHeaders[k];
+            }
+        }
         var payload = { url: url, headers: headers, options: { referer: APP_URL + "/" } };
         return "MAGIC_PROXY_v2" + base64Encode(JSON.stringify(payload));
     }
 
     // ─── Image Helpers ───────────────────────────────────────────────────────────
-    // CF Image Resizing URLs embed the original URL as base64 in the path.
-    // Extract it to get a directly accessible assets.anime.nexus URL.
     function extractDirectUrl(cfUrl) {
         if (!cfUrl || cfUrl.indexOf("/aHR0c") === -1) return cfUrl;
         var idx = cfUrl.indexOf("/aHR0c");
@@ -205,6 +217,8 @@
             var s = r.data[i];
             if (s && s.id) {
                 SHOW_CACHE[s.id] = {
+                    name: s.name,
+                    description: s.description,
                     poster: s.poster,
                     backdrop: s.backdrop || s.background,
                     background: s.background,
@@ -231,6 +245,283 @@
             tags: show.genres ? show.genres.map(function(g) { return g.name; }) : undefined,
             headers: { "Referer": APP_URL + "/" }
         });
+    }
+
+    // ─── WebView-Based HTTP fetch ───────────────────────────────────────────────
+    // Makes a web request through the InAppWebView so Cloudflare session/cookies
+    // established by solveCaptcha are maintained. Falls back to normal apiPost.
+    async function webViewPost(url, bodyObj) {
+        var bodyStr = JSON.stringify(bodyObj);
+        var headers = {
+            "Content-Type": "application/json",
+            "Referer": APP_URL + "/",
+            "Origin": APP_URL
+        };
+
+        // Try global WebView fetch functions first (maintains Cloudflare session)
+        var wvNames = [
+            "fetchWithWebView", "requestWithWebView", "webViewFetch",
+            "webview_fetch", "sessionFetch", "session_fetch",
+            "http_post_webview"
+        ];
+        for (var i = 0; i < wvNames.length; i++) {
+            var fn = globalThis[wvNames[i]];
+            if (typeof fn !== "function") continue;
+            try {
+                var res = await fn(url, {
+                    method: "POST",
+                    body: bodyStr,
+                    headers: headers,
+                    useWebView: true,
+                    webView: true,
+                    session: true,
+                    cloudflare: true
+                });
+                var raw = res && res.body ? res.body : (typeof res === "string" ? res : null);
+                if (raw) { try { return JSON.parse(raw); } catch (_) {} }
+            } catch (_) {}
+        }
+
+        // Try http_post with WebView options (4th argument)
+        if (typeof http_post === "function") {
+            try {
+                var res = await http_post(url, headers, bodyStr, {
+                    useWebView: true,
+                    webView: true,
+                    session: true,
+                    cloudflare: true
+                });
+                if (res && res.body) { try { return JSON.parse(res.body); } catch (_) {} }
+            } catch (_) {}
+        }
+
+        // Final fallback: normal apiPost
+        return await apiPost(url, { "Content-Type": "application/json" }, bodyStr);
+    }
+
+    // ─── WebSocket Authenticated Session ───────────────────────────────────────────
+    // Establishes a Socket.IO connection via WebSocket to get the authenticated
+    // session, challenge, and encryptedSecret needed for HLS access.
+    async function establishSocketSession(hlsUrl, streamId, fingerprint) {
+        if (typeof WebSocket !== "function") {
+            console.log("[AnimeNexus] WebSocket not available");
+            return null;
+        }
+
+        var sid = "";
+        var socketUrl = APP_URL.replace(/^http/, "ws") + "/api/socket/?" +
+            "EIO=4&transport=websocket&" +
+            "videoId=" + encodeURIComponent(streamId) + "&" +
+            "fingerprint=" + encodeURIComponent(fingerprint) + "&" +
+            "m3u8Url=" + encodeURIComponent(hlsUrl);
+
+        return new Promise(function(resolve) {
+            var timeout = setTimeout(function() {
+                console.log("[AnimeNexus] Socket session timeout");
+                try { ws.close(); } catch(_) {}
+                resolve(null);
+            }, 15000);
+
+            var ws;
+            try {
+                ws = new WebSocket(socketUrl);
+            } catch(e) {
+                console.log("[AnimeNexus] WebSocket create error: " + String(e));
+                clearTimeout(timeout);
+                resolve(null);
+                return;
+            }
+
+            var challenge = null;
+            var encryptedSecret = null;
+            var sessionId = null;
+            var connected = false;
+            var authenticated = false;
+
+            ws.onopen = function() {
+                console.log("[AnimeNexus] Socket connected");
+            };
+
+            ws.onmessage = function(event) {
+                var data = String(event.data || "");
+                // Socket.IO Engine.IO protocol:
+                // 0 = open (handshake), 40 = namespace connect, 42 = event
+
+                if (data.charAt(0) === "0") {
+                    // Engine.IO handshake: 0{"sid":"...","upgrades":[],"pingInterval":25000,"pingTimeout":20000}
+                    try {
+                        var handshake = JSON.parse(data.slice(1));
+                        sid = handshake.sid;
+                        // Send CONNECT to namespace
+                        ws.send("40");
+                    } catch(e) {}
+                }
+                else if (data === "40") {
+                    // Connected to default namespace
+                    connected = true;
+                    checkDone();
+                }
+                else if (data.slice(0, 2) === "42") {
+                    // Socket.IO EVENT: 42["eventName", data]
+                    try {
+                        var msg = JSON.parse(data.slice(2));
+                        var eventName = msg[0];
+                        var eventData = msg[1] || {};
+
+                        if (eventName === "authenticated") {
+                            console.log("[AnimeNexus] Socket authenticated");
+                            authenticated = true;
+                            challenge = eventData.challenge || null;
+                            encryptedSecret = eventData.encryptedSecret || null;
+                            sessionId = eventData.sessionId || sid || eventData.sid || null;
+                            checkDone();
+                        }
+                        else if (eventName === "challenge") {
+                            // Challenge received (may contain additional attestation data)
+                            if (!challenge) challenge = eventData.challenge || null;
+                            if (!encryptedSecret) encryptedSecret = eventData.encryptedSecret || null;
+                            checkDone();
+                        }
+                        else if (eventName === "connected") {
+                            connected = true;
+                            checkDone();
+                        }
+                    } catch(e) {}
+                }
+                else if (data === "3") {
+                    // Engine.IO ping — respond with pong
+                    ws.send("2");
+                }
+            };
+
+            function checkDone() {
+                if (connected && authenticated && challenge && encryptedSecret) {
+                    clearTimeout(timeout);
+                    console.log("[AnimeNexus] Socket session established");
+                    resolve({
+                        challenge: challenge,
+                        encryptedSecret: encryptedSecret,
+                        sessionId: sessionId || sid
+                    });
+                }
+            }
+
+            ws.onerror = function(err) {
+                console.log("[AnimeNexus] Socket error: " + String(err));
+            };
+
+            ws.onclose = function() {
+                if (!connected || !authenticated) {
+                    clearTimeout(timeout);
+                    console.log("[AnimeNexus] Socket closed before session established");
+                    resolve(null);
+                }
+            };
+        });
+    }
+
+    // ─── Turnstile / Attestation ──────────────────────────────────────────────────
+    // Extracts the stream UUID from an HLS URL
+    function extractStreamId(hlsUrl) {
+        if (!hlsUrl) return "";
+        var m = hlsUrl.match(/\/anime\/video\/([a-f0-9-]+)\//);
+        return m ? m[1] : "";
+    }
+
+    // Performs the full Turnstile solve + attestation exchange, returns headers map + attested URL
+    async function attestStream(hlsUrl) {
+        if (typeof solveCaptcha !== "function") {
+            console.log("[AnimeNexus] solveCaptcha not available, skipping attestation");
+            return null;
+        }
+
+        var streamId = extractStreamId(hlsUrl);
+        if (!streamId) {
+            console.log("[AnimeNexus] Could not extract streamId from HLS URL");
+            return null;
+        }
+
+        // Generate a unique fingerprint for this session
+        var fingerprint = SessionTracker.generateUuid();
+
+        // Solve the Turnstile challenge — opens InAppWebView for user to complete
+        var turnstileToken = await solveCaptcha('0x4AAAAAAA80VvnXcgnXgqVY', APP_URL + '/');
+
+        if (!turnstileToken) {
+            console.log("[AnimeNexus] Turnstile solve returned no token");
+            return null;
+        }
+
+        // ─── Strategy 1: WebSocket auth (Socket.IO) ─────────────────────────────
+        // This establishes an authenticated session on the server, giving us the
+        // challenge + encryptedSecret directly — the HTTP POST is only for refresh.
+        var socketSession = null;
+        try {
+            socketSession = await establishSocketSession(hlsUrl, streamId, fingerprint);
+        } catch (e) {
+            console.log("[AnimeNexus] Socket session error: " + String(e));
+        }
+
+        if (socketSession && socketSession.challenge) {
+            var sid = socketSession.sessionId || "";
+            var sep = hlsUrl.indexOf('?') > -1 ? '&' : '?';
+            var attestedUrl = hlsUrl + sep +
+                "token=" + encodeURIComponent(sid) +
+                "&requestType=manifest" +
+                "&sessionId=" + encodeURIComponent(sid);
+
+            var proxyHeaders = {
+                "X-Session-ID": sid,
+                "X-Fingerprint": fingerprint,
+                "X-Challenge": socketSession.challenge,
+                "X-Encrypted-Secret": socketSession.encryptedSecret || ""
+            };
+
+            return {
+                url: attestedUrl,
+                headers: proxyHeaders
+            };
+        }
+
+        // ─── Strategy 2: HTTP POST attestation (fallback) ───────────────────────
+        console.log("[AnimeNexus] WebSocket unavailable or failed, trying HTTP POST");
+
+        var authRes = await webViewPost(APP_URL + "/api/auth/ws-token", {
+            videoId: streamId,
+            fingerprint: fingerprint,
+            purpose: "manifest",
+            turnstileToken: turnstileToken
+        });
+
+        // Validate attestation response
+        if (!authRes || (!authRes.refId && !authRes.token && !authRes.sessionId)) {
+            console.log("[AnimeNexus] Attestation failed: " + JSON.stringify(authRes).slice(0, 200));
+            return null;
+        }
+
+        var refId = authRes.refId || "";
+        var sessionId = authRes.sessionId || refId;
+        var token = authRes.token || refId;
+        var encryptedSecret = authRes.encryptedSecret || "";
+        var challenge = authRes.challenge || "";
+
+        var sep = hlsUrl.indexOf('?') > -1 ? '&' : '?';
+        var attestedUrl = hlsUrl + sep +
+            "token=" + encodeURIComponent(token) +
+            "&requestType=manifest" +
+            "&sessionId=" + encodeURIComponent(sessionId);
+
+        var proxyHeaders = {
+            "X-Session-ID": sessionId,
+            "X-Fingerprint": fingerprint
+        };
+        if (challenge) proxyHeaders["X-Challenge"] = challenge;
+        if (encryptedSecret) proxyHeaders["X-Encrypted-Secret"] = encryptedSecret;
+
+        return {
+            url: attestedUrl,
+            headers: proxyHeaders
+        };
     }
 
     // ─── getHome ──────────────────────────────────────────────────────────────────
@@ -300,17 +591,27 @@
 
             var showId = p.id;
 
-            // Show details
+            // Show details — NOTE: /api/anime/shows?id=X does FUZZY matching (not exact ID lookup),
+            // so the returned show may have wrong name/description.
+            // We prefer SHOW_CACHE data (seeded from list/search endpoints) for authoritative
+            // metadata, and use the API response only for fields not in cache (status, parental_rating, etc.).
             var sj = await apiGet("/api/anime/shows?id=" + encodeURIComponent(showId));
             var sa = sj && sj.data;
             var show = Array.isArray(sa) ? sa[0] : sa;
-            if (!show) { cb({ success: false, errorCode: "PARSE_ERROR", message: "Show not found" }); return; }
 
-            // Statistics (scores, languages)
+            // Use cached show metadata from list endpoints (always correct)
+            var cached = SHOW_CACHE[showId] || {};
+
+            if (!show && !cached.name) {
+                cb({ success: false, errorCode: "PARSE_ERROR", message: "Show not found" });
+                return;
+            }
+
+            // Statistics (scores, languages) — this endpoint works correctly
             var stats = { data: {} };
             try { stats = await apiGet("/api/anime/details/statistics?id=" + encodeURIComponent(showId)); } catch (_) {}
 
-            // Episodes
+            // Episodes — this endpoint works correctly
             var ej = await apiGet("/api/anime/details/episodes?id=" + encodeURIComponent(showId));
             var eps = ej && ej.data || [];
             var episodes = [];
@@ -349,21 +650,32 @@
                 }));
             }
 
+            // Prefer cached metadata (correct) over show detail API (may be wrong due to fuzzy ID matching)
+            var showTitle = cached.name || (show && show.name) || "Unknown";
+            var showDescription = cached.description || (show && show.description) || "";
+            var showPoster = cached.poster ? pickImg(cached.poster, ["640x960", "480x720", "240x360"]) : posterUrl(show);
+            var showBanner = cached.backdrop ? pickImg(cached.backdrop, ["1920x1080", "1920x762", "1360x768", "960x540"]) : bannerUrl(show);
+            var showLogo = cached.logo ? pickImg(cached.logo, ["large", "medium", "small"]) : logoUrl(show);
+
+            // Status from show detail API (SHOW_CACHE doesn't have it)
+            var showStatus = show && show.status;
+            var itemStatus = (!showStatus || showStatus === "Finished Airing") ? "completed" : showStatus === "Currently Airing" ? "ongoing" : "upcoming";
+
             var item = new MultimediaItem({
-                title: show.name || "Unknown",
+                title: showTitle,
                 url: url,
-                posterUrl: posterUrl(show),
-                bannerUrl: bannerUrl(show),
-                logoUrl: logoUrl(show),
+                posterUrl: showPoster,
+                bannerUrl: showBanner,
+                logoUrl: showLogo,
                 type: "anime",
-                description: show.description || "",
-                year: show.release_date ? parseInt(show.release_date) : undefined,
-                releaseDate: show.release_date || undefined,
+                description: showDescription,
+                year: show && show.release_date ? parseInt(show.release_date) : undefined,
+                releaseDate: (show && show.release_date) || undefined,
                 score: stats.data && stats.data.average ? stats.data.average.score : undefined,
-                status: (!show.status || show.status === "Finished Airing") ? "completed" : show.status === "Currently Airing" ? "ongoing" : "upcoming",
-                contentRating: show.parental_rating || undefined,
-                tags: show.genres ? show.genres.map(function(g) { return g.name; }) : undefined,
-                nextAiring: show.next_episode ? new NextAiring({
+                status: itemStatus,
+                contentRating: (show && show.parental_rating) || undefined,
+                tags: show && show.genres ? show.genres.map(function(g) { return g.name; }) : undefined,
+                nextAiring: show && show.next_episode ? new NextAiring({
                     episode: show.next_episode.episode,
                     season: 1,
                     airDate: show.next_episode.air_date || ""
@@ -375,7 +687,7 @@
 
             cb({ success: true, data: item });
 
-            Analytics.logEvent("load_show", { show_id: showId, show_name: show.name });
+            Analytics.logEvent("load_show", { show_id: showId, show_name: showTitle });
         } catch (e) {
             cb({ success: false, errorCode: "LOAD_ERROR", message: e && e.stack ? e.stack : String(e) });
         }
@@ -411,11 +723,26 @@
 
             if (!hlsUrl) { cb({ success: false, errorCode: "PARSE_ERROR", message: "No HLS URL" }); return; }
 
-            // Route through MAGIC_PROXY_v2 with session cookie to handle auth.
-            // Note: the video endpoint (api.anime.nexus/api/anime/video/*) uses
-            // Cloudflare Turnstile + WebSocket attestation. The proxy may still
-            // return 403 if the server requires a Turnstile token.
-            var proxyUrl = proxifyStream(hlsUrl);
+            // ─── Turnstile Attestation ─────────────────────────────────────────
+            // Try to solve Turnstile + get attestation tokens for the HLS URL.
+            // Falls back to proxy without attestation if captcha solve is unavailable.
+            var finalUrl = hlsUrl;
+            var extraHeaders = {};
+            try {
+                var attestResult = await attestStream(hlsUrl);
+                if (attestResult) {
+                    finalUrl = attestResult.url;
+                    extraHeaders = attestResult.headers;
+                    console.log("[AnimeNexus] Attestation succeeded, tokens acquired");
+                } else {
+                    console.log("[AnimeNexus] Attestation returned no result, using plain proxy");
+                }
+            } catch (e) {
+                console.log("[AnimeNexus] Attestation error: " + String(e));
+            }
+
+            // Build proxy URL with attestation headers if available
+            var proxyUrl = proxifyStream(finalUrl, extraHeaders);
 
             // Quality label — sort by width numerically (not lexicographically)
             var qKeys = Object.keys(qualities).sort(function(a, b) {
@@ -427,7 +754,7 @@
             if (qKeys.length > 0) {
                 var best = qKeys[qKeys.length - 1];
                 var mb = fileSizes[best] ? Math.round(fileSizes[best] / 1048576) + "MB" : "";
-                label = best.replace("x", "×") + (mb ? " (" + mb + ")" : "");
+                label = best.replace("x", "\u00D7") + (mb ? " (" + mb + ")" : "");
             }
 
             var primarySource = new StreamResult({
