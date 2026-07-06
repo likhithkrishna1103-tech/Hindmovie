@@ -1,0 +1,17 @@
+{
+  "packageName": "com.igris.repo.animenexus",
+  "name": "Anime Nexus",
+  "version": 2,
+  "baseUrl": "https://anime.nexus",
+  "description": "Watch anime with sub/dub from Anime Nexus. Features HLS streaming with multi-language subtitles.",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "ja"
+  ],
+  "categories": [
+    "Anime"
+  ]
+}
