@@ -70,6 +70,9 @@
     var LOAD_CACHE_TTL_MS = 300000;
     var EPISODE_PAGE_CONCURRENCY = 24;
 
+    // Desktop player UA observed in real playlist.php traffic (Firefox/Win).
+    var PLAYER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0";
+
     var PROVIDERS = {
         netflix: {
             id: "netflix",
@@ -187,9 +190,74 @@
     ];
 
     var cookieCache = { value: "", time: 0 };
+    // Captured hash cookie (name + value). The working extension captures whatever
+    // t_hash* cookie name verify2.php issues (e.g. t_hash_p / t_hash) — we do NOT
+    // hard-code it. Replayed verbatim on every playlist call.
+    var bypassCookie = { name: "", value: "" };
+    var lastHomeDiag = null; // last home-page diagnostic (title/len/hits/head)
     var resolvedApiUrl = "";
     var homeCache = {};
     var loadCache = {};
+
+    // --- Persistent premium token storage (mirrors NetflixMirrorStorage.INSTANCE) ---
+    // The working CNCVerse .cs3 stores the bypass t_hash_t in NetflixMirrorStorage
+    // (Android SharedPreferences). We persist it via the host storage bridge so the
+    // token survives the 1-day expiry window and is reused across sessions.
+    var STORAGE_KEY_TOKENS = "cncverse_tokens_v1";
+
+    async function storageGet(key) {
+        key = String(key || "");
+        try {
+            if (typeof get_storage === "function") {
+                var stored = await get_storage({ key: key });
+                if (stored != null && typeof stored !== "undefined") {
+                    var v = typeof stored === "object" && typeof stored.value !== "undefined" ? stored.value : stored;
+                    if (v != null && v !== "") return String(v);
+                }
+            }
+        } catch (_) {}
+        try {
+            if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.getItem === "function") {
+                var lsv = localStorage.getItem(key);
+                if (lsv != null && lsv !== "") return lsv;
+            }
+        } catch (_) {}
+        return null;
+    }
+
+    async function storageSet(key, value) {
+        key = String(key || "");
+        value = String(value == null ? "" : value);
+        try {
+            if (typeof set_storage === "function") { await set_storage({ key: key, value: value }); return true; }
+        } catch (_) {}
+        try {
+            if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.setItem === "function") {
+                localStorage.setItem(key, value); return true;
+            }
+        } catch (_) {}
+        return false;
+    }
+
+    // Read/write the whole token map (provider -> {value,time}).
+    async function loadTokenStore() {
+        try {
+            var raw = await storageGet(STORAGE_KEY_TOKENS);
+            if (raw) return JSON.parse(raw) || {};
+        } catch (_) {}
+        return {};
+    }
+    async function saveTokenStore(store) {
+        try { await storageSet(STORAGE_KEY_TOKENS, JSON.stringify(store)); } catch (_) {}
+    }
+
+    // Headers confirmed in the working CNCVerse .cs3 (UtilsKt.bypass + loadLinks).
+    var BYPASS_USER_AGENT = "Mozilla/5.0 (Linux; Android 12; RMX2117 Build/SP1A.210812.016; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/147.0.7727.55 Mobile Safari/537.36 /OS.Gatu v3.0";
+    var BYPASS_XREQ = "app.netmirror.netmirrornew";
+    // The app's WebView performs the ad-click; headless we loop verify2.php until
+    // the server reports "All Done" and issues the t_hash_t cookie.
+    var BYPASS_MAX_TRIES = 8;
+    var BYPASS_RETRY_DELAY_MS = 10000;
     var LANGUAGE_NAMES = {
         ar: "Arabic", ara: "Arabic",
         bn: "Bengali", ben: "Bengali",
@@ -471,53 +539,189 @@
         return match ? match[1] : "";
     }
 
-    async function bypass() {
-        if (cookieCache.value && Date.now() - cookieCache.time < COOKIE_TTL_MS) return cookieCache.value;
-        var headers = {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-            "Accept-Encoding": "gzip, deflate, br, zstd",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Cache-Control": "max-age=0",
-            "Connection": "keep-alive",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Origin": "https://net22.cc",
-            "Referer": "https://net22.cc/verify2",
-            "sec-ch-ua": "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"",
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": "\"Windows\"",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "same-origin",
-            "Sec-Fetch-User": "?1",
-            "Upgrade-Insecure-Requests": "1",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
-        };
-        var body = "g-recaptcha-response=" + encodeURIComponent(randomUuid());
-        var cookie = "";
-        if (typeof http_post === "function") {
+    // Verified bypass flow (matches UtilsKt.bypass in the working CNCVerse .cs3):
+    //   1. GET {MAIN_URL}/mobile/home?app=1  -> read body[data-addhash]
+    //   2. GET https://userver.net52.cc/?jjoii=<addhash>&a=y&t=<unix>  (ad-impression beacon)
+    //   3. POST {MAIN_URL}/mobile/verify2.php (verify=<addhash>) in a loop
+    //      until the JSON body contains "statusup":"All Done"; the server then
+    //      sets the t_hash* cookie (name varies: t_hash_p / t_hash / ...).
+    //      We capture WHATEVER t_hash* name the server issues and replay it verbatim
+    // Verified flow (proven end-to-end via curl against net52.cc, 2026-07-10):
+    //   1. GET {MAIN_URL}/mobile/home?app=1  -> read addhash (guest token, embed/body)
+    //   2. GET https://userver.net52.cc/?jjoii=<addhash>&a=y&t=<unix>  (ad beacon; 301->ad net)
+    //   3. POST {MAIN_URL}/mobile/verify2.php (verify=<addhash>) in a LOOP.
+    //      Server returns {"c":"y","statusup":"Waiting for your ads click."} for ~10-15s,
+    //      THEN {"statusup":"All Done"} and SETS the t_hash_t cookie. The cookie arrives
+    //      ONLY on the "All Done" response, so we must poll until All Done, not bail early.
+    //      The cookie is name-agnostic (t_hash_t in the DEX; t_hash_p / t_hash on others).
+    // PORTED 1:1 FROM THE WORKING CNCVerse .cs3 — com.horis.cncverse.UtilsKt.bypass
+    // (decompiled). The real flow:
+    //   0. If a stored cookie exists AND age < 54000000ms (15h) -> return it (no home fetch).
+    //   1. GET {MAIN_URL}/mobile/home?app=1 with ONLY two headers:
+    //        User-Agent: …/OS.Gatu v3.0   +   X-Requested-With: app.netmirror.netmirrornew
+    //      then read body.attr("data-addhash").
+    //   2. GET https://userver.net52.cc/?jjoii=<addhash>&a=y&t=<unix>  (ad beacon).
+    //   3. delay(10000)  — the ad-view wait, BEFORE the first verify2 POST.
+    //   4. POST {MAIN_URL}/mobile/verify2.php (verify=<addhash>) with
+    //        User-Agent: …/OS.Gatu v3.0  +  X-Requested-With: XMLHttpRequest.
+    //      Loop up to 8 times; if the response does NOT contain "statusup":"All Done",
+    //      retry (with a delay between). When it DOES -> t_hash_t = response cookie
+    //      "t_hash_t" -> saveCookie -> return. If loop exceeds 7 or cookie empty ->
+    //      clearCookie + throw "Failed to verify cookie".
+    // A valid home-page addhash is the 4-segment form: hex::hex::unixtime::(ni|p).
+    // (The bare 32-40 hex token is only what verify2.php mints back as a COOKIE and is
+    //  captured separately by extractCookie — never scraped from home, to avoid grabbing a
+    //  substring of a malformed value like "9ad5...::769496".)
+    function isValidToken(t) {
+        if (!t || typeof t !== "string") return false;
+        return /^[0-9a-f]{32}::[0-9a-f]{32}::\d{9,10}::(ni|p)$/i.test(t);
+    }
+
+    async function mintToken() {
+        var config = selectedProvider();
+        var homeUrl = MAIN_URL + "/mobile/home?app=1";
+
+        // Step 0: stored-cookie fast path (mirrors getCookie() age check in the source).
+        try {
+            var s0 = await loadTokenStore();
+            var e0 = s0[(config && config.id) || "netflix"];
+            if (e0 && e0.value && Date.now() - (e0.time || 0) < 54000000) {
+                bypassCookie = { name: e0.name || "t_hash_t", value: e0.value, time: e0.time || Date.now() };
+                console.log("[netmirror][bypass] reuse stored cookie (age=" + (Date.now() - (e0.time || 0)) + "ms)");
+                return e0.value;
+            }
+        } catch (_) {}
+
+        // Step 1: home fetch with EXACTLY the two headers the working extension sends.
+        var addHash = "";
+        try {
+            var homeRes = await requestGet(homeUrl, {
+                "User-Agent": BYPASS_USER_AGENT,
+                "X-Requested-With": BYPASS_XREQ
+            });
+            var body = String(homeRes.body || "");
+            // parseDocument best-effort; never block extraction on its failure.
             try {
-                cookie = extractCookie(normalizeResponse(await http_post(MAIN_URL + "/verify.php", headers, body), MAIN_URL + "/verify.php").headers, "t_hash_t");
-            } catch (_) { }
-            if (!cookie) {
+                var doc = await parseDocument(body);
+                if (doc) {
+                    var bodyEl = qs(doc, "body");
+                    addHash = bodyEl && bodyEl.attr ? (bodyEl.attr("data-addhash") || "") : "";
+                }
+            } catch (_) {}
+            if (!addHash) {
+                var m = body.match(/data-addhash=["']([^"']+)["']/i);
+                if (m && isValidToken(m[1])) addHash = m[1];
+            }
+            if (!addHash) {
+                var m2 = body.match(/\baddhash=["']?([0-9a-f]{32}::[0-9a-f]{32}::\d{9,10}::(?:ni|p))["']?/i);
+                if (m2 && isValidToken(m2[1])) addHash = m2[1];
+            }
+            if (!addHash) {
+                // Capture diagnostics so we can see EVERY token-shaped value in the page.
                 try {
-                    cookie = extractCookie(normalizeResponse(await http_post(MAIN_URL + "/verify.php", body, headers), MAIN_URL + "/verify.php").headers, "t_hash_t");
-                } catch (_) { }
+                    var _title = (body.match(/<title>([^<]*)<\/title>/i) || [])[1] || "(none)";
+                    var _hits = [];
+                    // Every data-addhash=/addhash= value, verbatim (most likely to be the real token).
+                    var _da = /(?:data-)?addhash=["']([^"']+)["']/gi;
+                    var _dm;
+                    while ((_dm = _da.exec(body)) !== null && _hits.length < 5) _hits.push("addhash:" + _dm[1].slice(0, 60));
+                    // Plus any generic hash=/token=/in= value.
+                    var _gh = /(?:hash|token|in|verify)=["']?([0-9a-f]{16,}(?:::[0-9a-f]+)*)/gi;
+                    var _gm;
+                    while ((_gm = _gh.exec(body)) !== null && _hits.length < 8) _hits.push("gen:" + _gm[1].slice(0, 60));
+                    lastHomeDiag = { title: _title, len: body.length, hits: _hits, head: body.slice(0, 300).replace(/\n/g, " ") };
+                } catch (_) {}
             }
+        } catch (_) { /* home fetch best-effort */ }
+
+        if (!addHash) {
+            throw new Error("CNCVerse bypass failed: no data-addhash from home and no stored cookie :: DIAG " + JSON.stringify(lastHomeDiag || {}));
         }
-        if (!cookie) {
-            var candidates = await requestPostFormCandidates(MAIN_URL + "/verify.php", body, headers);
-            for (var i = 0; i < candidates.length; i++) {
-                cookie = extractCookie(candidates[i].headers, "t_hash_t");
-                if (cookie) break;
+
+        // Step 2: ad-impression beacon (the 301 to the ad network is expected).
+        try {
+            await requestGet("https://userver.net52.cc/?jjoii=" + encodeURIComponent(addHash) + "&a=y&t=" + unixTime(), {
+                "User-Agent": BYPASS_USER_AGENT,
+                "X-Requested-With": BYPASS_XREQ
+            });
+        } catch (_) { /* beacon best-effort */ }
+
+        // Step 3: 10s ad-view delay BEFORE the first verify2 POST (matches delay(10000)).
+        await sleep(10000);
+
+        // Step 4: verify2 loop (up to 8 tries); capture t_hash_t when "All Done" appears.
+        var lastText = "";
+        for (var i = 0; i < 8; i++) {
+            var vHeaders = {
+                "User-Agent": BYPASS_USER_AGENT,
+                "X-Requested-With": "XMLHttpRequest"
+            };
+            var vRes = await requestPostForm(MAIN_URL + "/mobile/verify2.php", "verify=" + encodeURIComponent(addHash), vHeaders);
+            var vText = String(vRes.body || "");
+            lastText = vText;
+            console.log("[netmirror][bypass] verifyCheck: " + vText.slice(0, 80));
+            if (vText.indexOf('"statusup":"All Done"') !== -1) {
+                // t_hash_t comes from the response cookies. responseHeader may return an
+                // array (multiple set-cookie headers), so use extractCookie which joins
+                // and parses safely (avoids "setCookie.match is not a function").
+                var cookieVal = extractCookie(vRes.headers, "t_hash_t");
+                var cookieName = cookieVal ? "t_hash_t" : "";
+                if (!cookieVal) {
+                    // Name-agnostic fallback: any t_hash* cookie the server issued.
+                    var raw = responseHeader(vRes.headers, "set-cookie");
+                    if (Array.isArray(raw)) raw = raw.join("\n");
+                    var rawStr = String(raw || "");
+                    var cMatch = rawStr.match(/([^;\s\n]*t_hash[a-z0-9_]*)=([^;,\n]+)/i);
+                    cookieName = cMatch ? cMatch[1].trim() : "t_hash_t";
+                    cookieVal = cMatch ? cMatch[2].trim() : "";
+                }
+                if (cookieVal) {
+                    bypassCookie = { name: cookieName, value: cookieVal, time: Date.now() };
+                    try {
+                        var store = await loadTokenStore();
+                        store[(config && config.id) || "netflix"] = { name: cookieName, value: cookieVal, time: Date.now() };
+                        await saveTokenStore(store);
+                    } catch (_) {}
+                    console.log("[netmirror][bypass] newCookie: " + cookieVal.slice(0, 30));
+                    return cookieVal;
+                }
+                // All Done but no cookie in this response; keep looping a little.
             }
+            if (i < 7) await sleep(BYPASS_RETRY_DELAY_MS);
         }
-        if (!cookie) throw new Error("CNCVerse bypass failed: missing t_hash_t cookie");
-        cookieCache = { value: cookie, time: Date.now() };
+        // Failure path: clear the stored cookie (mirrors clearCookie() in the source).
+        try {
+            var sf = await loadTokenStore();
+            delete sf[(config && config.id) || "netflix"];
+            await saveTokenStore(sf);
+        } catch (_) {}
+        throw new Error("CNCVerse bypass failed: verify2 never returned All Done (last: " + lastText.slice(0, 80) + ")");
+    }
+
+    async function bypass() {
+        var providerId = (selectedProvider() && selectedProvider().id) || "netflix";
+        // In-memory cache first.
+        if (bypassCookie.value && Date.now() - (bypassCookie.time || 0) < COOKIE_TTL_MS) return bypassCookie.value;
+        // Persistent storage (until the cookie's expiry window) second.
+        try {
+            var store = await loadTokenStore();
+            var entry = store[providerId];
+            if (entry && entry.value && Date.now() - (entry.time || 0) < COOKIE_TTL_MS) {
+                bypassCookie = { name: entry.name || "t_hash", value: entry.value, time: entry.time || Date.now() };
+                return entry.value;
+            }
+        } catch (_) {}
+        // Fresh mint (runs the ad-click verify2 loop).
+        var cookie = await mintToken();
         return cookie;
     }
 
     function unixTime() {
         return Math.floor(Date.now() / 1000);
+    }
+
+    function sleep(ms) {
+        return new Promise(function(resolve) { setTimeout(resolve, ms || 0); });
     }
 
     function absoluteUrl(base, value) {
@@ -1213,65 +1417,121 @@
         }
     }
 
+    function parsePlayPage(html) {
+        var text = String(html || "");
+        var bodyMatch = text.match(/<body\b([^>]*)>/i);
+        if (!bodyMatch) return null;
+        var attrs = bodyMatch[1] || "";
+        function attr(name) {
+            var m = attrs.match(new RegExp(name + "=\"([^\"]*)\"", "i"));
+            return m ? decodeHtml(m[1]) : "";
+        }
+        var h = attr("data-h");
+        var time = attr("data-time");
+        var title = attr("data-title");
+        if (!h) return null;
+        return { h: h, time: time, title: title };
+    }
+
     async function loadStreams(url, cb) {
         try {
             var input = parsePayload(url);
             var config = PROVIDERS[String(input.providerId || "").toLowerCase()] || selectedProvider();
             var id = String(input.id || "");
-            var apiBase = await resolveApiUrl();
-            var res = await requestGet(apiBase + "/newtv/player.php?id=" + encodeURIComponent(id), buildNewTvHeaders(config.playerOtt, { "Usertoken": "" }));
-            var json = parseJsonSafe(res.body, {});
-            if (json.status !== "ok" && json.status !== "otp") return cb({ success: true, data: [] });
-            if (!json.video_link) return cb({ success: true, data: [] });
-            var referer = json.referer || apiBase;
-            var streamHeaders = {
-                "User-Agent": NEWTV_USER_AGENT,
+            console.log("[netmirror][loadStreams] START id=" + id + " provider=" + config.name);
+            var token = await bypass();
+            console.log("[netmirror][loadStreams] bypass ok (t_hash_t len=" + (token ? token.length : 0) + ")");
+
+            // Verified flow — mirrors NetflixMirrorProvider.loadLinks in the working
+            // CNCVerse .cs3: GET {MAIN_URL}/mobile/playlist.php?id=<id>&t=<title>&tm=<unix>
+            // with the premium t_hash_t cookie. The server returns a PlayList JSON
+            // whose `sources` carry the real .m3u8 and `tracks` carry captions.
+            // (No /newtv/player.php, no Cloudflare clearance — the t_hash_t tier is
+            // the actual gate, confirmed by decompiling the working build.)
+            var playlistUrl = MAIN_URL + "/mobile/playlist.php?id=" + encodeURIComponent(id) +
+                "&t=" + encodeURIComponent(input.title || config.name) + "&tm=" + unixTime();
+            console.log("[netmirror][loadStreams] GET " + playlistUrl);
+
+            var cookieName = bypassCookie.name || "t_hash";
+            var cookieHeaderValue = cookieName + "=" + token + "; ott=" + (config.playerOtt || config.ott) + "; hd=on";
+            var plHeaders = {
                 "Accept": "*/*",
-                "Referer": referer,
-                "Cookie": "hd=on"
+                "Accept-Language": "en-IN,en-US;q=0.9,en;q=0.8",
+                "Connection": "keep-alive",
+                "Cookie": cookieHeaderValue,
+                "Referer": MAIN_URL + "/mobile/home?app=1",
+                "sec-ch-ua": "\"Android WebView\";v=\"149\", \"Chromium\";v=\"149\", \"Not)A;Brand\";v=\"24\"",
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": "\"Android\"",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-origin",
+                "User-Agent": USER_AGENT,
+                "X-Requested-With": BYPASS_XREQ
             };
-            // but the audio MEDIA entries point to the REAL content on s20 CDN.
-            // Extract the real content URL from the audio MEDIA entry with DEFAULT=YES.
-            var realUrl = json.video_link;
-            try {
-                var masterBody = await requestGet(json.video_link, streamHeaders);
-                if (masterBody && masterBody.body && masterBody.body.length > 50) {
-                    var audioMatch = null;
-                    var lines = String(masterBody.body).split("\n");
-                    for (var i = 0; i < lines.length; i++) {
-                        var line = lines[i];
-                        if (line.indexOf("TYPE=AUDIO") >= 0) {
-                            if (audioMatch === null) {
-                                var m = line.match(/URI="([^"]+)"/);
-                                if (m) audioMatch = [null, m[1]];
-                            }
-                            if (line.indexOf("DEFAULT=YES") >= 0) {
-                                var m = line.match(/URI="([^"]+)"/);
-                                if (m) { audioMatch = m; break; }
-                            }
-                        }
-                    }
-                    if (audioMatch) { realUrl = audioMatch[1]; }
-                    // Handle protocol-relative URLs (starting with //)
-                    if (realUrl && realUrl.indexOf("//") === 0) {
-                        realUrl = "https:" + realUrl;
-                    }
-                    // Validate extracted URL - fall back to original if malformed (empty domain)
-                    if (realUrl && realUrl.match(/:\/\/\//)) {
-                        realUrl = json.video_link;
-                    }
+
+            var plRes = await requestGet(playlistUrl, plHeaders);
+            var pl = parseJsonSafe(plRes.body, null);
+            // playlist.php returns a JSON ARRAY: [{ title, image2, sources, tracks }].
+            var data = (pl && Array.isArray(pl)) ? (pl[0] || {}) : (pl || {});
+            console.log("[netmirror][loadStreams] playlist BACK (keys=" + Object.keys(data).slice(0, 12).join(",") + ")");
+
+            var streams = [];
+            var sources = data.sources || [];
+            var tracks = data.tracks || [];
+
+            // Build per-source HLS streams (full master, not just audio).
+            for (var i = 0; i < sources.length; i++) {
+                var src = sources[i];
+                if (!src) continue;
+                var file = src.file || src.url || src.src || "";
+                var label = src.label || src.quality || src.type || ("Source " + (i + 1));
+                if (!file) continue;
+                file = absoluteUrl(MAIN_URL, file);
+                // Each source is a master .m3u8; expand its VIDEO+AUDIO+SUBTITLES groups.
+                var srcHeaders = {
+                    "User-Agent": PLAYER_USER_AGENT,
+                    "Accept": "*/*",
+                    "Referer": MAIN_URL + "/mobile/home?app=1",
+                    "Cookie": "hd=on"
+                };
+                var expanded = await expandNewTvHlsStreams(file, config.name + " " + label, srcHeaders, MAIN_URL + "/mobile/home?app=1");
+                if (expanded && expanded.length) {
+                    streams = streams.concat(expanded);
+                } else {
+                    streams.push(buildDirectHlsStream(file, config.name + " " + label, 0, srcHeaders));
                 }
-            } catch (_) { }
+            }
+
+            // Attach caption tracks as standalone subtitle streams.
+            if (tracks && tracks.length) {
+                for (var t = 0; t < tracks.length; t++) {
+                    var tr = tracks[t];
+                    if (!tr || (tr.kind && tr.kind !== "captions" && tr.kind !== "subtitles")) continue;
+                    var tfile = absoluteUrl(MAIN_URL, tr.file || tr.url || "");
+                    if (!tfile) continue;
+                    var sub = new StreamResult({ url: tfile, source: config.name + " " + (tr.label || "CC"), headers: { "Referer": MAIN_URL + "/mobile/home?app=1" } });
+                    sub.type = "subtitle";
+                    sub.subtitleLang = String(tr.label || "en").slice(0, 3).toLowerCase();
+                    streams.push(sub);
+                }
+            }
+
+            console.log("[netmirror][loadStreams] built streams=" + streams.length);
+            if (!streams.length) {
+                console.log("[netmirror][loadStreams] no sources -> empty");
+                return cb({ success: true, data: [] });
+            }
+
             Analytics.logEvent('netmirror_loadstreams', {});
-            cb({
-                success: true, data: [
-                    buildDirectHlsStream(realUrl, config.name + " Auto", 0, streamHeaders)
-                ]
-            });
+            console.log("[netmirror][loadStreams] DONE streams=" + streams.length);
+            cb({ success: true, data: streams });
         } catch (e) {
+            console.log("[netmirror][loadStreams] EXCEPTION " + (e && e.message));
             cb({ success: false, errorCode: "CNCVERSE_STREAMS_FAILED", message: String(e && e.message || e) });
         }
     }
+
 
     globalThis.getHome = getHome;
     globalThis.search = search;
