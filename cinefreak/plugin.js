@@ -2107,10 +2107,14 @@
             var detailsTitle = tmdbDetails && (tmdbDetails.name || tmdbDetails.title);
             if (detailsTitle) title = detailsTitle;
             var description = (tmdbDetails && tmdbDetails.overview) || plot || "";
-            var backgroundUrl = tmdbDetails && tmdbDetails.backdrop_path ? (TMDB_IMAGE_BASE + tmdbDetails.backdrop_path) : poster;
+            var tmdbPoster = tmdbDetails && tmdbDetails.poster_path ? (TMDB_IMAGE_BASE + tmdbDetails.poster_path) : "";
+            var bannerUrl = tmdbDetails && tmdbDetails.backdrop_path ? (TMDB_IMAGE_BASE + tmdbDetails.backdrop_path) : (poster || tmdbPoster);
+            var posterUrl = tmdbPoster || poster;
             var tmdbYear = trim((tmdbDetails && (tmdbDetails.first_air_date || tmdbDetails.release_date) || "").slice(0, 4));
             var cast = buildActorList(tmdbDetails && tmdbDetails.credits && tmdbDetails.credits.cast);
             var score = tmdbDetails && typeof tmdbDetails.vote_average === "number" ? Number(tmdbDetails.vote_average.toFixed(1)) : undefined;
+            var runtime = (tmdbDetails && tmdbDetails.episode_run_time && tmdbDetails.episode_run_time[0])
+                || (tmdbDetails && tmdbDetails.runtime) || undefined;
 
             if (type === "movie") {
                 // Cinefreak movie pages: <h4 class="movie-title">Label</h4> followed by
@@ -2151,8 +2155,10 @@
                     streams: [],
                     name: "Movie",
                     url: streamPayload,
-                    posterUrl: poster || undefined,
+                    posterUrl: posterUrl || undefined,
                     description: description,
+                    runtime: runtime,
+                    rating: score,
                     headers: defaultHeaders({ "Referer": sourceUrl })
                 };
                 Analytics.logEvent('cinefreak_load', {});
@@ -2161,14 +2167,15 @@
                     data: new MultimediaItem({
                         title: title,
                         url: sourceUrl,
-                        posterUrl: poster,
-                        backgroundUrl: backgroundUrl,
+                        posterUrl: posterUrl,
+                        bannerUrl: bannerUrl,
                         logoUrl: logoUrl || undefined,
                         type: "movie",
                         plot: plot,
                         year: tmdbYear ? Number(tmdbYear) : (year || undefined),
                         genres: genres,
                         rating: score,
+                        duration: runtime,
                         actors: cast,
                         headers: defaultHeaders({ "Referer": sourceUrl }),
                         episodes: [movieEpisode]
@@ -2189,6 +2196,22 @@
             if (!epStarts.length) {
                 // fallback: treat each quality-box as one combined episode group
                 epStarts = [0];
+            }
+            // Enrich per-episode metadata (title/overview/still/rating/runtime) from TMDB season data.
+            var seasonNumbers = [];
+            for (var si = 0; si < epStarts.length; si++) {
+                var sblk = html.slice(epStarts[si], (si + 1 < epStarts.length) ? epStarts[si + 1] : html.length);
+                var sm = String(sblk).match(/class=["'][^"']*season-number[^"']*["'][^>]*>\s*S?0*(\d+)/i) || String(sblk).match(/S(\d+)/i);
+                var sn = sm ? Number(sm[1]) : 1;
+                if (seasonNumbers.indexOf(sn) < 0) seasonNumbers.push(sn);
+            }
+            var seasonMetadata = {};
+            if (tmdbId) {
+                var metaResults = await Promise.all(seasonNumbers.map(function (sn) { return fetchSeasonMetadata(tmdbId, sn); }));
+                for (var mi = 0; mi < seasonNumbers.length; mi++) {
+                    var merged = metaResults[mi] || {};
+                    for (var mk in merged) { if (Object.prototype.hasOwnProperty.call(merged, mk)) seasonMetadata[mk] = merged[mk]; }
+                }
             }
             var episodes = [];
             for (var e = 0; e < epStarts.length; e++) {
@@ -2221,15 +2244,23 @@
                 epLinks = uniqueBy(epLinks, function (item) { return item.href; });
 
                 for (var epNum = episodeStart; epNum <= episodeEnd; epNum++) {
+                    var epMeta = seasonMetadata[season + "_" + epNum] || {};
+                    var epName = epMeta.title || epTitle;
+                    var epDesc = epMeta.overview || plot;
+                    var epPoster = epMeta.thumbnail || posterUrl;
+                    var epRating = (typeof epMeta.rating === "number" && epMeta.rating) ? Number(epMeta.rating.toFixed(1)) : score;
+                    var epAir = epMeta.released || "";
+                    var epRuntime = (tmdbDetails && tmdbDetails.episode_run_time && tmdbDetails.episode_run_time[0]) || undefined;
                     episodes.push(new Episode({
-                        name: epTitle + (episodeStart !== episodeEnd ? " (E" + epNum + ")" : ""),
+                        name: (episodeStart !== episodeEnd ? (epName + " (E" + epNum + ")") : epName),
                         url: JSON.stringify({ sourceUrl: sourceUrl, title: title, type: "series", season: season, episode: epNum, links: epLinks }),
                         season: season,
                         episode: epNum,
-                        description: plot,
-                        posterUrl: poster || undefined,
-                        airDate: "",
-                        score: score,
+                        description: epDesc,
+                        posterUrl: epPoster || undefined,
+                        rating: epRating,
+                        airDate: epAir,
+                        runtime: epRuntime,
                         headers: defaultHeaders({ "Referer": sourceUrl })
                     }));
                 }
@@ -2246,8 +2277,8 @@
                 data: new MultimediaItem({
                     title: title,
                     url: sourceUrl,
-                    posterUrl: poster,
-                    backgroundUrl: backgroundUrl,
+                    posterUrl: posterUrl,
+                    bannerUrl: bannerUrl,
                     logoUrl: logoUrl || undefined,
                     type: "series",
                     plot: plot,
