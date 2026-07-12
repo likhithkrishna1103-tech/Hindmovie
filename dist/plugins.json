@@ -144,6 +144,29 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.castletv.sky"
   },
   {
+    "packageName": "com.igris.repo.cinefreak",
+    "name": "Cinefreak",
+    "version": 1,
+    "baseUrl": "https://cinefreak.nl",
+    "description": "Cinefreak plugin for ZORO",
+    "authors": [
+      "Igris"
+    ],
+    "languages": [
+      "en",
+      "hi",
+      "ta",
+      "te",
+      "ml",
+      "kn",
+      "bn"
+    ],
+    "categories": [
+      "Others"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.cinefreak.sky"
+  },
+  {
     "packageName": "com.igris.repo.cinestream",
     "name": "CineStream",
     "version": 26,
