@@ -2222,14 +2222,15 @@
 
                 for (var epNum = episodeStart; epNum <= episodeEnd; epNum++) {
                     episodes.push(new Episode({
-                        title: epTitle + (episodeStart !== episodeEnd ? " (E" + epNum + ")" : ""),
+                        name: epTitle + (episodeStart !== episodeEnd ? " (E" + epNum + ")" : ""),
                         url: JSON.stringify({ sourceUrl: sourceUrl, title: title, type: "series", season: season, episode: epNum, links: epLinks }),
                         season: season,
                         episode: epNum,
-                        thumbnail: poster,
-                        plot: plot,
-                        released: "",
-                        rating: score
+                        description: plot,
+                        posterUrl: poster || undefined,
+                        airDate: "",
+                        score: score,
+                        headers: defaultHeaders({ "Referer": sourceUrl })
                     }));
                 }
             }
