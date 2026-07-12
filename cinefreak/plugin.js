@@ -2143,12 +2143,24 @@
                 movieLinks = uniqueBy(movieLinks, function (item) { return item.href; });
 
                 var streamPayload = buildLoadPayload(sourceUrl, movieLinks, { title: title, type: "movie" });
+                var movieEpisode = {
+                    season: 1,
+                    episode: 1,
+                    dubStatus: "none",
+                    playbackPolicy: "none",
+                    streams: [],
+                    name: "Movie",
+                    url: streamPayload,
+                    posterUrl: poster || undefined,
+                    description: description,
+                    headers: defaultHeaders({ "Referer": sourceUrl })
+                };
                 Analytics.logEvent('cinefreak_load', {});
                 cb({
                     success: true,
                     data: new MultimediaItem({
                         title: title,
-                        url: streamPayload,
+                        url: sourceUrl,
                         posterUrl: poster,
                         backgroundUrl: backgroundUrl,
                         logoUrl: logoUrl || undefined,
@@ -2158,7 +2170,8 @@
                         genres: genres,
                         rating: score,
                         actors: cast,
-                        headers: defaultHeaders({ "Referer": sourceUrl })
+                        headers: defaultHeaders({ "Referer": sourceUrl }),
+                        episodes: [movieEpisode]
                     })
                 });
                 return;
