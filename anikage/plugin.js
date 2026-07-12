@@ -608,7 +608,9 @@
             if (Array.isArray(serversData) && serversData.length > 0) {
                 providers = serversData.map(function(s) { return s.id; });
             } else {
-                providers = ["megg", "miko", "anya", "verse", "neko"];
+                // Real, live-verified server union on anikage.cc (no "niko"/"anya"/"verse" exist).
+                // Per-anime server sets vary; this covers all observed working providers.
+                providers = ["neko", "koto", "megg", "wave", "miko", "dib"];
             }
 
             // === PARALLEL provider fetching via Dart-native http_parallel ===
