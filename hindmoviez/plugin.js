@@ -736,7 +736,7 @@
                     if (bestResult && bestResult.id) {
                         var mdType = trendingItems[r].type === "series" ? "tv" : "movie";
                         detailReqs.push({
-                            url: TMDB_API_BASE + "/" + mdType + "/" + bestResult.id + "?api_key=" + TMDB_API_KEY + "&append_to_response=images",
+                            url: TMDB_API_BASE + "/" + mdType + "/" + bestResult.id + "?api_key=" + TMDB_API_KEY + "&append_to_response=images,external_ids",
                             headers: {}
                         });
                         detailOrigIdx.push(r);
@@ -747,20 +747,14 @@
                 for (var d = 0; d < detailResponses.length; d++) {
                     var origItemIdx = detailOrigIdx[d];
                     var details = parseJsonSafe(detailResponses[d].body, {});
-                    var logos = (details && details.images && details.images.logos) || [];
-                    var logoUrl = "";
-                    for (var li = 0; li < logos.length; li++) {
-                        if (logos[li] && logos[li].file_path) {
-                            logoUrl = TMDB_IMG_BASE + "/w500" + logos[li].file_path;
-                            if ((logos[li].iso_639_1 || "").toLowerCase() === "en") break;
-                        }
-                    }
+                    var imdbId = details && details.external_ids && details.external_ids.imdb_id ? details.external_ids.imdb_id : "";
+                    var logoUrl = imdbId ? ("https://live.metahub.space/logo/medium/" + imdbId + "/img") : "";
                     var bannerPath = details && details.backdrop_path ? details.backdrop_path : "";
                     var genres = extractTmdbGenres(details);
                     var rating = details && typeof details.vote_average === "number" ? Number(details.vote_average.toFixed(1)) : undefined;
                     trendingMeta[origItemIdx] = {
-                        logo: logoUrl || undefined,
-                        banner: bannerPath ? (TMDB_IMG_BASE + bannerPath) : undefined,
+                        logoUrl: logoUrl || undefined,
+                        bannerUrl: bannerPath ? (TMDB_IMG_BASE + bannerPath) : undefined,
                         genres: genres,
                         rating: rating
                     };
@@ -778,8 +772,8 @@
                             posterUrl: item.posterUrl,
                             type: item.type,
                             quality: item.quality,
-                            logo: meta.logo,
-                            banner: meta.banner,
+                            logoUrl: meta.logoUrl,
+                            bannerUrl: meta.bannerUrl,
                             genres: meta.genres,
                             rating: meta.rating
                         };
@@ -1131,7 +1125,7 @@
                 if (tmdbId) {
                     try {
                         const tmdbmetatype = isSeries ? "tv" : "movie";
-                        const detailsRes = await fetchWithRetry(`https://api.themoviedb.org/3/${tmdbmetatype}/${tmdbId}?api_key=1865f43a0549ca50d341dd9ab8b29f49&append_to_response=credits,videos&language=en-US`, { attempts: 2, ttl: HTTP_CACHE_TTL });
+                        const detailsRes = await fetchWithRetry(`https://api.themoviedb.org/3/${tmdbmetatype}/${tmdbId}?api_key=1865f43a0549ca50d341dd9ab8b29f49&append_to_response=credits,videos,external_ids&language=en-US`, { attempts: 2, ttl: HTTP_CACHE_TTL });
                         tmdbDetails = parseJsonSafe(detailsRes.body);
                         if (tmdbDetails && tmdbDetails.credits) {
                             castList = parseCredits(JSON.stringify(tmdbDetails.credits));
@@ -1144,6 +1138,9 @@
                 var trailerUrl = extractTmdbTrailerUrl(tmdbDetails);
                 var duration = extractTmdbDuration(tmdbDetails, isSeries ? "tv" : "movie");
                 var tmdbGenres = extractTmdbGenres(tmdbDetails);
+                var tmdbLogoUrl = tmdbDetails && tmdbDetails.external_ids && tmdbDetails.external_ids.imdb_id 
+                    ? ("https://live.metahub.space/logo/medium/" + tmdbDetails.external_ids.imdb_id + "/img") 
+                    : "";
             }
 
             const metaDescription = html.match(/<meta[^>]+property="og:description"[^>]+content="([^"]+)"/i)?.[1]
@@ -1256,15 +1253,15 @@
                         url: realUrl,
                         posterUrl: poster,
                         bannerUrl: background || poster,
-                        logoUrl: responseData?.meta?.logo || undefined,
+                        logoUrl: tmdbLogoUrl || responseData?.meta?.logo || undefined,
                         type: "series",
                         year: parseInt(releaseYear) || (responseData?.meta?.year ? parseInt(responseData.meta.year) : undefined),
                         score: parseFloat(imdbRating) || (responseData?.meta?.imdbRating ? parseFloat(responseData.meta.imdbRating) : undefined),
                         genres: docGenres.length ? docGenres : (tmdbGenres.length ? tmdbGenres : (responseData?.meta?.genres || [])),
                         actors: castList,
                         description: plot,
-                        duration: duration,
-                        trailer: trailerUrl || undefined,
+                        runtime: duration,
+                        trailers: trailerUrl ? [new Trailer({ url: trailerUrl })] : undefined,
                         episodes
                     })
                 });
@@ -1321,15 +1318,15 @@
                     url: realUrl,
                     posterUrl: poster,
                     bannerUrl: background || poster,
-                    logoUrl: responseData?.meta?.logo || undefined,
+                    logoUrl: tmdbLogoUrl || responseData?.meta?.logo || undefined,
                     type: "movie",
                     year: parseInt(releaseYear) || (responseData?.meta?.year ? parseInt(responseData.meta.year) : undefined),
                     score: parseFloat(imdbRating) || (responseData?.meta?.imdbRating ? parseFloat(responseData.meta.imdbRating) : undefined),
                     genres: docGenres.length ? docGenres : (tmdbGenres.length ? tmdbGenres : (responseData?.meta?.genres || [])),
                     actors: castList,
                     description: plot,
-                    duration: duration,
-                    trailer: trailerUrl || undefined,
+                    runtime: duration,
+                    trailers: trailerUrl ? [new Trailer({ url: trailerUrl })] : undefined,
                     episodes: [new Episode({
                         name: "Movie",
                         url: JSON.stringify(unique(moviePageUrls)),

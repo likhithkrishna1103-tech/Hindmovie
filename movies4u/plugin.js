@@ -936,7 +936,7 @@
     function fetchTmdbDetails(type, tmdbId) {
         if (!tmdbId) return Promise.resolve({});
         var mediaType = type === "movie" ? "movie" : "tv";
-        return fetchTmdbJson(TMDB_WORKER_API + "/" + mediaType + "/" + tmdbId + "?api_key=" + TMDB_WORKER_API_KEY + "&append_to_response=credits,videos");
+        return fetchTmdbJson(TMDB_WORKER_API + "/" + mediaType + "/" + tmdbId + "?api_key=" + TMDB_WORKER_API_KEY + "&append_to_response=credits,videos,external_ids");
     }
 
     function extractTmdbTrailerUrl(tmdbDetails) {
@@ -1905,7 +1905,7 @@
                     if (bestResult && bestResult.id) {
                         var mdType = trendingItems[r].type === "series" ? "tv" : "movie";
                         detailReqs.push({
-                            url: TMDB_WORKER_API + "/" + mdType + "/" + bestResult.id + "?api_key=" + TMDB_WORKER_API_KEY + "&append_to_response=images",
+                            url: TMDB_WORKER_API + "/" + mdType + "/" + bestResult.id + "?api_key=" + TMDB_WORKER_API_KEY + "&append_to_response=images,external_ids",
                             headers: defaultHeaders()
                         });
                         detailOrigIdx.push(r);
@@ -1916,20 +1916,14 @@
                 for (var d = 0; d < detailResponses.length; d++) {
                     var origItemIdx = detailOrigIdx[d];
                     var details = parseJsonSafe(detailResponses[d].body, {});
-                    var logos = (details && details.images && details.images.logos) || [];
-                    var logoUrl = "";
-                    for (var li = 0; li < logos.length; li++) {
-                        if (logos[li] && logos[li].file_path) {
-                            logoUrl = "https://image.tmdb.org/t/p/w500" + logos[li].file_path;
-                            if ((logos[li].iso_639_1 || "").toLowerCase() === "en") break;
-                        }
-                    }
+                    var imdbId = details && details.external_ids && details.external_ids.imdb_id ? details.external_ids.imdb_id : "";
+                    var logoUrl = imdbId ? ("https://live.metahub.space/logo/medium/" + imdbId + "/img") : "";
                     var bannerPath = details && details.backdrop_path ? details.backdrop_path : "";
                     var genres = extractTmdbGenres(details);
                     var rating = details && typeof details.vote_average === "number" ? Number(details.vote_average.toFixed(1)) : undefined;
                     trendingMeta[origItemIdx] = {
-                        logo: logoUrl || undefined,
-                        banner: bannerPath ? (TMDB_IMAGE_BASE + bannerPath) : undefined,
+                        logoUrl: logoUrl || undefined,
+                        bannerUrl: bannerPath ? (TMDB_IMAGE_BASE + bannerPath) : undefined,
                         genres: genres,
                         rating: rating
                     };
@@ -1947,8 +1941,8 @@
                             posterUrl: item.posterUrl,
                             type: item.type,
                             quality: item.quality,
-                            logo: meta.logo,
-                            banner: meta.banner,
+                            logoUrl: meta.logoUrl,
+                            bannerUrl: meta.bannerUrl,
                             genres: meta.genres,
                             rating: meta.rating
                         };
@@ -2085,7 +2079,9 @@
             }
 
             var tmdbDetails = await detailsPromise;
-            var logoUrl = await logoPromise;
+            var logoUrl = tmdbDetails && tmdbDetails.external_ids && tmdbDetails.external_ids.imdb_id
+                ? ("https://live.metahub.space/logo/medium/" + tmdbDetails.external_ids.imdb_id + "/img")
+                : "";
             if (tmdbDetails) {
                 title = tmdbDetails.name || tmdbDetails.title || title;
             }
@@ -2109,19 +2105,18 @@
                         posterUrl: poster,
                         bannerUrl: bannerUrl,
                         logoUrl: logoUrl || undefined,
-                        logo: logoUrl || undefined,
                         type: "movie",
                         description: description,
                         year: year ? Number(year) : undefined,
                         score: score,
-                        duration: duration,
-                        genres: genres,
-                        trailer: trailerUrl || undefined,
-                        cast: cast,
-                        headers: defaultHeaders({ "Referer": sourceUrl }),
-                        episodes: [
-                            new Episode({
-                                name: "Movie",
+                    runtime: duration,
+                    genres: genres,
+                    trailers: trailerUrl ? [new Trailer({ url: trailerUrl })] : undefined,
+                    cast: cast,
+                    headers: defaultHeaders({ "Referer": sourceUrl }),
+                    episodes: [
+                        new Episode({
+                            name: "Movie",
                                 url: buildLoadPayload(sourceUrl, movieLinks, {
                                     title: title,
                                     type: "movie",
@@ -2177,14 +2172,13 @@
                     posterUrl: poster,
                     bannerUrl: bannerUrl,
                     logoUrl: logoUrl || undefined,
-                    logo: logoUrl || undefined,
                     type: type,
                     description: description,
                     year: year ? Number(year) : undefined,
                     score: score,
-                    duration: duration,
+                    runtime: duration,
                     genres: genres,
-                    trailer: trailerUrl || undefined,
+                    trailers: trailerUrl ? [new Trailer({ url: trailerUrl })] : undefined,
                     cast: cast,
                     headers: defaultHeaders({ "Referer": sourceUrl }),
                     episodes: episodes
