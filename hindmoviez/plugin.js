@@ -466,6 +466,10 @@
 
     function trim(s) { return (s || "").trim(); }
 
+    function tmdbImage(path) {
+        return path ? TMDB_IMG_BASE + "/original" + path : null;
+    }
+
     async function httpParallelGet(requests) {
         var items = Array.isArray(requests) ? requests.filter(function (item) { return item && item.url; }) : [];
         if (!items.length) return [];
@@ -1212,6 +1216,26 @@
                     }
                 });
 
+                const tmdbSeasonCache = {};
+                if (tmdbId) {
+                    const seasons = Array.from(episodeUrlMap.keys()).map(k => parseInt(k.split("_")[0], 10));
+                    const uniqueSeasons = [...new Set(seasons)].filter(Boolean);
+                    if (uniqueSeasons.length > 0) {
+                        const seasonReqs = uniqueSeasons.map(s => ({
+                            url: `${TMDB_API_BASE}/tv/${tmdbId}/season/${s}?api_key=${TMDB_API_KEY}`,
+                            headers: { "User-Agent": "Mozilla/5.0" }
+                        }));
+                        const seasonRes = await httpParallelGet(seasonReqs);
+                        seasonRes.forEach((res, i) => {
+                            try {
+                                tmdbSeasonCache[uniqueSeasons[i]] = parseJsonSafe(res.body);
+                            } catch {
+                                tmdbSeasonCache[uniqueSeasons[i]] = null;
+                            }
+                        });
+                    }
+                }
+
                 const episodes = [];
                 for (const [key, urls] of episodeUrlMap.entries()) {
                     const [seasonNumber, episodeNumber] = key.split("_").map(Number);
@@ -1221,16 +1245,29 @@
                     let epPoster = null;
                     let epDesc = null;
                     let epReleased = null;
+                    let epRating = null;
 
-                    if (responseData?.meta?.videos) {
+                    const tmdbSeason = tmdbSeasonCache[seasonNumber];
+                    if (tmdbSeason?.episodes) {
+                        const tmdbEp = tmdbSeason.episodes.find(e => Number(e.episode_number) === Number(episodeNumber));
+                        if (tmdbEp) {
+                            epName = tmdbEp.name || epName;
+                            epPoster = tmdbEp.still_path ? tmdbImage(tmdbEp.still_path) : null;
+                            epDesc = tmdbEp.overview || null;
+                            epReleased = tmdbEp.air_date || null;
+                            epRating = tmdbEp.vote_average || null;
+                        }
+                    }
+
+                    if (!epDesc && responseData?.meta?.videos) {
                         const metaEpisode = responseData.meta.videos.find(
                             v => v.season === seasonNumber && v.episode === episodeNumber
                         );
                         if (metaEpisode) {
-                            epName = metaEpisode.name || metaEpisode.title || epName;
-                            epPoster = metaEpisode.thumbnail || null;
-                            epDesc = metaEpisode.overview || null;
-                            epReleased = metaEpisode.released || null;
+                            if (epName === `Episode ${episodeNumber}`) epName = metaEpisode.name || metaEpisode.title || epName;
+                            if (!epPoster) epPoster = metaEpisode.thumbnail || null;
+                            if (!epDesc) epDesc = metaEpisode.overview || null;
+                            if (!epReleased) epReleased = metaEpisode.released || null;
                         }
                     }
 
@@ -1240,8 +1277,9 @@
                         season: seasonNumber,
                         episode: episodeNumber,
                         posterUrl: epPoster,
-                        description: epDesc,
-                        date: epReleased
+                        description: epDesc || undefined,
+                        airDate: epReleased || undefined,
+                        rating: epRating || undefined
                     }));
                 }
                 episodes.sort((a, b) => a.season !== b.season ? a.season - b.season : a.episode - b.episode);
@@ -1252,13 +1290,13 @@
                         title: responseData?.meta?.name || title,
                         url: realUrl,
                         posterUrl: poster,
-                        bannerUrl: background || poster,
+                        bannerUrl: tmdbImage(tmdbDetails?.backdrop_path) || background || poster,
                         logoUrl: tmdbLogoUrl || responseData?.meta?.logo || undefined,
                         type: "series",
                         year: parseInt(releaseYear) || (responseData?.meta?.year ? parseInt(responseData.meta.year) : undefined),
                         score: parseFloat(imdbRating) || (responseData?.meta?.imdbRating ? parseFloat(responseData.meta.imdbRating) : undefined),
                         genres: docGenres.length ? docGenres : (tmdbGenres.length ? tmdbGenres : (responseData?.meta?.genres || [])),
-                        actors: castList,
+                        cast: castList,
                         description: plot,
                         runtime: duration,
                         trailers: trailerUrl ? [new Trailer({ url: trailerUrl })] : undefined,
@@ -1317,13 +1355,13 @@
                     title: responseData?.meta?.name || title,
                     url: realUrl,
                     posterUrl: poster,
-                    bannerUrl: background || poster,
+                    bannerUrl: tmdbImage(tmdbDetails?.backdrop_path) || background || poster,
                     logoUrl: tmdbLogoUrl || responseData?.meta?.logo || undefined,
                     type: "movie",
                     year: parseInt(releaseYear) || (responseData?.meta?.year ? parseInt(responseData.meta.year) : undefined),
                     score: parseFloat(imdbRating) || (responseData?.meta?.imdbRating ? parseFloat(responseData.meta.imdbRating) : undefined),
                     genres: docGenres.length ? docGenres : (tmdbGenres.length ? tmdbGenres : (responseData?.meta?.genres || [])),
-                    actors: castList,
+                    cast: castList,
                     description: plot,
                     runtime: duration,
                     trailers: trailerUrl ? [new Trailer({ url: trailerUrl })] : undefined,

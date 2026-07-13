@@ -2410,7 +2410,7 @@
                         rating: score,
                         runtime: duration,
                         trailers: trailerUrl ? [new Trailer({ url: trailerUrl })] : undefined,
-                        actors: cast,
+                        cast: cast,
                         headers: defaultHeaders({ "Referer": sourceUrl }),
                         episodes: [movieEpisode]
                     })
@@ -2521,7 +2521,7 @@
                     rating: score,
                     runtime: duration,
                     trailers: trailerUrl ? [new Trailer({ url: trailerUrl })] : undefined,
-                    actors: cast,
+                    cast: cast,
                     headers: defaultHeaders({ "Referer": sourceUrl }),
                     episodes: episodes
                 })

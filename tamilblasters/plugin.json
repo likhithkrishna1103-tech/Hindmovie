@@ -1,0 +1,22 @@
+{
+  "packageName": "com.igris.repo.tamilblasters",
+  "name": "Tamilblasters",
+  "version": 2,
+  "baseUrl": "https://www.1tamilblasters.pro",
+  "description": "TamilBlasters - Tamil/Telugu/Hindi/Malayalam/Kannada movies & series with HLS streams (StreamHG/Lulu) and direct MKV downloads",
+  "authors": [
+    "Igris"
+  ],
+  "languages": [
+    "en",
+    "ta",
+    "te",
+    "hi",
+    "ml",
+    "kn"
+  ],
+  "categories": [
+    "Movies",
+    "Series"
+  ]
+}

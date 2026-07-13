@@ -4,35 +4,24 @@
     /**
      * AniNeko plugin (anineko.to) — self-contained, with embedded per-host extractors.
      *
-     * Architecture (reverse-engineered from the live site, verified against real fetches):
-     *  - getHome : hero carousel (big_cover banner) + /ajax/featured-genre rows + /ajax/search
-     *  - search  : /ajax/search?q=
-     *  - load    : detail page -> metadata + episode grid (/watch/{slug}/ep-N)
-     *  - loadStreams : episode page -> parse data-video server buttons grouped by tab
-     *        tab_0 = hsub (Hard Sub), tab_1 = sub (Soft Sub, external .vtt), tab_2 = dub (DUB)
-     *        Each data-video is an EXTERNAL EMBED PLAYER page, NOT a direct file.
-     *
-     *  The embeds resolve to direct HLS like this (traced live, not guessed):
-     *   - vivibebe.site     -> https://vivibebe.site/public/stream/<id>/master.m3u8   (JWPlayer, direct)
-     *   - otakuhg.site      -> packed eval() -> links.hls2 signed .m3u8 (StreamHG/VidHide JWPlayer)
-     *   - otakuvid.online   -> packed eval() -> links.hls2 signed .m3u8 (Earnvids/VidHide JWPlayer)
-     *   - playmogo.com /e/  -> DoodStream-style (Cloudflare) -> /pass_md5/ token + random + expiry
-     *   - bibiemb.online    -> same family as otakuvid (VidHide) packed eval()
-     *
-     *  We therefore embed custom extractors (resolveVivibebe, resolveStreamHG/Earnvids,
-     *  resolveDoodStream) and call them from loadStreams via resolveExtractorUrl().
-     *
-     *  Metadata:
-     *   - Per-episode JSON-LD (schema.org TVEpisode) on each /watch/{slug}/ep-N page gives the
-     *     REAL thumbnail (poster), air date (datePublished) and duration (PTxxM). Parsed in load().
-     *   - Series-level: title, poster (og:image), banner, description, genres, status, year.
-     *   - NOTE: anineko's pages expose NO rating/cast/studio fields, so those are intentionally
-     *     omitted (never fabricated).
+     * Key design notes (verified against the live site + the skystream sandbox helpers):
+     *  - The detail page server-renders ALL episodes as <article class="nv-info-episode-item">
+     *    blocks (One Piece = 1169 of them, no pagination). We parse the grid with the
+     *    native parse_html() helper (robust, no regex drift) -> consistent titles.
+     *  - PERFORMANCE/COUNT FIX: the series plot is set ONCE on the MultimediaItem. It is
+     *    NOT copied into every Episode (that previously produced ~1.4 MB of duplicated
+     *    text and the app truncated the response to ~39 episodes). Episode objects stay small.
+     *  - Per-episode metadata (thumb / air date / duration) comes from the schema.org
+     *    TVEpisode JSON-LD on each /watch/{slug}/ep-N page, fetched in parallel via
+     *    http_parallel and bounded by EP_META_CAP (first screen only, for speed).
+     *  - Embeds (tab_0=HardSub, tab_1=SoftSub, tab_2=Dub) are EXTERNAL PLAYER PAGES. We
+     *    resolve them with embedded extractors; packed P.A.C.K.E.R. embeds are deobfuscated
+     *    natively via getAndUnpack().
      */
 
     var BASE_URL = (typeof manifest !== "undefined" && manifest && manifest.baseUrl) ? manifest.baseUrl : "https://anineko.to/";
     var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
-    var EP_META_CAP = 100; // max episodes enriched with per-episode JSON-LD (avoid runaway fetches on long series)
+    var EP_META_CAP = 24; // per-episode JSON-LD enrichment cap (bounds latency; rest use series poster)
 
     function ensureSlash(u) { return (!u) ? u : (u.charAt(u.length - 1) === "/" ? u : u + "/"); }
     var BASE = ensureSlash(BASE_URL);
@@ -63,19 +52,6 @@
             .replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&nbsp;/g, " ")
             .replace(/\s+/g, " ").trim();
     }
-    function getQualityFromText(s) {
-        if (!s) return 0;
-        var decoded = String(s).replace(/%[0-9a-fA-F]{2}/g, " ");
-        var m = decoded.match(/(\d{3,4})p/i);
-        if (m) return parseInt(m[1], 10);
-        if (/2160|4k|uhd/i.test(decoded)) return 2160;
-        if (/1440|qhd/i.test(decoded)) return 1440;
-        if (/1080/i.test(decoded)) return 1080;
-        if (/720/i.test(decoded)) return 720;
-        if (/480/i.test(decoded)) return 480;
-        if (/360/i.test(decoded)) return 360;
-        return 0;
-    }
     function decodeHtmlEntities(s) {
         return String(s || "")
             .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
@@ -96,95 +72,22 @@
         if (!res || res.status < 200 || res.status >= 400) throw new Error("HTTP " + (res ? res.status : "?") + " for " + url);
         return String(res.body || "");
     }
-    async function httpGetJson(url, headers) {
-        var res = await http_get(url, headers || apiHeaders());
-        if (!res || res.status < 200 || res.status >= 400) throw new Error("HTTP " + (res ? res.status : "?") + " for " + url);
-        return parseJsonSafe(res.body || "", null);
-    }
 
-    // ---- Decode the Dean-Edwards packer used by otakuhg/otakuvid/bibiemb embeds ----
-    // The embed page contains: eval(function(p,a,c,k,e,d){while(c--)if(k[c])p=p.replace(new RegExp(k[c],'g'),k[c]);return p}("<template>","<base>","<count>","<dict>".split('|')|["..."],"<e>"))
-    // Unpacked in pure JS. NOTE: the plugin sandbox has NO eval(), so we parse args manually.
-    function unpackPacker(html) {
-        try {
-            var start = html.lastIndexOf("eval(function(p,a,c,k,e,d)");
-            if (start < 0) return "";
-            var depth = 0, realEnd = -1;
-            for (var i = start + 4; i < html.length; i++) {
-                if (html[i] === "(") depth++;
-                else if (html[i] === ")") { depth--; if (depth === 0) { realEnd = i; break; } }
-            }
-            if (realEnd < 0) return "";
-            var packed = html.slice(start, realEnd + 1);
-            var sig = html.indexOf("function(p,a,c,k,e,d){", start);
-            var braceOpen = html.indexOf("{", sig);
-            var bd = 0, bodyClose = -1;
-            for (var j = braceOpen; j < html.length; j++) {
-                if (html[j] === "{") bd++;
-                else if (html[j] === "}") { bd--; if (bd === 0) { bodyClose = j; break; } }
-            }
-            var argOpen = html.indexOf("(", bodyClose);
-            var argStr = packed.slice(argOpen - start + 1, realEnd - start + 1);
-            // Tokenize top-level comma-separated args (respect quotes AND escaped quotes)
-            var parts = [], cur = "", q = null;
-            for (var t = 0; t < argStr.length; t++) {
-                var ch = argStr[t];
-                if (q) {
-                    cur += ch;
-                    if (ch === "\\" && t + 1 < argStr.length) { cur += argStr[t + 1]; t++; continue; }
-                    if (ch === q) q = null;
-                }
-                else if (ch === '"' || ch === "'") { cur += ch; q = ch; }
-                else if (ch === ",") { parts.push(cur); cur = ""; }
-                else cur += ch;
-            }
-            parts.push(cur);
-            if (parts.length < 4) return "";
-            function stripQ(s) { s = s.trim(); if (s.length >= 2 && (s[0] === '"' || s[0] === "'") && s[s.length - 1] === s[0]) return s.slice(1, -1); return s; }
-            var p = stripQ(parts[0]);
-            var a = parseInt(stripQ(parts[1]), 10) || 36;
-            var c = parseInt(stripQ(parts[2]), 10);
-            var kExpr = parts[3].trim();
-            var k = [];
-            if (kExpr.indexOf(".split(") >= 0) {
-                var sm = kExpr.match(/["']((?:[^"']|\.)*)["']/);
-                k = sm ? sm[1].split("|") : [];
-            } else if (kExpr.charAt(0) === "[") {
-                // parse array of quoted strings manually
-                var inner = kExpr.slice(1, kExpr.lastIndexOf("]"));
-                var qi = 0, qopen = false, buf = "", arr = [];
-                for (var x = 0; x < inner.length; x++) {
-                    var cx = inner[x];
-                    if (qopen) { buf += cx; if (cx === qi) qopen = false; }
-                    else if (cx === '"' || cx === "'") { qi = cx; qopen = true; buf = ""; }
-                    else if (cx === "," && !qopen) { arr.push(buf); buf = ""; }
-                    else if (!qopen && cx !== " ") buf += cx;
-                }
-                if (buf.length) arr.push(buf);
-                k = arr;
-            }
-            var e = parseInt(stripQ(parts[4] || "0"), 10) || 0;
-            var out = String(p);
-            for (var ci = c - 1; ci >= 0; ci--) {
-                if (k[ci]) {
-                    var key = (ci ^ e).toString(a);
-                    var re = new RegExp("\\b" + key + "\\b", "g");
-                    out = out.replace(re, k[ci]);
-                }
-            }
-            return out;
-        } catch (err) {
-            return "";
-        }
+    // ---- Extractors (embed -> real StreamResult[]) -------------------------
+    function buildStreamResult(url, source, headers, quality) {
+        return new StreamResult({
+            url: url,
+            source: quality ? (source + " [" + quality + "p]") : source,
+            quality: quality || undefined,
+            headers: headers || {}
+        });
     }
-
     function extractM3u8FromUnpacked(unpacked) {
         if (!unpacked) return "";
         var all = unpacked.match(/https?:\/\/[^\s"']+\.m3u8(?:\?[^\s"']*)?/gi) || [];
         if (all.length) return decodeHtmlEntities(all[0]);
         return "";
     }
-
     function extractSubtitleUrl(embedUrl) {
         if (!embedUrl) return "";
         var idx = embedUrl.indexOf("?");
@@ -201,16 +104,6 @@
         return "";
     }
 
-    // ---- Extractors (embed -> real StreamResult[]) -------------------------
-    function buildStreamResult(url, source, headers, quality) {
-        return new StreamResult({
-            url: url,
-            source: quality ? (source + " [" + quality + "p]") : source,
-            quality: quality || undefined,
-            headers: headers || {}
-        });
-    }
-
     // vivibebe.site -> /public/stream/<id>/master.m3u8
     async function resolveVivibebe(url, label) {
         var m = /^https?:\/\/vivibebe\.site\/([a-zA-Z0-9_-]+)/i.exec(url);
@@ -222,30 +115,26 @@
         return [buildStreamResult(m3u8, label || "AniNeko HD", { "User-Agent": USER_AGENT, "Referer": "https://vivibebe.site/" }, 0)];
     }
 
-    // otakuhg.site / otakuvid.online / bibiemb.online -> packed eval() -> signed m3u8
+    // otakuhg.site / otakuvid.online / bibiemb.online -> P.A.C.K.E.R. packed -> signed m3u8.
+    // Uses the native getAndUnpack() helper (no custom regex/tokenizer).
     async function resolveVidHide(url, label, refererHost) {
         var headers = { "User-Agent": USER_AGENT, "Referer": refererHost || "https://otakuhg.site/" };
         var res = await http_get(url, headers);
         if (!res || res.status !== 200) return [];
         var html = String(res.body || "");
-        var unpacked = unpackPacker(html);
-        if (unpacked) {
-            var m3u8 = extractM3u8FromUnpacked(unpacked);
-            if (m3u8) return [buildStreamResult(m3u8, label || "AniNeko", headers, 0)];
-        }
-        // fallback: direct m3u8 already in page
-        var direct = extractM3u8FromUnpacked(html);
-        if (direct) return [buildStreamResult(direct, label || "AniNeko", headers, 0)];
+        var unpacked = "";
+        try { unpacked = getAndUnpack(html); } catch (e) { unpacked = ""; }
+        var m3u8 = extractM3u8FromUnpacked(unpacked) || extractM3u8FromUnpacked(html);
+        if (m3u8) return [buildStreamResult(m3u8, label || "AniNeko", headers, 0)];
         return [];
     }
 
-    // playmogo.com /e/<id> -> DoodStream-style: /pass_md5/<id> then append random + expiry
+    // playmogo.com /e/<id> -> DoodStream-style: /pass_md5/<token> then append random + expiry
     async function resolveDoodStream(url, label) {
         var headers = { "User-Agent": USER_AGENT, "Referer": "https://playmogo.com/" };
         var res = await http_get(url, headers);
         if (!res || res.status !== 200) return [];
         var html = String(res.body || "");
-        // DoodStream embeds usually contain /pass_md5/<token>
         var md5Match = /\/pass_md5\/[^'"]*/.exec(html);
         if (!md5Match) return [];
         var md5Url = "https://" + new URL(url).hostname + md5Match[0];
@@ -256,6 +145,7 @@
             for (var i = 0; i < length; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
             return result;
         }
+        // If the host ever ships an AES-wrapped URL, crypto.decryptAES(data, key, iv) is available here.
         var tokenMatch = /token=([^&]+)/.exec(md5Url);
         var token = tokenMatch ? tokenMatch[1] : "";
         var videoUrl = String(md5Res.body || "").trim() + makeid(10) + "?token=" + token + "&expiry=" + Date.now();
@@ -271,7 +161,6 @@
             if (/otakuhg\.site/i.test(u)) return await resolveVidHide(u, label || "AniNeko StreamHG", "https://otakuhg.site/");
             if (/otakuvid\.online|bibiemb\.online/i.test(u)) return await resolveVidHide(u, label || "AniNeko Earnvids", "https://otakuvid.online/");
             if (/playmogo\.com|dood/i.test(u)) return await resolveDoodStream(u, label || "AniNeko Dood");
-            // Unknown embed host: pass through as a raw extractor candidate with Referer.
             return [buildStreamResult(u, label || "AniNeko", { "User-Agent": USER_AGENT, "Referer": BASE }, 0)];
         } catch (e) {
             return [];
@@ -279,29 +168,17 @@
     }
 
     // ---- Parsers -----------------------------------------------------------
-    function parseHeroSlides(html) {
-        var items = [], slideRe = /<article class="nv-hero-slide[^"]*"[^>]*>([\s\S]*?)<\/article>/gi, m;
-        while ((m = slideRe.exec(html)) !== null) {
-            var block = m[1];
-            var bg = (block.match(/<img class="nv-hero-bg"[^>]*src="([^"]+)"/i) || [])[1] || "";
-            var title = (block.match(/<h1 class="nv-hero-title"[^>]*>([^<]+)</i) || [])[1] || "";
-            var link = (block.match(/<a class="nv-btn nv-btn-primary"[^>]*href="([^"]+)"/i) || [])[1] || "";
-            if (!link) link = (block.match(/href="(\/watch\/[^"]+)"/i) || [])[1] || "";
-            title = cleanText(title);
-            if (!title || !link) continue;
-            items.push({ title: title, url: absoluteUrl(link), posterUrl: bg ? absoluteUrl(bg) : "", bannerUrl: bg ? absoluteUrl(bg) : "" });
-        }
-        return items;
-    }
-    function parseEpisodeGrid(html) {
-        var eps = [], seen = {}, re = /<article class="nv-info-episode-item">([\s\S]*?)<\/article>/gi, m;
-        while ((m = re.exec(html)) !== null) {
-            var block = m[1];
+    // Build episode list from parse_html() output (article.nv-info-episode-item -> innerHTML).
+    function parseArticleBlocks(els) {
+        var eps = [], seen = {};
+        (els || []).forEach(function (el) {
+            var block = el.innerHTML || "";
             var href = (block.match(/href="(\/watch\/[^"]+\/ep-\d+)"/i) || [])[1];
-            if (!href) continue;
+            if (!href) return;
             var epNum = (href.match(/ep-(\d+)/i) || [])[1];
-            if (!epNum || seen[epNum]) continue;
+            if (!epNum || seen[epNum]) return;
             seen[epNum] = true;
+            // <strong> = "Episode N" label ; <span> = real episode title
             var strong = (block.match(/<strong>([^<]*)<\/strong>/i) || [])[1] || "";
             var span = (block.match(/<span>([^<]*)<\/span>/i) || [])[1] || "";
             var title = cleanText(span) || cleanText(strong) || ("Episode " + epNum);
@@ -315,18 +192,24 @@
                 hasHsub: /HSUB/.test(badgeText),
                 hasSub: /SUB/.test(badgeText)
             });
-        }
-        if (!eps.length) {
-            var re2 = /href="(\/watch\/[^"]+\/ep-(\d+))"/gi;
-            while ((m = re2.exec(html)) !== null) {
-                var n = m[2];
-                if (seen[n]) continue;
-                seen[n] = true;
-                eps.push({ episode: parseInt(n, 10), url: absoluteUrl(m[1]), title: "Episode " + n, hasDub: false, hasHsub: false, hasSub: true });
-            }
-        }
+        });
         eps.sort(function (a, b) { return a.episode - b.episode; });
         return eps;
+    }
+
+    function parseHeroSlides(html) {
+        var items = [], slideRe = /<article class="nv-hero-slide[^"]*"[^>]*>([\s\S]*?)<\/article>/gi, m;
+        while ((m = slideRe.exec(html)) !== null) {
+            var block = m[1];
+            var bg = (block.match(/<img class="nv-hero-bg"[^>]*src="([^"]+)"/i) || [])[1] || "";
+            var title = (block.match(/<h1 class="nv-hero-title"[^>]*>([^<]+)</i) || [])[1] || "";
+            var link = (block.match(/<a class="nv-btn nv-btn-primary"[^>]*href="([^"]+)"/i) || [])[1] || "";
+            if (!link) link = (block.match(/href="(\/watch\/[^"]+)"/i) || [])[1] || "";
+            title = cleanText(title);
+            if (!title || !link) continue;
+            items.push({ title: title, url: absoluteUrl(link), posterUrl: bg ? absoluteUrl(bg) : "", bannerUrl: bg ? absoluteUrl(bg) : "" });
+        }
+        return items;
     }
     function parseServerBlocks(html) {
         var groups = { hsub: [], sub: [], dub: [] };
@@ -370,7 +253,6 @@
         return mins;
     }
     // Parse the schema.org TVEpisode JSON-LD embedded on each /watch/{slug}/ep-N page.
-    // Provides REAL per-episode: thumbnail (poster), air date, duration.
     function parseEpisodeJsonLd(html) {
         try {
             var m = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/i);
@@ -444,9 +326,10 @@
         try {
             var q = cleanText(query || "");
             if (!q) { cb({ success: true, data: [] }); return; }
-            var json = await httpGetJson(BASE + "ajax/search?q=" + encodeURIComponent(q));
+            var json = await http_get(BASE + "ajax/search?q=" + encodeURIComponent(q), apiHeaders());
+            var parsed = parseJsonSafe(json && json.body ? json.body : "", null);
             var items = [];
-            if (json && json.success && Array.isArray(json.results)) json.results.forEach(function (r) { items.push(apiItemToMultimedia(r)); });
+            if (parsed && parsed.success && Array.isArray(parsed.results)) parsed.results.forEach(function (r) { items.push(apiItemToMultimedia(r)); });
             cb({ success: true, data: items });
         } catch (e) {
             cb({ success: false, errorCode: "SEARCH_ERROR", message: String(e && e.message ? e.message : e) });
@@ -459,37 +342,41 @@
             if (!slug) throw new Error("Invalid AniNeko URL: " + url);
             var detailUrl = BASE + "watch/" + slug;
             var html = await httpGetText(detailUrl, htmlHeaders());
+
             var titleMatch = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
             var title = titleMatch ? cleanText(titleMatch[1]) : cleanText(slug);
             var posterUrl = parseOgImage(html) || "";
             var bannerUrl = parseBanner(html) || posterUrl || "";
-            var description = parseDescription(html);
+            var description = parseDescription(html);          // series plot (set ONCE, not per-episode)
             var genres = parseGenres(html);
             var sy = parseStatusYear(html);
-            var eps = parseEpisodeGrid(html);
+
+            // Robust grid parse via native helper -> all episodes, consistent titles.
+            var articleEls = [];
+            try { articleEls = await parse_html(html, "article.nv-info-episode-item", null); } catch (e) { articleEls = []; }
+            var eps = parseArticleBlocks(articleEls);
             if (!eps.length) eps = [{ episode: 1, url: detailUrl + "/ep-1", title: "Episode 1", hasDub: false, hasHsub: false, hasSub: true }];
 
-            // Enrich a bounded number of episodes with their per-episode JSON-LD (real thumb / air date / duration).
-            // We only FETCH the first EP_META_CAP episode pages to avoid N network calls on long series;
-            // later episodes still get the series poster but no per-episode air date / duration.
-            var enrichCount = Math.min(eps.length, EP_META_CAP);
-            var epHtmlList = await Promise.all(eps.slice(0, enrichCount).map(function (ep) {
-                return httpGetText(ep.url, htmlHeaders()).catch(function () { return ""; });
-            }));
+            // Bounded parallel enrichment (first EP_META_CAP episodes) for real thumb/airDate/runtime.
+            var cap = Math.min(eps.length, EP_META_CAP);
+            var metas = new Array(eps.length).fill(null);
+            if (cap > 0) {
+                var reqs = eps.slice(0, cap).map(function (ep) { return { method: "GET", url: ep.url, headers: htmlHeaders() }; });
+                var resps = await http_parallel(reqs);
+                for (var ri = 0; ri < resps.length; ri++) {
+                    if (resps[ri]) metas[ri] = parseEpisodeJsonLd(String(resps[ri].body || ""));
+                }
+            }
 
             var episodes = eps.map(function (ep, idx) {
-                var meta = (idx < enrichCount) ? parseEpisodeJsonLd(epHtmlList[idx]) : null;
-                var dubStatus;
-                if (ep.hasDub) dubStatus = "dub";
-                else if (ep.hasHsub) dubStatus = "hardsub";
-                else dubStatus = "softsub";
+                var meta = (idx < cap) ? metas[idx] : null;
+                var dubStatus = ep.hasDub ? "dub" : (ep.hasHsub ? "hardsub" : "softsub");
                 return new Episode({
                     name: ep.title || ("Episode " + ep.episode),
                     url: JSON.stringify({ url: ep.url, episode: ep.episode }),
                     season: 1,
                     episode: ep.episode,
                     posterUrl: (meta && meta.thumbnailUrl) || posterUrl || undefined,
-                    description: description || undefined,
                     airDate: meta ? meta.airDate : undefined,
                     runtime: (meta && meta.durationMin) ? meta.durationMin : undefined,
                     headers: { "Referer": BASE },
@@ -497,11 +384,10 @@
                 });
             });
 
-            // Next airing: only meaningful while the series is still ongoing.
+            // Next airing: only while still ongoing (never fabricate for completed).
             var nextAiring = null;
             if (sy.status === "ongoing" && episodes.length) {
-                var maxEp = episodes[episodes.length - 1].episode;
-                nextAiring = new NextAiring({ episode: maxEp + 1, season: 1, airDate: "" });
+                nextAiring = new NextAiring({ episode: episodes[episodes.length - 1].episode + 1, season: 1, airDate: "" });
             }
 
             cb({ success: true, data: new MultimediaItem({
@@ -510,10 +396,9 @@
                 posterUrl: posterUrl,
                 bannerUrl: bannerUrl,
                 type: "anime",
-                description: description || undefined,
+                description: description || undefined,   // set once on the series
                 year: sy.year,
                 status: sy.status,
-                duration: (episodes[0] && episodes[0].runtime) || undefined,
                 tags: genres.length ? genres : undefined,
                 nextAiring: nextAiring,
                 headers: { "Referer": BASE },

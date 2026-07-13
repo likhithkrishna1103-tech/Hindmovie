@@ -779,7 +779,7 @@
                 posterUrl: info && info.posterUrl || basics.posterUrl,
                 description: info && info.description || basics.description,
                 score: info && info.score || undefined,
-                released: info && info.released || undefined
+                airDate: info && info.released || undefined
             });
         });
     }
