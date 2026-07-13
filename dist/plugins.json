@@ -127,7 +127,7 @@
   {
     "packageName": "com.igris.repo.anineko",
     "name": "Anineko",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://anineko.to/",
     "domains": [
       {
@@ -170,7 +170,7 @@
   {
     "packageName": "com.igris.repo.cinefreak",
     "name": "Cinefreak",
-    "version": 7,
+    "version": 8,
     "baseUrl": "https://cinefreak.nl",
     "description": "Cinefreak plugin for ZORO",
     "authors": [
@@ -255,7 +255,7 @@
   {
     "packageName": "com.igris.repo.hindmoviez",
     "name": "HindMoviez",
-    "version": 15,
+    "version": 16,
     "baseUrl": "https://hindmovie.icu",
     "description": "Trending movies and series, quickly.",
     "authors": [
@@ -512,6 +512,29 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.senshi.sky"
   },
   {
+    "packageName": "com.igris.repo.tamilblasters",
+    "name": "Tamilblasters",
+    "version": 2,
+    "baseUrl": "https://www.1tamilblasters.pro",
+    "description": "TamilBlasters - Tamil/Telugu/Hindi/Malayalam/Kannada movies & series with HLS streams (StreamHG/Lulu) and direct MKV downloads",
+    "authors": [
+      "Igris"
+    ],
+    "languages": [
+      "en",
+      "ta",
+      "te",
+      "hi",
+      "ml",
+      "kn"
+    ],
+    "categories": [
+      "Movies",
+      "Series"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.tamilblasters.sky"
+  },
+  {
     "packageName": "com.igris.repo.youtube",
     "name": "YouTube",
     "version": 34,
@@ -558,7 +581,7 @@
   {
     "packageName": "com.igris.repo.zinkmovies",
     "name": "Zinkmovies",
-    "version": 5,
+    "version": 6,
     "baseUrl": "https://new7.zinkmovies.biz",
     "description": "Zinkmovies movies, series, anime, and KDrama with HubCloud mirror resolution.",
     "authors": [
