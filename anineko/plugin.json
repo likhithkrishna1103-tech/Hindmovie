@@ -1,0 +1,23 @@
+{
+  "packageName": "com.igris.repo.anineko",
+  "name": "Anineko",
+  "version": 1,
+  "baseUrl": "https://anineko.to/",
+  "domains": [
+    {
+      "name": "anineko",
+      "url": "https://anineko.to"
+    }
+  ],
+  "description": "Rich anime provider with HardSub, SoftSub and Dub streams",
+  "authors": [
+    "Igris"
+  ],
+  "languages": [
+    "en",
+    "ja"
+  ],
+  "categories": [
+    "Anime"
+  ]
+}

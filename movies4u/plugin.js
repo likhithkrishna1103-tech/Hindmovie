@@ -82,7 +82,7 @@
     var CACHE_TTL = 300000;
 
     var MAIN_PAGE_SECTIONS = [
-        { path: "", title: "Home" },
+        { path: "", title: "Trending" },
         { path: "category/bollywood-movies/", title: "BollyWood" },
         { path: "category/hollywood-movies/", title: "HollyWood" },
         { path: "category/web-series/", title: "WEB-Series" },
@@ -700,6 +700,36 @@
         return href ? href.split("/")[0] : "";
     }
 
+    function extractDurationFromHtml(html) {
+        var text = stripTags(String(html || ""));
+        var match = text.match(/(?:Duration|Runtime|Length)[:\s]*(\d+)\s*(?:min|minutes?|mins?|m\b)/i);
+        if (match) return Number(match[1]);
+        var hMatch = text.match(/(\d+)\s*h(?:r|our)?s?\s*(?:\d+)?\s*(?:min|minutes?|mins?)?/i);
+        if (hMatch) {
+            var hours = Number(hMatch[1]) * 60;
+            var mins = text.match(/\d+\s*h(?:r|our)?s?\s*(\d+)\s*(?:min|minutes?|mins?)/i);
+            return hours + (mins ? Number(mins[1]) : 0);
+        }
+        return undefined;
+    }
+
+    function extractTrailerFromHtml(html, base) {
+        var match = firstMatch(html, [
+            /<a\b[^>]*href=["']([^"']*(?:youtube\.com\/watch|youtu\.be\/)[^"']*)["']/i,
+            /<iframe\b[^>]*src=["']([^"']*(?:youtube\.com\/embed|youtube\.com\/v)[^"']*)["']/i
+        ]);
+        if (!match) return "";
+        if (/youtu\.be\/([a-zA-Z0-9_-]+)/.test(match)) {
+            var id = match.match(/youtu\.be\/([a-zA-Z0-9_-]+)/);
+            return "https://www.youtube.com/watch?v=" + id[1];
+        }
+        if (/youtube\.com\/embed\/([a-zA-Z0-9_-]+)/.test(match)) {
+            var embedId = match.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]+)/);
+            return "https://www.youtube.com/watch?v=" + embedId[1];
+        }
+        return match;
+    }
+
     function getSeasonSections(html, base) {
         var section = extractBetweenMarkers(
             html,
@@ -906,7 +936,55 @@
     function fetchTmdbDetails(type, tmdbId) {
         if (!tmdbId) return Promise.resolve({});
         var mediaType = type === "movie" ? "movie" : "tv";
-        return fetchTmdbJson(TMDB_WORKER_API + "/" + mediaType + "/" + tmdbId + "?api_key=" + TMDB_WORKER_API_KEY + "&append_to_response=credits");
+        return fetchTmdbJson(TMDB_WORKER_API + "/" + mediaType + "/" + tmdbId + "?api_key=" + TMDB_WORKER_API_KEY + "&append_to_response=credits,videos");
+    }
+
+    function extractTmdbTrailerUrl(tmdbDetails) {
+        if (!tmdbDetails || !tmdbDetails.videos) return "";
+        var results = tmdbDetails.videos.results || [];
+        var official = null;
+        var fallback = null;
+        for (var i = 0; i < results.length; i++) {
+            var v = results[i];
+            if (!v || !v.key) continue;
+            var name = String(v.name || "").toLowerCase();
+            var type = String(v.type || "").toLowerCase();
+            if (v.site === "YouTube" && type === "trailer" && v.official) {
+                if (!official || name.indexOf("official") !== -1) official = v;
+            }
+            if (!fallback && v.site === "YouTube" && type === "trailer") fallback = v;
+        }
+        var best = official || fallback;
+        if (!best) {
+            for (var j = 0; j < results.length; j++) {
+                if (results[j] && results[j].key && results[j].site === "YouTube") {
+                    best = results[j];
+                    break;
+                }
+            }
+        }
+        return best ? ("https://www.youtube.com/watch?v=" + best.key) : "";
+    }
+
+    function extractTmdbDuration(tmdbDetails, type) {
+        if (!tmdbDetails) return undefined;
+        if (type === "movie") {
+            var runtime = Number(tmdbDetails.runtime);
+            return isNaN(runtime) || runtime <= 0 ? undefined : runtime;
+        }
+        var runTimes = tmdbDetails.episode_run_time;
+        if (Array.isArray(runTimes) && runTimes.length > 0) {
+            var first = Number(runTimes[0]);
+            return isNaN(first) || first <= 0 ? undefined : first;
+        }
+        return undefined;
+    }
+
+    function extractTmdbGenres(tmdbDetails) {
+        if (!tmdbDetails || !Array.isArray(tmdbDetails.genres)) return [];
+        return tmdbDetails.genres.map(function (g) {
+            return g && g.name ? g.name : "";
+        }).filter(Boolean);
     }
 
     function fetchSeasonMetadata(tmdbId, season) {
@@ -1744,32 +1822,141 @@
         });
     }
 
+    async function httpParallelGet(requests) {
+        var items = Array.isArray(requests) ? requests.filter(function (item) { return item && item.url; }) : [];
+        if (!items.length) return [];
+        if (typeof http_parallel === "function") {
+            try {
+                var parallelRes = await http_parallel(items.map(function (item) {
+                    return {
+                        method: "GET",
+                        url: item.url,
+                        headers: item.headers || defaultHeaders()
+                    };
+                }));
+                return items.map(function (item, index) {
+                    var res = parallelRes && parallelRes[index];
+                    return {
+                        status: (res && typeof res.status !== "undefined") ? res.status : 200,
+                        body: String(res && (res.body || res.text || "") || ""),
+                        headers: (res && res.headers) || {},
+                        url: (res && (res.url || res.finalUrl)) || item.url
+                    };
+                });
+            } catch (_) {}
+        }
+        return await Promise.all(items.map(function (item) {
+            return request(item.url, { headers: item.headers || defaultHeaders(), timeout: 15000 }).catch(function () {
+                return { status: 599, body: "", headers: {}, url: item.url };
+            });
+        }));
+    }
+
     async function getHome(cb) {
         try {
             var mainUrl = await getMainUrl();
             var results = {};
             var firstHtml = "";
-            var sectionEntries = await Promise.all(MAIN_PAGE_SECTIONS.map(function (section) {
-                var url = absoluteUrl(mainUrl + "/", section.path);
-                return getText(url, mainPageHeaders(mainUrl)).then(function (html) {
-                    return {
-                        title: section.title,
-                        html: html,
-                        items: parseHomeResults(html, mainUrl)
-                    };
-                }).catch(function () {
-                    return {
-                        title: section.title,
-                        html: "",
-                        items: []
-                    };
-                });
-            }));
 
-            for (var i = 0; i < sectionEntries.length; i++) {
-                var entry = sectionEntries[i];
-                if (!firstHtml && entry.html) firstHtml = entry.html;
-                results[entry.title] = entry.items;
+            var sectionRequests = MAIN_PAGE_SECTIONS.map(function (section) {
+                return {
+                    url: absoluteUrl(mainUrl + "/", section.path),
+                    headers: mainPageHeaders(mainUrl)
+                };
+            });
+            var sectionResponses = await httpParallelGet(sectionRequests);
+
+            var sectionEntries = sectionResponses.map(function (res, idx) {
+                var html = res && res.body ? res.body : "";
+                if (!firstHtml && html) firstHtml = html;
+                return {
+                    title: MAIN_PAGE_SECTIONS[idx].title,
+                    html: html,
+                    items: parseHomeResults(html, mainUrl)
+                };
+            });
+
+            var trendingIdx = 0;
+            var trendingEntry = sectionEntries[trendingIdx];
+            var trendingItems = (trendingEntry && trendingEntry.items) || [];
+            var trendingMeta = {};
+
+            if (trendingItems.length) {
+                var searchReqs = [];
+                for (var t = 0; t < trendingItems.length; t++) {
+                    var item = trendingItems[t];
+                    var rawTitle = trim(String(item.title || "").split("(")[0]);
+                    var yearMatch = String(item.title || "").match(/\((\d{4})\)/);
+                    var searchYear = yearMatch ? yearMatch[1] : "";
+                    var mediaType = item.type === "series" ? "tv" : "movie";
+                    var searchUrl = TMDB_WORKER_API + "/search/" + mediaType + "?api_key=" + TMDB_WORKER_API_KEY + "&query=" + encodeURIComponent(rawTitle) + (searchYear ? "&year=" + searchYear : "");
+                    searchReqs.push({ url: searchUrl, headers: defaultHeaders() });
+                }
+
+                var searchResponses = await httpParallelGet(searchReqs);
+
+                var detailReqs = [];
+                var detailOrigIdx = [];
+                for (var r = 0; r < searchResponses.length; r++) {
+                    var searchJson = parseJsonSafe(searchResponses[r].body, {});
+                    var itemYearMatch = String(trendingItems[r].title || "").match(/\((\d{4})\)/);
+                    var itemYear = itemYearMatch ? itemYearMatch[1] : "";
+                    var bestResult = chooseBestTmdbResult(searchJson.results, trendingItems[r].title, itemYear);
+                    if (bestResult && bestResult.id) {
+                        var mdType = trendingItems[r].type === "series" ? "tv" : "movie";
+                        detailReqs.push({
+                            url: TMDB_WORKER_API + "/" + mdType + "/" + bestResult.id + "?api_key=" + TMDB_WORKER_API_KEY + "&append_to_response=images",
+                            headers: defaultHeaders()
+                        });
+                        detailOrigIdx.push(r);
+                    }
+                }
+
+                var detailResponses = detailReqs.length ? await httpParallelGet(detailReqs) : [];
+                for (var d = 0; d < detailResponses.length; d++) {
+                    var origItemIdx = detailOrigIdx[d];
+                    var details = parseJsonSafe(detailResponses[d].body, {});
+                    var logos = (details && details.images && details.images.logos) || [];
+                    var logoUrl = "";
+                    for (var li = 0; li < logos.length; li++) {
+                        if (logos[li] && logos[li].file_path) {
+                            logoUrl = "https://image.tmdb.org/t/p/w500" + logos[li].file_path;
+                            if ((logos[li].iso_639_1 || "").toLowerCase() === "en") break;
+                        }
+                    }
+                    var bannerPath = details && details.backdrop_path ? details.backdrop_path : "";
+                    var genres = extractTmdbGenres(details);
+                    var rating = details && typeof details.vote_average === "number" ? Number(details.vote_average.toFixed(1)) : undefined;
+                    trendingMeta[origItemIdx] = {
+                        logo: logoUrl || undefined,
+                        banner: bannerPath ? (TMDB_IMAGE_BASE + bannerPath) : undefined,
+                        genres: genres,
+                        rating: rating
+                    };
+                }
+            }
+
+            for (var e = 0; e < sectionEntries.length; e++) {
+                var entry = sectionEntries[e];
+                if (e === trendingIdx) {
+                    var enrichedItems = entry.items.map(function (item, idx) {
+                        var meta = trendingMeta[idx] || {};
+                        return {
+                            title: item.title,
+                            url: item.url,
+                            posterUrl: item.posterUrl,
+                            type: item.type,
+                            quality: item.quality,
+                            logo: meta.logo,
+                            banner: meta.banner,
+                            genres: meta.genres,
+                            rating: meta.rating
+                        };
+                    });
+                    results[entry.title] = enrichedItems;
+                } else {
+                    results[entry.title] = entry.items;
+                }
             }
 
             var total = 0;
@@ -1908,6 +2095,9 @@
             var year = trim((tmdbDetails && (tmdbDetails.first_air_date || tmdbDetails.release_date) || "").slice(0, 4));
             var cast = buildActorList(tmdbDetails && tmdbDetails.credits && tmdbDetails.credits.cast);
             var score = tmdbDetails && typeof tmdbDetails.vote_average === "number" ? Number(tmdbDetails.vote_average.toFixed(1)) : undefined;
+            var trailerUrl = extractTmdbTrailerUrl(tmdbDetails) || extractTrailerFromHtml(html, sourceUrl);
+            var duration = extractTmdbDuration(tmdbDetails, isMovie ? "movie" : "tv") || extractDurationFromHtml(html);
+            var genres = extractTmdbGenres(tmdbDetails);
 
             if (isMovie) {
                 var movieLinks = uniqueBy(downloadLinks, function (item) { return item; });
@@ -1924,6 +2114,9 @@
                         description: description,
                         year: year ? Number(year) : undefined,
                         score: score,
+                        duration: duration,
+                        genres: genres,
+                        trailer: trailerUrl || undefined,
                         cast: cast,
                         headers: defaultHeaders({ "Referer": sourceUrl }),
                         episodes: [
@@ -1989,6 +2182,9 @@
                     description: description,
                     year: year ? Number(year) : undefined,
                     score: score,
+                    duration: duration,
+                    genres: genres,
+                    trailer: trailerUrl || undefined,
                     cast: cast,
                     headers: defaultHeaders({ "Referer": sourceUrl }),
                     episodes: episodes
