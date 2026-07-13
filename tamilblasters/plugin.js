@@ -132,17 +132,17 @@
 
         blocks.forEach(function (block) {
             // Prefer the entry-title anchor for the canonical link + title.
-            var titleAnchor = block.match(/<h2[^>]*blog-entry-title[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+            var titleAnchor = block.match(/<h2[^>]*blog-entry-title[^>]*>\s*<a[^>]+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i);
             var href = "", title = "";
             if (titleAnchor) { href = titleAnchor[1]; title = cleanText(titleAnchor[2]); }
             if (!href) {
-                var anyA = block.match(/<a[^>]+href="([^"]+)"[^>]*rel="bookmark"/i);
+                var anyA = block.match(/<a[^>]+href="([^"]*)"[^>]*rel="bookmark"/i);
                 if (anyA) href = anyA[1];
             }
-            var img = block.match(/<img[^>]+(?:data-src|src)="([^"]+)"[^>]*>/i);
+            var img = block.match(/<img[^>]+(?:data-src|src)="([^"]*)"[^>]*>/i);
             var poster = img ? absUrl(img[1]) : "";
             if (!title && img) {
-                var alt = img[0].match(/alt="([^"]+)"/i);
+                var alt = img[0].match(/alt="([^"]*)"/i);
                 if (alt) title = cleanText(alt[1]);
             }
             href = absUrl(href);
@@ -160,6 +160,8 @@
     // ============================================================
     // Detail page extraction
     // ============================================================
+
+    // Extract iframe src URLs (case-insensitive, handles <IFRAME SRC="...">).
     async function extractIframes(html) {
         var out = [];
         if (typeof parse_html === "function") {
@@ -167,18 +169,69 @@
                 var rows = await parse_html(String(html || ""), "iframe", "src");
                 (rows || []).forEach(function (r) {
                     var s = r && (r.attr || r.src || r.href || "");
-                    if (s) out.push(absUrl(s));
+                    if (s) out.push(String(s).trim());
                 });
             } catch (_) { /* fall through */ }
         }
         if (!out.length) {
-            var re = /<iframe[^>]+src="([^"]+)"/gi, m;
-            while ((m = re.exec(String(html || "")))) out.push(absUrl(m[1]));
+            // Case-insensitive, handles <IFRAME SRC=...> and quoted/unquoted values.
+            var re = /<iframe\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*))/gi;
+            var m;
+            while ((m = re.exec(String(html || "")))) {
+                var val = m[1] || m[2] || m[3];
+                if (val) out.push(val);
+            }
         }
         // de-dup
         var seen = {}, res = [];
         out.forEach(function (u) { if (u && !seen[u]) { seen[u] = 1; res.push(u); } });
         return res;
+    }
+
+    // Like the cs3's extractVideos(): pair each iframe with its nearest preceding
+    // <p> sibling for a human-readable label.
+    function extractIframeWithLabels(html) {
+        var text = String(html || "");
+        var pairs = [];
+
+        // Find all iframes with their positions.
+        var iframeRe = /<iframe\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*))/gi;
+        var positions = [];
+        var m;
+        while ((m = iframeRe.exec(text))) {
+            var val = m[1] || m[2] || m[3];
+            if (val) {
+                positions.push({ src: val, index: m.index });
+            }
+        }
+
+        // Find all <p> elements with their positions.
+        var pRe = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+        var pTags = [];
+        var pm;
+        while ((pm = pRe.exec(text))) {
+            pTags.push({ text: cleanText(pm[1]), index: pm.index, end: pm.index + pm[0].length });
+        }
+
+        // For each iframe, find the preceding <p> (closest before the iframe).
+        for (var i = 0; i < positions.length; i++) {
+            var ifr = positions[i];
+            var label = "";
+            var closestDist = Infinity;
+            for (var j = 0; j < pTags.length; j++) {
+                var pTag = pTags[j];
+                if (pTag.end < ifr.index && (ifr.index - pTag.end) < closestDist) {
+                    var t = pTag.text.replace(/^(?:Watch\s*(?:Online|Now|Full|In\s*HD)\s*)+/i, "").trim();
+                    if (t && t.length > 1 && t.length < 60) {
+                        label = t;
+                        closestDist = ifr.index - pTag.end;
+                    }
+                }
+            }
+            pairs.push({ src: absUrl(ifr.src), label: label || "Stream" });
+        }
+
+        return pairs;
     }
 
     function extractDownloadButtons(html) {
@@ -267,7 +320,6 @@
         var s = String(unpacked || "");
         // Match the .cs3 reference intercept filter: (m3u8|master\.txt).
         // StreamHG player defines links={"hls2":"...master.m3u8","hls4":"/stream/...master.m3u8","hls3":"...master.txt"}.
-        // Prefer an absolute hls2/hls4 m3u8, then hls3 master.txt, then any jwplayer file, then generic.
         var STREAM_RE = "(?:m3u8|master\\.txt)";
 
         // 1) Explicit hls2/hls4/hls key with an absolute stream URL.
@@ -385,30 +437,86 @@
             var se = parseSeasonEpisode(meta.title);
             var type = se.isSeries ? "series" : "movie";
 
-            // Each 1tamilblasters post is a single movie or a single episode.
-            // Build ONE Episode; the stream URL is a JSON payload carrying the source page.
-            var payload = JSON.stringify({ sourceUrl: url, title: meta.title, type: type });
-            var episode = new Episode({
-                name: se.isSeries ? ("Season " + se.season + " Episode " + se.episode) : "Movie",
-                url: payload,
-                season: se.season,
-                episode: se.episode,
-                description: meta.desc,
-                posterUrl: meta.poster || undefined,
-                headers: HEADERS,
-                dubStatus: "none"
-            });
+            if (type === "movie") {
+                // Movie: single S1E1 episode with the page URL as payload.
+                var payload = JSON.stringify({ sourceUrl: url, title: meta.title, type: type });
+                var episode = new Episode({
+                    name: "Movie",
+                    url: payload,
+                    season: 1,
+                    episode: 1,
+                    description: meta.desc,
+                    posterUrl: meta.poster || undefined,
+                    headers: HEADERS,
+                    dubStatus: "none"
+                });
+                var item = new MultimediaItem({
+                    title: meta.title || "Tamilblasters",
+                    url: url,
+                    posterUrl: meta.poster,
+                    type: "movie",
+                    description: meta.desc,
+                    year: meta.year || undefined,
+                    headers: HEADERS,
+                    playbackPolicy: "VPN Recommended",
+                    episodes: [episode]
+                });
+                return cb({ success: true, data: item });
+            }
+
+            // --- SERIES ---
+            // cs3-style: one Episode per iframe, paired with preceding <p> label.
+            var iframePairs = extractIframeWithLabels(html);
+            var episodes = [];
+            var epNum = se.episode;
+
+            if (iframePairs.length) {
+                for (var i = 0; i < iframePairs.length; i++) {
+                    var pair = iframePairs[i];
+                    // Episode URL = JSON that loadStreams will parse to resolve this single iframe.
+                    var epPayload = JSON.stringify({
+                        url: pair.src,
+                        sourceUrl: url,
+                        label: pair.label,
+                        season: se.season,
+                        episode: epNum
+                    });
+                    episodes.push(new Episode({
+                        name: pair.label,
+                        url: epPayload,
+                        season: se.season,
+                        episode: epNum + i,
+                        description: meta.desc,
+                        posterUrl: meta.poster || undefined,
+                        headers: HEADERS,
+                        dubStatus: "none"
+                    }));
+                }
+            } else {
+                // No iframes found — still return the episode so loadStreams can fetch the page.
+                var fallbackPayload = JSON.stringify({ sourceUrl: url, title: meta.title, type: type });
+                episodes.push(new Episode({
+                    name: "Season " + se.season + " Episode " + se.episode,
+                    url: fallbackPayload,
+                    season: se.season,
+                    episode: se.episode,
+                    description: meta.desc,
+                    posterUrl: meta.poster || undefined,
+                    headers: HEADERS,
+                    dubStatus: "none"
+                }));
+            }
 
             var item = new MultimediaItem({
                 title: meta.title || "Tamilblasters",
                 url: url,
                 posterUrl: meta.poster,
-                type: type,
+                type: "series",
                 description: meta.desc,
                 year: meta.year || undefined,
                 headers: HEADERS,
                 playbackPolicy: "VPN Recommended",
-                episodes: [episode]
+                episodes: episodes
             });
             cb({ success: true, data: item });
         } catch (e) {
@@ -418,19 +526,45 @@
 
     async function loadStreams(url, cb) {
         try {
-            // load() passes a JSON payload as the episode URL; accept both that and a plain page URL.
+            // Try to parse as JSON payload (from load())
+            var payload = null;
+            try { payload = JSON.parse(url); } catch (_) {}
+
+            if (payload && payload.url) {
+                // -- Series episode: resolve THIS specific iframe --
+                var streams = await resolveEmbeds([payload.url]);
+
+                // Also fetch the source page for download buttons.
+                if (payload.sourceUrl) {
+                    try {
+                        var html = await httpGet(payload.sourceUrl);
+                        var buttons = extractDownloadButtons(html);
+                        buttons.forEach(function (b) {
+                            streams.push(new StreamResult({
+                                url: b.url,
+                                source: b.label,
+                                quality: b.quality,
+                                headers: { "User-Agent": UA, "Referer": BASE_URL + "/" }
+                            }));
+                        });
+                    } catch (_) {}
+                }
+
+                if (!streams.length) {
+                    return cb({ success: false, errorCode: "NO_STREAMS", message: "No stream resolved for this episode." });
+                }
+                return cb({ success: true, data: streams });
+            }
+
+            // -- Movie / fallback: fetch the page, resolve ALL iframes + downloads --
             var sourceUrl = url;
-            try {
-                var payload = JSON.parse(url);
-                if (payload && payload.sourceUrl) sourceUrl = payload.sourceUrl;
-            } catch (_) { /* plain URL */ }
+            if (payload && payload.sourceUrl) sourceUrl = payload.sourceUrl;
 
             var html = await httpGet(sourceUrl);
 
             var iframes = await extractIframes(html);
             var buttons = extractDownloadButtons(html);
 
-            // Resolve embedded players (m3u8) and direct download links in parallel.
             var embedStreamsP = resolveEmbeds(iframes);
             var downloadStreams = buttons.map(function (b) {
                 return new StreamResult({
