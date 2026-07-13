@@ -1018,6 +1018,16 @@
         return fetchTmdbJson(TMDB_WORKER_API + "/" + mediaType + "/" + tmdbId + "?api_key=" + TMDB_WORKER_API_KEY + "&append_to_response=credits");
     }
 
+    // Resolve a TMDB poster image URL for a search-result title (search API has no poster).
+    function fetchTmdbPosterUrl(mediaType, title, year) {
+        return searchTmdbId(mediaType, title, year).then(function (id) {
+            if (!id) return "";
+            return fetchTmdbJson(TMDB_WORKER_API + "/" + mediaType + "/" + id + "?api_key=" + TMDB_WORKER_API_KEY).then(function (json) {
+                return (json && json.poster_path) ? (TMDB_IMAGE_BASE + json.poster_path) : "";
+            }).catch(function () { return ""; });
+        }).catch(function () { return ""; });
+    }
+
     function fetchSeasonMetadata(tmdbId, season) {
         if (!tmdbId || !season) return Promise.resolve({});
         return fetchTmdbJson(TMDB_WORKER_API + "/tv/" + tmdbId + "/season/" + season + "?api_key=" + TMDB_WORKER_API_KEY).then(function (json) {
@@ -2042,23 +2052,48 @@
                 return;
             }
 
-            var results = data.map(function (item) {
+            var baseResults = data.map(function (item) {
                 var rawTitle = String(item.t || item.title || "");
                 var itemSlug = String(item.l || item.href || item.slug || "");
                 var itemUrl = absoluteUrl(mainUrl, itemSlug);
                 if (!/^https?:\/\//i.test(itemUrl) && !/\/$/.test(itemUrl)) itemUrl += "/";
-                var poster = String(item.poster || item.img || "");
-                poster = poster.indexOf("http") === 0 ? poster : absoluteUrl(mainUrl, poster);
+                var yearMatch = String(rawTitle || "").match(/\((\d{4})\)/);
+                var year = yearMatch ? Number(yearMatch[1]) : 0;
                 var type = /season|series|episode|s0|full-series-download/i.test(rawTitle) ? "series" : "movie";
-                return new MultimediaItem({
+                return {
+                    rawTitle: rawTitle,
                     title: trim(rawTitle.split(" (")[0]),
                     url: itemUrl,
-                    posterUrl: poster,
                     type: type,
-                    quality: getSearchQuality(rawTitle),
+                    year: year,
+                    mediaType: type === "series" ? "tv" : "movie",
+                    quality: getSearchQuality(rawTitle)
+                };
+            }).filter(function (item) { return !!item.title; });
+
+            if (!baseResults.length) {
+                cb({ success: false, errorCode: "SEARCH_EMPTY", message: "No search items parsed." });
+                return;
+            }
+
+            // Enrich each result with a real TMDB poster (search API has no poster field).
+            var posterPromises = baseResults.map(function (item) {
+                return fetchTmdbPosterUrl(item.mediaType, item.title, item.year);
+            });
+            var posters = await Promise.all(posterPromises);
+
+            var results = baseResults.map(function (item, idx) {
+                var poster = posters[idx] || "";
+                return new MultimediaItem({
+                    title: item.title,
+                    url: item.url,
+                    posterUrl: poster,
+                    type: item.type,
+                    year: item.year || undefined,
+                    quality: item.quality,
                     headers: defaultHeaders({ "Referer": mainUrl + "/" })
                 });
-            }).filter(function (item) { return !!item.title; });
+            });
 
             if (!results.length) {
                 cb({ success: false, errorCode: "SEARCH_EMPTY", message: "No search items parsed." });
