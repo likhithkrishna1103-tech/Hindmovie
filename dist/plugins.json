@@ -125,6 +125,30 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animewave.sky"
   },
   {
+    "packageName": "com.igris.repo.anineko",
+    "name": "Anineko",
+    "version": 1,
+    "baseUrl": "https://anineko.to/",
+    "domains": [
+      {
+        "name": "anineko",
+        "url": "https://anineko.to"
+      }
+    ],
+    "description": "Rich anime provider with HardSub, SoftSub and Dub streams",
+    "authors": [
+      "Igris"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anineko.sky"
+  },
+  {
     "packageName": "com.igris.repo.castletv",
     "name": "Castle TV",
     "version": 9,
@@ -146,7 +170,7 @@
   {
     "packageName": "com.igris.repo.cinefreak",
     "name": "Cinefreak",
-    "version": 5,
+    "version": 6,
     "baseUrl": "https://cinefreak.nl",
     "description": "Cinefreak plugin for ZORO",
     "authors": [
@@ -231,7 +255,7 @@
   {
     "packageName": "com.igris.repo.hindmoviez",
     "name": "HindMoviez",
-    "version": 13,
+    "version": 14,
     "baseUrl": "https://hindmovie.icu",
     "description": "Trending movies and series, quickly.",
     "authors": [
@@ -282,7 +306,7 @@
   {
     "packageName": "com.igris.repo.movies4u",
     "name": "Movies4U",
-    "version": 27,
+    "version": 28,
     "baseUrl": "https://new2.movies4u.style",
     "description": "Movie picks with straightforward stream links.",
     "authors": [
@@ -534,7 +558,7 @@
   {
     "packageName": "com.igris.repo.zinkmovies",
     "name": "Zinkmovies",
-    "version": 3,
+    "version": 4,
     "baseUrl": "https://new7.zinkmovies.biz",
     "description": "Zinkmovies movies, series, anime, and KDrama with HubCloud mirror resolution.",
     "authors": [
