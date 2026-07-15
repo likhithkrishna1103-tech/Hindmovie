@@ -1,0 +1,14 @@
+{
+  "packageName": "com.igris.repo.vegamovies",
+  "name": "VegaMovies & RogMovies",
+  "version": 1,
+  "baseUrl": "https://vegamovies.mq",
+  "description": "VegaMovies and RogMovies providers",
+  "providers": [
+    { "id": "vegamovies", "name": "VegaMovies", "baseUrl": "https://vegamovies.mq" },
+    { "id": "rogmovies", "name": "RogMovies", "baseUrl": "https://rogmovies.vip" }
+  ],
+  "authors": ["Igris"],
+  "languages": ["hi", "en", "te", "ta", "ma"],
+  "categories": ["Movies", "series"]
+}
