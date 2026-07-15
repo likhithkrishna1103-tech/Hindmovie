@@ -535,6 +535,40 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.tamilblasters.sky"
   },
   {
+    "packageName": "com.igris.repo.vegamovies",
+    "name": "VegaMovies & RogMovies",
+    "version": 1,
+    "baseUrl": "https://vegamovies.mq",
+    "description": "VegaMovies and RogMovies providers",
+    "providers": [
+      {
+        "id": "vegamovies",
+        "name": "VegaMovies",
+        "baseUrl": "https://vegamovies.mq"
+      },
+      {
+        "id": "rogmovies",
+        "name": "RogMovies",
+        "baseUrl": "https://rogmovies.vip"
+      }
+    ],
+    "authors": [
+      "Igris"
+    ],
+    "languages": [
+      "hi",
+      "en",
+      "te",
+      "ta",
+      "ma"
+    ],
+    "categories": [
+      "Movies",
+      "series"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.vegamovies.sky"
+  },
+  {
     "packageName": "com.igris.repo.youtube",
     "name": "YouTube",
     "version": 34,
