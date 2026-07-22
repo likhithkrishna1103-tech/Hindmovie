@@ -83,7 +83,7 @@
   {
     "packageName": "com.igris.repo.animewave",
     "name": "AnimeWave + AniKoto",
-    "version": 8,
+    "version": 9,
     "baseUrl": "https://animewave.to",
     "domains": [
       {
