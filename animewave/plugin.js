@@ -789,16 +789,25 @@
     }
 
     async function expandM3u8(url, source, language, headers, subtitles) {
-        var rows = [buildStream(url, source, language, headers, subtitles)];
+        var rows = [];
         try {
             var playlist = await getText(url, headers, 30 * 1000);
+            if (!/#EXTM3U/i.test(playlist || "")) return [];
+
             var variantRe = /#EXT-X-STREAM-INF:([^\n\r]*)[\r\n]+([^\r\n]+)/gi;
             var match;
+            var foundVariants = false;
             while ((match = variantRe.exec(playlist || "")) !== null) {
+                foundVariants = true;
                 var q = getQuality(match[1]);
                 var variantUrl = absoluteUrl(url, trim(match[2]));
                 if (!variantUrl) continue;
                 rows.push(buildStream(variantUrl, source, language, headers, subtitles, q));
+            }
+
+            if (!foundVariants) {
+                var q = getQuality(url);
+                rows.push(buildStream(url, source, language, headers, subtitles, q));
             }
         } catch (_) {}
         return uniqueBy(rows, function (item) { return item.url; });
@@ -813,14 +822,7 @@
             "Referer": origin + "/",
             "Origin": origin
         };
-        var rows = await expandM3u8(streamUrl, source + " [Direct]", language, headers, []);
-        try {
-            var proxied = await buildMagicM3u8Url(streamUrl, headers);
-            if (proxied && proxied !== streamUrl) {
-                rows.push(buildStream(proxied, source + " [Direct Proxy]", language, headers, [], getQuality(streamUrl)));
-            }
-        } catch (_) {}
-        return uniqueBy(rows, function (item) { return item.url; });
+        return expandM3u8(streamUrl, source + " [Direct]", language, headers, []);
     }
 
     async function resolveMegaFamily(embedUrl, source, language, referer) {
@@ -832,7 +834,7 @@
         }, 30 * 1000);
 
         var iframe = (pageHtml.match(/<iframe\b[^>]*src=["']([^"']+)["']/i) || [])[1] || "";
-        if (iframe && /(?:megaplay\.buzz|vidwish\.live|kwik\.(?:cx|si)|kiwi\.)/i.test(iframe)) {
+        if (iframe && /(?:megaplay|vidwish|vidtube|megacloud|bloggy|kwik|kiwi)/i.test(iframe)) {
             return resolveHost(absoluteUrl(embedUrl, iframe), source, language, embedUrl);
         }
 
@@ -845,7 +847,7 @@
             "User-Agent": USER_AGENT,
             "Accept": "application/json, text/javascript, */*; q=0.01",
             "X-Requested-With": "XMLHttpRequest",
-            "Referer": origin + "/"
+            "Referer": embedUrl || (origin + "/")
         }, 30 * 1000);
         var file = json && json.sources && (json.sources.file || (json.sources[0] && json.sources[0].file)) || "";
         if (!file) return [];
@@ -865,7 +867,7 @@
     async function resolveHost(embedUrl, source, language, referer) {
         var host = (embedUrl.match(/^https?:\/\/([^\/]+)/i) || [])[1] || "";
         if (/kwik\.(?:cx|si)|kiwi\./i.test(host)) return resolveKwik(embedUrl, source, language);
-        if (/megaplay\.buzz|megacloud\.bloggy\.click|vidwish\.live/i.test(host)) {
+        if (/megaplay|vidtube|vidwish|megacloud|bloggy|kotocdn/i.test(host) || embedUrl.indexOf("/stream/") !== -1) {
             return resolveMegaFamily(embedUrl, source, language, referer);
         }
         return [];
@@ -878,31 +880,21 @@
         resultUrl = resultUrl.replace(/\\\//g, "/");
         var lang = server.language || "SUB";
         var source = "🎥 [" + lang + "] [" + trim(server.name || "Server") + "]";
-        var host = (resultUrl.match(/^https?:\/\/([^\/]+)/i) || [])[1] || "";
         var headers = {
             "User-Agent": USER_AGENT,
             "Referer": referer || BASE_URL + "/",
             "Origin": BASE_URL
         };
-        var rows = [];
 
-        if (/megaplay\.buzz|megacloud\.bloggy\.click|vidwish\.live|kwik\.(?:cx|si)|kiwi\./i.test(host)) {
-            try {
-                rows = await resolveHost(resultUrl, source, lang, referer);
-            } catch (_) {
-                rows = [];
-            }
+        if (/\.(?:m3u8|mp4|mkv|webm|mpd)(?:$|[?#])/i.test(resultUrl)) {
+            return expandM3u8(resultUrl, source, lang, headers, []);
         }
 
-        if (!rows.length && /\.(?:m3u8|mp4|mkv|webm|mpd)(?:$|[?#])/i.test(resultUrl)) {
-            rows = [buildStream(resultUrl, source, lang, headers)];
+        try {
+            return await resolveHost(resultUrl, source, lang, referer);
+        } catch (_) {
+            return [];
         }
-
-        // If the endpoint ever starts returning a direct master playlist, expose variants too.
-        if (/\.m3u8(?:$|[?#])/i.test(resultUrl)) {
-            rows = rows.concat(await expandM3u8(resultUrl, source, lang, headers, []));
-        }
-        return uniqueBy(rows, function (item) { return item.url; });
     }
 
     async function loadStreams(url, cb) {
@@ -910,21 +902,44 @@
             var payload = unpackPayload(url);
             var serverIds = trim(payload.serverIds || "");
             var referer = trim(payload.watchUrl || payload.cleanUrl || BASE_URL + "/home");
-            if (!serverIds && payload.url) {
-                var loadResult = await new Promise(function (resolve) {
-                    load(payload.url, function (res) { resolve(res); });
-                });
-                var eps = loadResult && loadResult.data && loadResult.data.episodes || [];
-                if (eps.length) {
-                    payload = unpackPayload(eps[0].url);
-                    serverIds = trim(payload.serverIds || "");
-                    referer = trim(payload.watchUrl || payload.cleanUrl || referer);
+            
+            var servers = [];
+            if (serverIds) {
+                try {
+                    var listJson = await getJson(BASE_URL + "/ajax/server/list?servers=" + encodeURIComponent(serverIds), ajaxHeaders(referer), 60 * 1000);
+                    if (listJson && listJson.result && listJson.result !== "Bad request") {
+                        servers = parseServers(listJson.result);
+                    }
+                } catch (_) {}
+            }
+
+            if (!servers.length) {
+                var targetWatchUrl = referer;
+                if (!targetWatchUrl || targetWatchUrl === BASE_URL + "/home") {
+                    targetWatchUrl = payload.url ? absoluteUrl(BASE_URL, unpackPayload(payload.url).url || payload.url) : "";
+                }
+                if (targetWatchUrl) {
+                    var html = await getText(targetWatchUrl, PAGE_HEADERS);
+                    var meta = parseWatchPage(html, targetWatchUrl);
+                    if (meta && meta.animeId) {
+                        var episodeJson = await getJson(BASE_URL + "/ajax/episode/list/" + encodeURIComponent(meta.animeId) + "?style=&vrf=", ajaxHeaders(targetWatchUrl), 2 * 60 * 1000);
+                        var epHtml = episodeJson && episodeJson.result || "";
+                        var targetEp = payload.episode || 1;
+                        var targetSlug = payload.slug || targetEp;
+                        var epMatch = epHtml.match(new RegExp('<a[^>]*data-num=["\']' + targetEp + '["\'][^>]*>', 'i')) ||
+                                      epHtml.match(new RegExp('<a[^>]*data-slug=["\']' + targetSlug + '["\'][^>]*>', 'i'));
+                        if (epMatch) {
+                            var attrs = parseAttrs(epMatch[0]);
+                            serverIds = attrs["data-ids"] || "";
+                            if (serverIds) {
+                                var newListJson = await getJson(BASE_URL + "/ajax/server/list?servers=" + encodeURIComponent(serverIds), ajaxHeaders(targetWatchUrl), 60 * 1000);
+                                servers = parseServers(newListJson && newListJson.result || "");
+                            }
+                        }
+                    }
                 }
             }
-            if (!serverIds) throw new Error("AnimeWave server id missing");
 
-            var listJson = await getJson(BASE_URL + "/ajax/server/list?servers=" + encodeURIComponent(serverIds), ajaxHeaders(referer), 60 * 1000);
-            var servers = parseServers(listJson && listJson.result || "");
             if (!servers.length) return cb({ success: true, data: [] });
 
             var batches = await Promise.all(servers.map(function (server) {
