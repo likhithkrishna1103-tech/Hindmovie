@@ -255,7 +255,7 @@
   {
     "packageName": "com.igris.repo.hindmoviez",
     "name": "HindMoviez",
-    "version": 16,
+    "version": 17,
     "baseUrl": "https://hindmovie.icu",
     "description": "Trending movies and series, quickly.",
     "authors": [
