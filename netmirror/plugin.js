@@ -1448,7 +1448,7 @@
             // whose `sources` carry the real .m3u8 and `tracks` carry captions.
             // (No /newtv/player.php, no Cloudflare clearance — the t_hash_t tier is
             // the actual gate, confirmed by decompiling the working build.)
-            var playlistUrl = MAIN_URL + "/mobile/playlist.php?id=" + encodeURIComponent(id) +
+            var playlistUrl = MAIN_URL + "/mobile" + config.prefix + "/playlist.php?id=" + encodeURIComponent(id) +
                 "&t=" + encodeURIComponent(input.title || config.name) + "&tm=" + unixTime();
             console.log("[netmirror][loadStreams] GET " + playlistUrl);
 
