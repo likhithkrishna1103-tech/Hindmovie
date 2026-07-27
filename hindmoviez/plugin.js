@@ -452,11 +452,11 @@
         });
     }
 
-    function parseJsonSafe(text) {
+    function parseJsonSafe(text, fallback = null) {
         try {
-            return JSON.parse(text);
+            return text ? JSON.parse(text) : fallback;
         } catch (_) {
-            return null;
+            return fallback;
         }
     }
 
@@ -733,10 +733,11 @@
                 var detailReqs = [];
                 var detailOrigIdx = [];
                 for (var r = 0; r < searchResponses.length; r++) {
-                    var searchJson = parseJsonSafe(searchResponses[r].body, {});
-                    var itemYearMatch = String(trendingItems[r].title || "").match(/\((\d{4})\)/);
+                    var searchRes = searchResponses[r];
+                    var searchJson = parseJsonSafe(searchRes && searchRes.body, {});
+                    var itemYearMatch = String(trendingItems[r] && trendingItems[r].title || "").match(/\((\d{4})\)/);
                     var itemYear = itemYearMatch ? itemYearMatch[1] : "";
-                    var bestResult = chooseBestTmdbResult(searchJson.results, trendingItems[r].title, itemYear);
+                    var bestResult = chooseBestTmdbResult(searchJson && searchJson.results, trendingItems[r] && trendingItems[r].title, itemYear);
                     if (bestResult && bestResult.id) {
                         var mdType = trendingItems[r].type === "series" ? "tv" : "movie";
                         detailReqs.push({
@@ -750,7 +751,8 @@
                 var detailResponses = detailReqs.length ? await httpParallelGet(detailReqs) : [];
                 for (var d = 0; d < detailResponses.length; d++) {
                     var origItemIdx = detailOrigIdx[d];
-                    var details = parseJsonSafe(detailResponses[d].body, {});
+                    var detailRes = detailResponses[d];
+                    var details = parseJsonSafe(detailRes && detailRes.body, {});
                     var imdbId = details && details.external_ids && details.external_ids.imdb_id ? details.external_ids.imdb_id : "";
                     var logoUrl = imdbId ? ("https://live.metahub.space/logo/medium/" + imdbId + "/img") : "";
                     var bannerPath = details && details.backdrop_path ? details.backdrop_path : "";
@@ -1101,6 +1103,11 @@
             let description = null;
             let background = null;
             let responseData = null;
+            let tmdbDetails = null;
+            let trailerUrl = "";
+            let duration = undefined;
+            let tmdbGenres = [];
+            let tmdbLogoUrl = "";
 
             if (imdbId) {
                 const [tmdbFindRes, cinemetaRes] = await Promise.allSettled([
@@ -1125,7 +1132,6 @@
                     }
                 }
 
-                let tmdbDetails = null;
                 if (tmdbId) {
                     try {
                         const tmdbmetatype = isSeries ? "tv" : "movie";
@@ -1139,10 +1145,10 @@
                     }
                 }
 
-                var trailerUrl = extractTmdbTrailerUrl(tmdbDetails);
-                var duration = extractTmdbDuration(tmdbDetails, isSeries ? "tv" : "movie");
-                var tmdbGenres = extractTmdbGenres(tmdbDetails);
-                var tmdbLogoUrl = tmdbDetails && tmdbDetails.external_ids && tmdbDetails.external_ids.imdb_id 
+                trailerUrl = extractTmdbTrailerUrl(tmdbDetails);
+                duration = extractTmdbDuration(tmdbDetails, isSeries ? "tv" : "movie");
+                tmdbGenres = extractTmdbGenres(tmdbDetails);
+                tmdbLogoUrl = tmdbDetails && tmdbDetails.external_ids && tmdbDetails.external_ids.imdb_id 
                     ? ("https://live.metahub.space/logo/medium/" + tmdbDetails.external_ids.imdb_id + "/img") 
                     : "";
             }
