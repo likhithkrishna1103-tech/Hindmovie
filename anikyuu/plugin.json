@@ -1,0 +1,16 @@
+{
+  "packageName": "com.igris.repo.anikyuu",
+  "name": "anikyuu",
+  "version": 1,
+  "baseUrl": "https://anikyuu.to",
+  "description": "AniKyuu plugin for SkyStream",
+  "authors": [
+    "igris"
+  ],
+  "languages": [
+    "pt"
+  ],
+  "categories": [
+    "Anime"
+  ]
+}
