@@ -39,6 +39,23 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anikage.sky"
   },
   {
+    "packageName": "com.igris.repo.anikyuu",
+    "name": "anikyuu",
+    "version": 1,
+    "baseUrl": "https://anikyuu.to",
+    "description": "AniKyuu plugin for SkyStream",
+    "authors": [
+      "igris"
+    ],
+    "languages": [
+      "pt"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anikyuu.sky"
+  },
+  {
     "packageName": "com.igris.repo.animedubhindi",
     "name": "AnimeDubHindi",
     "version": 3,
