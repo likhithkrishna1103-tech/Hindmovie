@@ -318,7 +318,7 @@
   {
     "packageName": "com.igris.repo.movierulz",
     "name": "Movierulz",
-    "version": 6,
+    "version": 7,
     "baseUrl": "https://example.com",
     "description": "Fresh movie drops with fast links.",
     "authors": [
