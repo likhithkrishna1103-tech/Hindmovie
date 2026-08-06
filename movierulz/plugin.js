@@ -1,4 +1,4 @@
-(function () {
+(function() {
     function base64Decode(str) {
         var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         var output = "";
@@ -82,188 +82,10 @@
         console.error.apply(console, args);
     }
 
-    var FALLBACK_DOMAINS = [
-        "https://www.5movierulz.army",
-        "https://www.5movierulz.skin",
-        "https://www.5movierulz.mobi",
-        "https://www.5movierulz.com",
-        "https://www.5movierulz.haus",
-        "https://www.5movierulz.net",
-        "https://www.5movierulz.tel",
-        "https://www.5movierulz.show"
-    ];
-    var DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
+    var MAIN_URL = "https://www.5movierulz.pictures";
 
-    // Bing search URLs — tried in order if all other methods fail
-    var BING_SEARCH_URLS = [
-        "https://www.bing.com/search?q=5movierulz+watch+movies+online+free&count=10",
-        "https://www.bing.com/search?q=5movierulz+telugu+hindi+movies+download&count=10",
-        "https://www.bing.com/search?q=site%3A5movierulz+movies&count=10"
-    ];
-
-    // A response from the real site always contains this string
-    var SITE_FINGERPRINT = "movie-watch-online-free";
-
-    // Pattern that a 5movierulz domain must match
-    var DOMAIN_PATTERN = /https?:\/\/(?:www\.)?5movierulz\.\w{2,10}/i;
-
-    var cachedMainUrl = null;
-
-    // ============================================================
-    // DOMAIN DISCOVERY — 4 level waterfall:
-    //   1. cachedMainUrl (memory)
-    //   2. domains.json  (GitHub)
-    //   3. Known TLD fallback list
-    //   4. Bing search   (last resort — scrapes top results)
-    // ============================================================
     function getMainUrl() {
-        if (cachedMainUrl) return Promise.resolve(cachedMainUrl);
-
-        // Level 1 & 2: domains.json
-        return http_get(DOMAINS_URL).then(function (res) {
-            var data = JSON.parse(res.body);
-            var c = data["5movierulz"] || data["movierulz"] || null;
-            if (c) {
-                return testDomain(c).then(function (ok) {
-                    if (ok) { cachedMainUrl = c; return c; }
-                    return tryFallbacks(0);
-                });
-            }
-            return tryFallbacks(0);
-        }).catch(function () {
-            return tryFallbacks(0);
-        });
-    }
-
-    // Level 3: try each known TLD one by one
-    function tryFallbacks(i) {
-        if (i >= FALLBACK_DOMAINS.length) {
-            log("All fallbacks failed — trying Bing search discovery");
-            return tryBingSearch(0);
-        }
-        log("Trying fallback: " + FALLBACK_DOMAINS[i]);
-        return testDomain(FALLBACK_DOMAINS[i]).then(function (ok) {
-            if (ok) {
-                cachedMainUrl = FALLBACK_DOMAINS[i];
-                log("Fallback OK: " + cachedMainUrl);
-                return cachedMainUrl;
-            }
-            return tryFallbacks(i + 1);
-        }).catch(function () {
-            return tryFallbacks(i + 1);
-        });
-    }
-
-    // Level 4: Bing search — try each search query until we find candidates
-    function tryBingSearch(i) {
-        if (i >= BING_SEARCH_URLS.length) {
-            // Absolute last resort — return first fallback and hope for the best
-            warn("Bing search exhausted — using first fallback as last resort");
-            cachedMainUrl = FALLBACK_DOMAINS[0];
-            return Promise.resolve(cachedMainUrl);
-        }
-        log("Bing search attempt " + (i + 1) + ": " + BING_SEARCH_URLS[i]);
-        return http_get(BING_SEARCH_URLS[i]).then(function (res) {
-            var candidates = extractDomainCandidates(res.body);
-            log("Bing returned " + candidates.length + " candidates: " + candidates.join(", "));
-            if (candidates.length === 0) return tryBingSearch(i + 1);
-            return tryBingCandidates(candidates, 0, i);
-        }).catch(function (e) {
-            err("Bing search failed:", e.message);
-            return tryBingSearch(i + 1);
-        });
-    }
-
-    // Test each Bing candidate domain
-    function tryBingCandidates(candidates, i, searchIdx) {
-        if (i >= candidates.length) {
-            // This search query's candidates all failed — try next search query
-            return tryBingSearch(searchIdx + 1);
-        }
-        var candidate = candidates[i];
-        log("Testing Bing candidate: " + candidate);
-        return testDomain(candidate).then(function (ok) {
-            if (ok) {
-                cachedMainUrl = candidate;
-                log("Bing discovery success: " + cachedMainUrl);
-                return cachedMainUrl;
-            }
-            return tryBingCandidates(candidates, i + 1, searchIdx);
-        }).catch(function () {
-            return tryBingCandidates(candidates, i + 1, searchIdx);
-        });
-    }
-
-    // Extract all 5movierulz domain candidates from a Bing results page
-    // Bing wraps result links in: <a href="https://www.5movierulz.xxx/...">
-    // Also checks <cite> tags which show the domain cleanly
-    function extractDomainCandidates(html) {
-        var found   = [];
-        var seen    = {};
-        var pos     = 0;
-
-        // Strategy 1: scan all href= values for matching domains
-        while (true) {
-            var hIdx = html.indexOf('href="', pos);
-            if (hIdx === -1) break;
-            var hStart = hIdx + 6;
-            var hEnd   = html.indexOf('"', hStart);
-            if (hEnd === -1) break;
-            var href = html.substring(hStart, hEnd);
-            var match = href.match(DOMAIN_PATTERN);
-            if (match) {
-                // Extract just the origin (scheme + host)
-                var origin = extractOrigin(href);
-                if (origin && !seen[origin]) {
-                    seen[origin] = true;
-                    found.push(origin);
-                }
-            }
-            pos = hEnd + 1;
-        }
-
-        // Strategy 2: Bing <cite> tags contain clean domain text
-        pos = 0;
-        while (true) {
-            var cIdx = html.indexOf("<cite", pos);
-            if (cIdx === -1) break;
-            var cClose = html.indexOf(">", cIdx);
-            var cEnd   = html.indexOf("</cite>", cClose);
-            if (cClose === -1 || cEnd === -1) break;
-            var citeText = stripTags(html.substring(cClose + 1, cEnd)).trim();
-            // citeText might be "www.5movierulz.army › movies" etc.
-            var cMatch = citeText.match(DOMAIN_PATTERN);
-            if (cMatch) {
-                var origin = extractOrigin(cMatch[0]);
-                if (origin && !seen[origin]) {
-                    seen[origin] = true;
-                    found.push(origin);
-                }
-            }
-            pos = cEnd + 7;
-        }
-
-        return found;
-    }
-
-    // Get "https://www.5movierulz.army" from a full URL
-    function extractOrigin(url) {
-        if (!url) return null;
-        var m = url.match(/^(https?:\/\/[^\/]+)/);
-        return m ? m[1] : null;
-    }
-
-    // Test a domain by fetching its homepage and checking for site fingerprint
-    // Returns Promise<boolean>
-    function testDomain(domain) {
-        return http_get(domain + "/").then(function (res) {
-            var ok = res.body && res.body.indexOf(SITE_FINGERPRINT) !== -1;
-            log("testDomain " + domain + " -> " + (ok ? "OK" : "FAIL (wrong content)"));
-            return ok;
-        }).catch(function (e) {
-            log("testDomain " + domain + " -> FAIL (" + e.message + ")");
-            return false;
-        });
+        return Promise.resolve(MAIN_URL);
     }
 
     function stripTags(s) {
@@ -300,7 +122,7 @@
         var t = s.toLowerCase();
         if (/\b(4k|2160p|uhd)\b/.test(t)) return 2160;
         if (/\b1080p\b/.test(t)) return 1080;
-        if (/\b720p\b/.test(t))  return 720;
+        if (/\b720p\b/.test(t)) return 720;
         if (/\b(480p|320p)\b/.test(t)) return 480;
         return 0;
     }
@@ -316,71 +138,101 @@
     function isSeries(title) {
         return /\bSeason\s*\d|\bS\d{2}\b|\bEP\s*\d|Episode\s*\d/i.test(title);
     }
-
     function parseMovieGrid(html, mainUrl) {
-        var items    = [];
+        var items = [];
         var seenHref = {};
         var pos = 0;
 
         while (true) {
-            var aStart = html.indexOf("movie-watch-online-free", pos);
-            if (aStart === -1) break;
+            var idx1 = html.indexOf("boxed film", pos);
+            var idx2 = html.indexOf("cont_display", pos);
+            var idx3 = html.indexOf("movie-watch-online-free", pos);
 
-            var aOpen = html.lastIndexOf("<a", aStart);
-            if (aOpen === -1) { pos = aStart + 1; continue; }
+            var cardIdx = -1;
+            if (idx1 !== -1) cardIdx = idx1;
+            if (idx2 !== -1 && (cardIdx === -1 || idx2 < cardIdx)) cardIdx = idx2;
+            if (idx3 !== -1 && (cardIdx === -1 || idx3 < cardIdx)) cardIdx = idx3;
+
+            if (cardIdx === -1) break;
+
+            var aOpen = html.indexOf("<a", cardIdx);
+            if (aOpen === -1 || aOpen > cardIdx + 300) {
+                var prevA = html.lastIndexOf("<a", cardIdx);
+                if (prevA !== -1 && cardIdx - prevA < 300) aOpen = prevA;
+            }
+            if (aOpen === -1) { pos = cardIdx + 12; continue; }
 
             var hrefIdx = html.indexOf('href="', aOpen);
-            if (hrefIdx === -1 || hrefIdx > aStart + 200) { pos = aStart + 1; continue; }
+            if (hrefIdx === -1 || hrefIdx > aOpen + 300) { pos = cardIdx + 12; continue; }
             var hrefStart = hrefIdx + 6;
-            var hrefEnd   = html.indexOf('"', hrefStart);
-            if (hrefEnd === -1) { pos = aStart + 1; continue; }
+            var hrefEnd = html.indexOf('"', hrefStart);
+            if (hrefEnd === -1) { pos = cardIdx + 12; continue; }
             var href = html.substring(hrefStart, hrefEnd);
 
-            if (href.indexOf("movie-watch-online-free") === -1) { pos = aStart + 24; continue; }
-            if (seenHref[href]) { pos = aStart + 24; continue; }
-            seenHref[href] = true;
+            if (!href || href === "#" || href.indexOf("javascript:") === 0 ||
+                href.indexOf("/category/") !== -1 || href.indexOf("/language/") !== -1 ||
+                href.indexOf("/quality/") !== -1 || href.indexOf("/genre/") !== -1 ||
+                href.indexOf("/director/") !== -1 || href.indexOf("/actor/") !== -1) {
+                pos = cardIdx + 12;
+                continue;
+            }
+
+            var fullUrl = resolveUrl(href, mainUrl);
+            if (seenHref[fullUrl]) { pos = cardIdx + 12; continue; }
+            seenHref[fullUrl] = true;
 
             var aClose = html.indexOf("</a>", aOpen);
 
             var posterUrl = null;
             var imgIdx = html.indexOf("<img", aOpen);
-            if (imgIdx !== -1 && imgIdx < aClose) {
+            if (imgIdx !== -1 && (aClose === -1 || imgIdx < aClose + 500)) {
                 var srcIdx = html.indexOf('src="', imgIdx);
-                if (srcIdx !== -1 && srcIdx < aClose) {
+                if (srcIdx !== -1) {
                     var srcStart = srcIdx + 5;
-                    var srcEnd   = html.indexOf('"', srcStart);
+                    var srcEnd = html.indexOf('"', srcStart);
                     if (srcEnd !== -1) posterUrl = resolveUrl(html.substring(srcStart, srcEnd), mainUrl);
                 }
             }
 
             var rawTitle = "";
             var titleAttrIdx = html.indexOf('title="', aOpen);
-            if (titleAttrIdx !== -1 && titleAttrIdx < aStart + 50) {
+            if (titleAttrIdx !== -1 && (aClose === -1 || titleAttrIdx < aClose)) {
                 var ts = titleAttrIdx + 7;
                 var te = html.indexOf('"', ts);
                 if (te !== -1) rawTitle = html.substring(ts, te);
             }
-            if (!rawTitle) {
+            if (!rawTitle && imgIdx !== -1) {
+                var altIdx = html.indexOf('alt="', imgIdx);
+                if (altIdx !== -1) {
+                    var as = altIdx + 5;
+                    var ae = html.indexOf('"', as);
+                    if (ae !== -1) rawTitle = html.substring(as, ae);
+                }
+            }
+            if (!rawTitle && aClose !== -1) {
                 var bStart = html.indexOf("<b>", aClose);
-                if (bStart !== -1 && bStart < aClose + 200) {
+                if (bStart !== -1 && bStart < aClose + 300) {
                     var bEnd = html.indexOf("</b>", bStart);
                     if (bEnd !== -1) rawTitle = html.substring(bStart + 3, bEnd);
                 }
             }
 
             var title = cleanTitle(rawTitle);
-            if (!title || title === "Unknown" || title.length < 3) { pos = aClose + 4; continue; }
+            if (!title || title === "Unknown" || title.length < 3) {
+                pos = Math.max(cardIdx + 12, aClose !== -1 ? aClose + 4 : cardIdx + 12);
+                continue;
+            }
 
             items.push({
-                title:     title,
-                url:       resolveUrl(href, mainUrl),
+                title: title,
+                url: fullUrl,
                 posterUrl: posterUrl,
-                type:      isSeries(rawTitle) ? "series" : "movie",
-                quality:   qualityOf(rawTitle),
-                rawTitle:  rawTitle
+                type: isSeries(rawTitle) ? "series" : "movie",
+                quality: qualityOf(rawTitle),
+                rawTitle: rawTitle
             });
 
-            pos = aClose + 4;
+            pos = Math.max(cardIdx + 12, aClose !== -1 ? aClose + 4 : cardIdx + 12);
         }
 
         log("parseMovieGrid: " + items.length + " items");
@@ -392,20 +244,20 @@
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
             result.push(new MultimediaItem({
-                title:     item.title,
-                url:       item.url,
+                title: item.title,
+                url: item.url,
                 posterUrl: item.posterUrl || undefined,
-                type:      item.type      || "movie",
-                quality:   item.quality   || 0
+                type: item.type || "movie",
+                quality: item.quality || 0
             }));
         }
         return result;
     }
 
     function getHome(cb) {
-        getMainUrl().then(function (mainUrl) {
+        getMainUrl().then(function(mainUrl) {
             log("getHome: " + mainUrl);
-            return http_get(mainUrl + "/").then(function (res) {
+            return http_get(mainUrl + "/").then(function(res) {
                 var html = res.body;
 
                 function sliceSection(startText, endText) {
@@ -417,12 +269,12 @@
                 }
 
                 var featuredHtml = sliceSection("featured movies free", "latest movies");
-                var latestHtml   = sliceSection("latest movies",        "posts navigation");
+                var latestHtml = sliceSection("latest movies", "posts navigation");
 
                 log("featuredHtml: " + featuredHtml.length + "c  latestHtml: " + latestHtml.length + "c");
 
                 var featuredItems = featuredHtml ? parseMovieGrid(featuredHtml, mainUrl) : [];
-                var latestItems   = latestHtml   ? parseMovieGrid(latestHtml,   mainUrl) : [];
+                var latestItems = latestHtml ? parseMovieGrid(latestHtml, mainUrl) : [];
 
                 var featuredUrls = {};
                 for (var i = 0; i < featuredItems.length; i++) featuredUrls[featuredItems[i].url] = true;
@@ -432,8 +284,8 @@
                 }
 
                 var homeData = {};
-                if (featuredItems.length) homeData["\uD83D\uDD25 Featured"]      = toMultimediaItems(featuredItems);
-                if (uniqueLatest.length)  homeData["\uD83C\uDD95 Latest Movies"] = toMultimediaItems(uniqueLatest);
+                if (featuredItems.length) homeData["🔥 Featured"] = toMultimediaItems(featuredItems);
+                if (uniqueLatest.length) homeData["🆕 Latest Movies"] = toMultimediaItems(uniqueLatest);
 
                 if (!Object.keys(homeData).length) {
                     var allItems = parseMovieGrid(html, mainUrl);
@@ -444,24 +296,25 @@
                 Analytics.logEvent('movierulz_home', {});
                 cb({ success: true, data: homeData });
             });
-        }).catch(function (e) {
+        }).catch(function(e) {
             err("getHome:", e.message);
             cb({ success: false, errorCode: "HOME_ERROR", message: e.message });
         });
     }
 
     function search(query, cb) {
-        getMainUrl().then(function (mainUrl) {
-            var q    = encodeURIComponent(query);
+        getMainUrl().then(function(mainUrl) {
+            var q = encodeURIComponent(query);
             var urls = [
+                mainUrl + "/search_movies?s=" + q,
                 mainUrl + "/?s=" + q,
                 mainUrl + "/search/" + encodeURIComponent(query)
             ];
             return trySearchUrls(urls, 0, mainUrl);
-        }).then(function (items) {
+        }).then(function(items) {
             Analytics.logEvent('movierulz_search', {});
             cb({ success: true, data: toMultimediaItems(items) });
-        }).catch(function (e) {
+        }).catch(function(e) {
             err("search:", e.message);
             cb({ success: false, errorCode: "SEARCH_ERROR", message: e.message });
         });
@@ -470,29 +323,37 @@
     function trySearchUrls(urls, i, mainUrl) {
         if (i >= urls.length) return Promise.resolve([]);
         log("search: " + urls[i]);
-        return http_get(urls[i]).then(function (res) {
+        return http_get(urls[i]).then(function(res) {
             var items = parseMovieGrid(res.body, mainUrl);
             log("search got: " + items.length + " items");
             if (items.length > 0) return items;
             return trySearchUrls(urls, i + 1, mainUrl);
-        }).catch(function () {
+        }).catch(function() {
             return trySearchUrls(urls, i + 1, mainUrl);
         });
     }
 
     function load(url, cb) {
-        getMainUrl().then(function (mainUrl) {
+        getMainUrl().then(function(mainUrl) {
             log("load: " + url);
-            return http_get(url).then(function (res) {
+            return http_get(url).then(function(res) {
                 var html = res.body;
 
                 // Title
                 var rawTitle = "";
-                var h2s = html.indexOf("<h2");
-                if (h2s !== -1) {
-                    var h2e = html.indexOf(">", h2s);
-                    var h2c = html.indexOf("</h2>", h2e);
-                    if (h2e !== -1 && h2c !== -1) rawTitle = html.substring(h2e + 1, h2c);
+                var ets = html.indexOf('class="entry-title"');
+                if (ets !== -1) {
+                    var ete = html.indexOf(">", ets);
+                    var etc = html.indexOf("</", ete);
+                    if (ete !== -1 && etc !== -1) rawTitle = html.substring(ete + 1, etc);
+                }
+                if (!rawTitle) {
+                    var h2s = html.indexOf("<h2");
+                    if (h2s !== -1) {
+                        var h2e = html.indexOf(">", h2s);
+                        var h2c = html.indexOf("</h2>", h2e);
+                        if (h2e !== -1 && h2c !== -1) rawTitle = html.substring(h2e + 1, h2c);
+                    }
                 }
                 if (!rawTitle) {
                     var tts = html.indexOf("<title>");
@@ -565,7 +426,7 @@
 
                 // Description
                 var descStart = langIdx > 0 ? langIdx : (genreIdx > 0 ? genreIdx : 0);
-                var descPos   = descStart;
+                var descPos = descStart;
                 for (var da = 0; da < 10; da++) {
                     var pStart = html.indexOf("<p>", descPos);
                     if (pStart === -1) break;
@@ -581,8 +442,8 @@
                 }
 
                 // All magnet links
-                var magnets  = [];
-                var seenMag  = {};
+                var magnets = [];
+                var seenMag = {};
                 var mpos = 0;
 
                 while (true) {
@@ -590,27 +451,36 @@
                     if (magIdx === -1) break;
 
                     var magStart = magIdx + 6;
-                    var magEnd   = html.indexOf('"', magStart);
+                    var magEnd = html.indexOf('"', magStart);
                     if (magEnd === -1) break;
 
                     var magnetUrl = html.substring(magStart, magEnd);
                     if (seenMag[magnetUrl]) { mpos = magEnd + 1; continue; }
                     seenMag[magnetUrl] = true;
 
-                    var aCloseIdx   = html.indexOf("</a>", magEnd);
+                    var aCloseIdx = html.indexOf("</a>", magEnd);
                     var buttonLabel = "";
                     if (aCloseIdx !== -1) {
-                        var smallIdx = html.indexOf("<small>", magEnd);
-                        if (smallIdx !== -1 && smallIdx < aCloseIdx) {
-                            var smallEnd = html.indexOf("</small>", smallIdx);
-                            if (smallEnd !== -1) {
-                                buttonLabel = stripTags(html.substring(smallIdx + 7, smallEnd)).trim();
+                        var sizeIdx = html.indexOf('class="btn-size">', magEnd);
+                        if (sizeIdx !== -1 && sizeIdx < aCloseIdx) {
+                            var sizeEnd = html.indexOf("</span>", sizeIdx);
+                            if (sizeEnd !== -1) {
+                                buttonLabel = stripTags(html.substring(sizeIdx + 17, sizeEnd)).trim();
+                            }
+                        }
+                        if (!buttonLabel) {
+                            var smallIdx = html.indexOf("<small>", magEnd);
+                            if (smallIdx !== -1 && smallIdx < aCloseIdx) {
+                                var smallEnd = html.indexOf("</small>", smallIdx);
+                                if (smallEnd !== -1) {
+                                    buttonLabel = stripTags(html.substring(smallIdx + 7, smallEnd)).trim();
+                                }
                             }
                         }
                     }
 
                     var dnMatch = magnetUrl.match(/[?&]dn=([^&]+)/i);
-                    var dnName  = dnMatch ? safeDecodeURI(dnMatch[1]) : "";
+                    var dnName = dnMatch ? safeDecodeURI(dnMatch[1]) : "";
                     var quality = qualityOf(buttonLabel) || qualityOf(dnName);
 
                     log("  magnet: label=" + buttonLabel + " Q=" + quality);
@@ -618,7 +488,7 @@
                     mpos = magEnd + 1;
                 }
 
-                magnets.sort(function (a, b) { return b.quality - a.quality; });
+                magnets.sort(function(a, b) { return b.quality - a.quality; });
                 log("load: " + magnets.length + " magnets found");
 
                 // Cast actors
@@ -634,30 +504,32 @@
                 var magnetPayload = [];
                 for (var mi = 0; mi < magnets.length; mi++) {
                     magnetPayload.push({
-                        magnetUrl:   magnets[mi].magnetUrl,
+                        magnetUrl: magnets[mi].magnetUrl,
                         buttonLabel: magnets[mi].buttonLabel,
-                        quality:     magnets[mi].quality
+                        quality: magnets[mi].quality
                     });
                 }
 
                 var episodes = [new Episode({
                     name: title,
-                    url:  JSON.stringify(magnetPayload)
+                    url: JSON.stringify(magnetPayload)
                 })];
 
                 Analytics.logEvent('movierulz_load', {});
-                cb({ success: true, data: new MultimediaItem({
-                    title:       title,
-                    url:         url,
-                    posterUrl:   posterUrl  || undefined,
-                    type:        type,
-                    description: description || undefined,
-                    genres:      genres,
-                    cast:        castActors,
-                    episodes:    episodes
-                }) });
+                cb({
+                    success: true, data: new MultimediaItem({
+                        title: title,
+                        url: url,
+                        posterUrl: posterUrl || undefined,
+                        type: type,
+                        description: description || undefined,
+                        genres: genres,
+                        cast: castActors,
+                        episodes: episodes
+                    })
+                });
             });
-        }).catch(function (e) {
+        }).catch(function(e) {
             err("load:", e.message);
             cb({ success: false, errorCode: "LOAD_ERROR", message: e.message });
         });
@@ -667,16 +539,16 @@
     // User sees: [MovieRulz] 2.5 gb 1080p / [MovieRulz] 1.4 gb 720p / etc.
     function loadStreams(url, cb) {
         try {
-            var parsed  = JSON.parse(url);
+            var parsed = JSON.parse(url);
             var entries = Array.isArray(parsed) ? parsed : [parsed];
             log("loadStreams: entries = " + entries.length);
 
             var results = [];
             for (var i = 0; i < entries.length; i++) {
-                var entry       = entries[i];
-                var magnetUrl   = entry.magnetUrl   || "";
+                var entry = entries[i];
+                var magnetUrl = entry.magnetUrl || "";
                 var buttonLabel = entry.buttonLabel || "";
-                var quality     = entry.quality     || 0;
+                var quality = entry.quality || 0;
 
                 if (!magnetUrl || magnetUrl.indexOf("magnet:") !== 0) continue;
 
@@ -684,9 +556,9 @@
                 log("  stream: " + label + " " + quality + "p");
 
                 results.push(new StreamResult({
-                    url:     magnetUrl,
+                    url: magnetUrl,
                     quality: quality,
-                    source:  label,
+                    source: label,
                     headers: {}
                 }));
             }
