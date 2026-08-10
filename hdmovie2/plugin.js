@@ -1,4 +1,13 @@
 (function () {
+    var hostFetch = null;
+    try {
+        if (typeof fetch === "function") {
+            hostFetch = fetch;
+        } else {
+            hostFetch = (() => {}).constructor("return fetch")();
+        }
+    } catch (_) {}
+
     function base64Decode(str) {
         var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         var output = "";
@@ -47,11 +56,13 @@
             if (this.queue.length === 0) return;
             var events = this.queue.splice(0);
             try {
-                await http_post(
-                    'https://www.google-analytics.com/mp/collect?measurement_id=' + this.measurementId + '&api_secret=' + this.apiSecret,
-                    { 'Content-Type': 'application/json' },
-                    JSON.stringify({ client_id: this.clientId, events: events })
-                );
+                if (typeof http_post === "function") {
+                    await http_post(
+                        'https://www.google-analytics.com/mp/collect?measurement_id=' + this.measurementId + '&api_secret=' + this.apiSecret,
+                        { 'Content-Type': 'application/json' },
+                        JSON.stringify({ client_id: this.clientId, events: events })
+                    );
+                }
             } catch (e) { console.log('[Analytics] Send skipped'); }
         }
     };
@@ -59,17 +70,23 @@
 
     "use strict";
 
-    var TMDB_API = "https://api.themoviedb.org/3";
-    var TMDB_WORKER_API = "https://wild-surf-4a0d.phisher1.workers.dev";
-    var TMDB_API_KEY = "1865f43a0549ca50d341dd9ab8b29f49";
-    var TMDB_IMAGE = "https://image.tmdb.org/t/p/original";
+    var DEFAULT_BASE_URL = "https://hdmovie2a.icu";
     var DOMAINS_JSON_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
+    var TMDB_WORKER_API = "https://wild-surf-4a0d.phisher1.workers.dev";
+    var TMDB_FALLBACK_API = "https://api.themoviedb.org/3";
+    var TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original";
+    var TMDB_API_KEY = "1865f43a0549ca50d341dd9ab8b29f49";
     var COMMON_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
+
     var domainsCache = null;
+    var cachedBaseUrl = null;
+    var cachedBaseUrlTime = 0;
+    var CACHE_TTL = 300000;
+
     var HDMOVIE2_HOME_SECTIONS = [
-        { path: function () { return "release/" + new Date().getFullYear(); }, title: "Latest" },
-        { path: "genre/bollywood", title: "BollyWood" },
+        { path: function () { return "release/" + new Date().getFullYear(); }, title: "Trending" },
         { path: "movies", title: "Movies" },
+        { path: "genre/bollywood", title: "BollyWood" },
         { path: "genre/hindi-webseries", title: "Hindi Web Series" },
         { path: "genre/netflix", title: "Netflix" },
         { path: "genre/zee5", title: "Zee5" },
@@ -77,6 +94,10 @@
         { path: "genre/comedy", title: "Comedy" },
         { path: "genre/science-fiction", title: "Science Fiction" }
     ];
+
+    function toErrorMessage(error) {
+        return String(error && (error.stack || error.message) || error);
+    }
 
     function trim(value) {
         return String(value == null ? "" : value).replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "");
@@ -131,8 +152,15 @@
         return 0;
     }
 
+    function defaultHeaders(extra) {
+        return Object.assign({
+            "User-Agent": COMMON_USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        }, extra || {});
+    }
+
     function requestWithFetch(url, method, headers, body, allowRedirects) {
-        return fetch(url, {
+        return hostFetch(url, {
             method: method,
             headers: headers,
             body: body,
@@ -149,61 +177,72 @@
         });
     }
 
+    function normalizeExtractorDomain(url) {
+        var str = String(url || "");
+        str = str.replace(/^https?:\/\/(?:www\.)?(?:gdflix\.dev|new\.gdflix\.dad|new2\.gdflix\.\w+|new\d*\.gdflix\.\w+)/i, "https://new3.gdflix.io");
+        str = str.replace(/^https?:\/\/(?:www\.)?new\d*\.filepress\.\w+/i, "https://new3.filepress.baby");
+        return str;
+    }
+
     function request(url, options) {
         options = options || {};
+        var normalizedUrl = normalizeExtractorDomain(url);
         var method = String(options.method || "GET").toUpperCase();
-        var headers = options.headers || {};
+        var headers = options.headers || defaultHeaders();
         var body = options.body;
         var allowRedirects = options.allowRedirects !== false;
 
+        if (hostFetch) {
+            return requestWithFetch(normalizedUrl, method, headers, body, allowRedirects).catch(function (err) {
+                if (method === "GET" && typeof http_get === "function") {
+                    return Promise.resolve(http_get(normalizedUrl, headers)).then(function (res) {
+                        return {
+                            status: responseStatus(res) || 200,
+                            body: res && typeof res.body !== "undefined" ? res.body : "",
+                            headers: parseHeaders(res && res.headers),
+                            finalUrl: (res && (res.url || res.finalUrl)) || normalizedUrl
+                        };
+                    });
+                }
+                throw err;
+            });
+        }
+
         if (method === "GET" && typeof http_get === "function") {
-            return Promise.resolve(http_get(url, headers)).then(function (res) {
+            return Promise.resolve(http_get(normalizedUrl, headers)).then(function (res) {
                 return {
                     status: responseStatus(res) || 200,
                     body: res && typeof res.body !== "undefined" ? res.body : "",
                     headers: parseHeaders(res && res.headers),
-                    finalUrl: (res && (res.url || res.finalUrl)) || url
+                    finalUrl: (res && (res.url || res.finalUrl)) || normalizedUrl
                 };
             });
         }
 
         if (method === "POST" && typeof http_post === "function") {
-            var attempts = [
-                function () { return http_post(url, headers, body); },
-                function () { return http_post(url, body, headers); }
-            ];
-            return (async function () {
-                var lastError = null;
-                for (var i = 0; i < attempts.length; i++) {
-                    try {
-                        var res = await attempts[i]();
-                        return {
-                            status: responseStatus(res) || 200,
-                            body: res && typeof res.body !== "undefined" ? res.body : "",
-                            headers: parseHeaders(res && res.headers),
-                            finalUrl: (res && (res.url || res.finalUrl)) || url
-                        };
-                    } catch (error) {
-                        lastError = error;
-                    }
-                }
-                throw lastError || new Error("POST failed: " + url);
-            })();
+            return Promise.resolve(http_post(normalizedUrl, headers, body)).then(function (res) {
+                return {
+                    status: responseStatus(res) || 200,
+                    body: res && typeof res.body !== "undefined" ? res.body : "",
+                    headers: parseHeaders(res && res.headers),
+                    finalUrl: (res && (res.url || res.finalUrl)) || normalizedUrl
+                };
+            });
         }
 
-        return requestWithFetch(url, method, headers, body, allowRedirects);
+        throw new Error("No HTTP client available");
     }
 
     function getText(url, headers, allowRedirects) {
-        return request(url, { headers: headers || {}, allowRedirects: allowRedirects }).then(function (res) {
-            if (res.status >= 400) throw new Error("GET failed (" + res.status + "): " + url);
+        return request(url, { headers: headers || defaultHeaders(), allowRedirects: allowRedirects }).then(function (res) {
+            if (res.status >= 400 && res.status !== 404) throw new Error("GET failed (" + res.status + "): " + url);
             return String(res.body || "");
         });
     }
 
     function getJson(url, headers) {
-        return request(url, { headers: headers || {} }).then(function (res) {
-            if (res.status >= 400) throw new Error("GET failed (" + res.status + "): " + url);
+        return request(url, { headers: headers || defaultHeaders({ "Accept": "application/json" }) }).then(function (res) {
+            if (res.status >= 400) throw new Error("GET JSON failed (" + res.status + "): " + url);
             return parseJsonSafe(res.body, {});
         });
     }
@@ -271,11 +310,27 @@
     function qualityFromText(text) {
         var value = String(text || "").toLowerCase();
         if (/\b2160p\b|\b4k\b|\buhd\b/.test(value)) return 2160;
-        if (/\b1080p\b/.test(value)) return 1080;
-        if (/\b720p\b/.test(value)) return 720;
-        if (/\b480p\b/.test(value)) return 480;
+        if (/\b1440p\b|\bqhd\b/.test(value)) return 1440;
+        if (/\b1080p\b|\bfullhd\b/.test(value)) return 1080;
+        if (/\b720p\b|\bhd\b/.test(value)) return 720;
+        if (/\b576p\b/.test(value)) return 576;
+        if (/\b480p\b|\bsd\b/.test(value)) return 480;
         if (/\b360p\b/.test(value)) return 360;
         return 0;
+    }
+
+    function getSearchQuality(text) {
+        var lower = String(text || "").toLowerCase();
+        if (/\b(4k|ds4k|uhd|2160p)\b/.test(lower)) return "4K";
+        if (/\b(hdts|hdcam|hdtc)\b/.test(lower)) return "HD Cam";
+        if (/\b(camrip|cam-rip|cam)\b/.test(lower)) return "Cam";
+        if (/\b(web-dl|webrip|webdl)\b/.test(lower)) return "WebRip";
+        if (/\b(bluray|bdrip|blu-ray)\b/.test(lower)) return "BluRay";
+        if (/\b(1080p|fullhd|hdrip|hdtv|hd)\b/.test(lower)) return "HD";
+        if (/\b720p\b/.test(lower)) return "SD";
+        if (/\bdvd\b/.test(lower)) return "DVD";
+        if (/\bhq\b/.test(lower)) return "HQ";
+        return "HD";
     }
 
     function uniqueBy(list, keyFn) {
@@ -298,526 +353,775 @@
             .replace(/[^a-z0-9]+/g, " "));
     }
 
-    function titleScore(candidate, queries) {
-        var cand = normalizeTitle(candidate);
-        if (!cand) return 0;
-        var best = 0;
-        for (var i = 0; i < queries.length; i++) {
-            var query = normalizeTitle(queries[i]);
-            if (!query) continue;
-            if (cand === query) best = Math.max(best, 100);
-            else if (cand.indexOf(query) !== -1 || query.indexOf(cand) !== -1) best = Math.max(best, 75);
+    async function getMainUrl() {
+        var now = Date.now();
+        if (cachedBaseUrl && (now - cachedBaseUrlTime < CACHE_TTL)) {
+            return cachedBaseUrl;
         }
-        return best;
-    }
-
-    function bestMatch(list, queries, year, typeHint) {
-        var ranked = [];
-        for (var i = 0; i < (list || []).length; i++) {
-            var item = list[i];
-            var score = titleScore(item && item.title, queries);
-            if (score <= 0) continue;
-            if (year && item && item.year) {
-                if (String(item.year) === String(year)) score += 18;
-                else if (Math.abs(Number(item.year) - Number(year)) <= 1) score += 8;
+        var resolved = (typeof manifest !== "undefined" && manifest && manifest.baseUrl) ? manifest.baseUrl : DEFAULT_BASE_URL;
+        try {
+            if (!domainsCache) {
+                domainsCache = await getJson(DOMAINS_JSON_URL, defaultHeaders());
             }
-            if (typeHint && item && item.type && String(item.type) === String(typeHint)) score += 5;
-            ranked.push({ item: item, score: score });
-        }
-        ranked.sort(function (a, b) { return b.score - a.score; });
-        return ranked.length ? ranked[0].item : null;
-    }
-
-    function commonHeaders(extra) {
-        return Object.assign({
-            "User-Agent": COMMON_USER_AGENT,
-            "Accept": "*/*"
-        }, extra || {});
-    }
-
-    async function getDynamicDomain(key, fallback) {
-        if (!domainsCache) {
-            try {
-                domainsCache = await getJson(DOMAINS_JSON_URL, commonHeaders({ "Accept": "application/json" }));
-            } catch (_) {
-                domainsCache = {};
+            if (domainsCache && domainsCache.hdmovie2) {
+                resolved = domainsCache.hdmovie2;
             }
+        } catch (_) {}
+        cachedBaseUrl = trim(resolved).replace(/\/+$/g, "");
+        cachedBaseUrlTime = now;
+        return cachedBaseUrl;
+    }
+
+    function getProperLink(uri, mainUrl) {
+        if (!uri) return "";
+        if (uri.indexOf("/episodes/") !== -1) {
+            var title = uri.split("/episodes/")[1] || "";
+            var match = title.match(/(.+?)-season/i);
+            var titleSlug = match ? match[1] : title.replace(/\/+$/, "");
+            return (mainUrl || DEFAULT_BASE_URL) + "/tvshows/" + titleSlug;
         }
-        return trim(String(domainsCache && domainsCache[key] || fallback || "")).replace(/\/+$/g, "");
-    }
-
-    function buildPayload(data) {
-        return JSON.stringify(data || {});
-    }
-
-    function parsePayload(url) {
-        var parsed = parseJsonSafe(url, null);
-        if (parsed && typeof parsed === "object") return parsed;
-        throw new Error("Invalid payload");
-    }
-
-    async function getTmdbJson(path) {
-        var urls = [
-            TMDB_WORKER_API + "/" + String(path || "").replace(/^\/+/, ""),
-            TMDB_API + "/" + String(path || "").replace(/^\/+/, "")
-        ];
-        var lastError = null;
-        for (var i = 0; i < urls.length; i++) {
-            try {
-                return await getJson(urls[i]);
-            } catch (error) {
-                lastError = error;
-            }
+        if (uri.indexOf("/seasons/") !== -1) {
+            var title2 = uri.split("/seasons/")[1] || "";
+            var match2 = title2.match(/(.+?)-season/i);
+            var titleSlug2 = match2 ? match2[1] : title2.replace(/\/+$/, "");
+            return (mainUrl || DEFAULT_BASE_URL) + "/tvshows/" + titleSlug2;
         }
-        throw lastError || new Error("TMDB request failed");
+        return uri;
     }
 
-    function tmdbImage(path) {
-        return path ? (TMDB_IMAGE + path) : "";
+    function parseImageAttr(imgHtml) {
+        if (!imgHtml) return "";
+        var dataSrc = firstMatch(imgHtml, [
+            /\bdata-src=["']([^"']+)["']/i,
+            /\bdata-wpfc-original-src=["']([^"']+)["']/i,
+            /\bdata-lazy-src=["']([^"']+)["']/i,
+            /\bsrc=["']([^"']+)["']/i
+        ]);
+        if (dataSrc && dataSrc.indexOf(".gif") === -1) return dataSrc;
+        var src = firstMatch(imgHtml, [/\bsrc=["']([^"']+)["']/i]);
+        return src || dataSrc || "";
     }
 
-    function yearFromText(value) {
-        var match = String(value || "").match(/\b(19|20)\d{2}\b/);
-        return match ? Number(match[0]) : 0;
-    }
-
-    function buildSitePayload(data) {
-        return buildPayload({
-            mode: "site",
-            pageUrl: data.pageUrl || data.url || "",
-            title: data.title || "",
-            originalTitle: data.originalTitle || data.title || "",
-            year: Number(data.year) || 0,
-            isMovie: true,
-            posterUrl: data.posterUrl || "",
-            bannerUrl: data.bannerUrl || data.posterUrl || "",
-            description: data.description || ""
-        });
-    }
-
-    function buildSiteCard(data) {
-        return new MultimediaItem({
-            title: data.title || "",
-            url: buildSitePayload(data),
-            posterUrl: data.posterUrl || "",
-            bannerUrl: data.bannerUrl || data.posterUrl || "",
-            description: data.description || "",
-            year: Number(data.year) || 0,
-            type: "movie"
-        });
-    }
-
-    function parseHdmovieCard(block, base) {
-        var href = absoluteUrl(base, firstMatch(block, [
-            /<h3\b[^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i,
-            /<a\b[^>]*href=["']([^"']+)["'][^>]*>\s*<div\b[^>]*class=["'][^"']*see/i,
+    function parseArticleItem(block, base) {
+        var linkTag = firstRawMatch(block, [
+            /<h3\b[^>]*>\s*<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i,
+            /<h2\b[^>]*class=["'][^"']*result-title[^"']*["'][^>]*>\s*<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i,
+            /<div\b[^>]*class=["'][^"']*title[^"']*["'][^>]*>\s*<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i,
             /<a\b[^>]*href=["']([^"']+)["'][^>]*>/i
-        ]));
-        var title = stripTags(firstMatch(block, [
+        ]);
+        var href = firstMatch(block, [
+            /<h3\b[^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i,
+            /<h2\b[^>]*class=["'][^"']*result-title[^"']*["'][^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i,
+            /<div\b[^>]*class=["'][^"']*title[^"']*["'][^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i,
+            /<a\b[^>]*href=["']([^"']+)["']/i
+        ]);
+        var rawTitle = stripTags(firstMatch(block, [
             /<h3\b[^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i,
+            /<h2\b[^>]*class=["'][^"']*result-title[^"']*["'][^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i,
+            /<div\b[^>]*class=["'][^"']*title[^"']*["'][^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i,
             /<img\b[^>]*alt=["']([^"']+)["']/i
         ]));
-        if (!href || !title) return null;
-        var posterUrl = normalizeResolvedUrl(firstMatch(block, [/<img\b[^>]*src=["']([^"']+)["']/i]), base);
-        var year = yearFromText(stripTags(firstMatch(block, [
-            /<span class=["']year["'][^>]*>([^<]+)<\/span>/i,
-            /<div class=["'][^"']*data[^"']*>\s*<h3[\s\S]*?<span>([\s\S]*?)<\/span>/i,
-            /<div class=["'][^"']*meta[^"']*>\s*<span class=["']year["'][^>]*>([^<]+)<\/span>/i
-        ])) || title);
-        var description = stripTags(firstMatch(block, [/<div class=["'][^"']*contenido[^"']*>\s*<p>([\s\S]*?)<\/p>/i]));
-        return {
-            title: title,
-            pageUrl: href,
-            url: href,
-            posterUrl: posterUrl,
-            bannerUrl: posterUrl,
-            description: description,
+        if (!href || !rawTitle) return null;
+
+        var cleanTitle = trim(rawTitle.replace(/\(\d{4}\)/g, "")).split(" |")[0];
+        var properHref = getProperLink(absoluteUrl(base, href), base);
+        var imgHtml = firstRawMatch(block, [/<div\b[^>]*class=["'][^"']*poster[^"']*["'][\s\S]*?<img\b[^>]*>/i, /<img\b[^>]*>/i]);
+        var posterUrl = parseImageAttr(imgHtml);
+        if (posterUrl) posterUrl = absoluteUrl(base, posterUrl);
+
+        var qualityStr = stripTags(firstMatch(block, [/<span\b[^>]*class=["'][^"']*quality[^"']*["'][^>]*>([\s\S]*?)<\/span>/i]));
+        var ratingStr = stripTags(firstMatch(block, [/<div\b[^>]*class=["'][^"']*rating[^"']*["'][^>]*>([\s\S]*?)<\/div>/i]));
+        var score = ratingStr ? parseFloat(ratingStr) : undefined;
+        if (isNaN(score)) score = undefined;
+
+        var typeStr = stripTags(firstMatch(block, [/<span\b[^>]*class=["'][^"']*result-type[^"']*["'][^>]*>([\s\S]*?)<\/span>/i]));
+        var isTv = /series|tvshows|tv|season|episode/i.test(typeStr + " " + href + " " + rawTitle);
+        var type = isTv ? "series" : "movie";
+
+        var yearMatch = rawTitle.match(/\b((?:19|20)\d{2})\b/) || block.match(/\b((?:19|20)\d{2})\b/);
+        var year = yearMatch ? parseInt(yearMatch[1] || yearMatch[0], 10) : undefined;
+        if (isNaN(year) || year < 1900 || year > 2100) year = undefined;
+
+        return new MultimediaItem({
+            title: cleanTitle,
+            url: properHref,
+            posterUrl: posterUrl || undefined,
+            type: type,
             year: year,
-            type: "movie"
-        };
+            score: score,
+            quality: getSearchQuality(qualityStr || rawTitle),
+            headers: { "Referer": base + "/" }
+        });
     }
 
-    function parseHdmovieCards(containerHtml, base) {
-        return extractBlocks(containerHtml, "article").map(function (block) {
-            return parseHdmovieCard(block, base);
-        }).filter(Boolean);
-    }
-
-    function parseHdmovieFeatured(html, base) {
-        var container = firstRawMatch(html, [/<div class=["']items featured["']>([\s\S]*?)<\/div>\s*<header>/i]);
-        return parseHdmovieCards(container, base);
-    }
-
-    function parseHdmovieLatest(html, base) {
-        var container = firstRawMatch(html, [/<div class=["']items normal["']>([\s\S]*?)<\/div>\s*<\/div>\s*<div class=["']sidebar/i]);
-        return parseHdmovieCards(container, base);
-    }
-
-    function parseHdmoviePopular(html, base) {
-        var container = firstRawMatch(html, [/<h2 class=["']widget-title["']>Popular Mo(?:i|v)ies[\s\S]*?<\/h2><div class=["']dtw_content dt_views_count["']>([\s\S]*?)<\/div><\/aside>/i]);
-        return parseHdmovieCards(container, base);
-    }
-
-    function parseHdmovieArchiveItems(html, base) {
-        var container = firstRawMatch(html, [
-            /<header>\s*<h2>Recently added<\/h2>\s*<\/header>\s*<div class=["']items normal["']>([\s\S]*?)<\/div>\s*<div class=["']resppages["']/i,
-            /<div class=["']items normal["']>([\s\S]*?)<\/div>\s*<div class=["']resppages["']/i,
-            /<div class=["']items normal["']>([\s\S]*?)<\/div>\s*<\/div>\s*<div class=["']sidebar/i
-        ]);
-        return parseHdmovieCards(container, base);
-    }
-
-    function parseHdmovieSearchResults(html, base) {
-        var out = [];
-        var regex = /<div class=["']result-item["'][\s\S]*?<\/article>\s*<\/div>/gi;
-        var match;
-        while ((match = regex.exec(String(html || ""))) !== null) {
-            var card = parseHdmovieCard(match[0], base);
-            if (card) out.push(card);
+    function parseArticles(html, base) {
+        var blocks = extractBlocks(html, "article");
+        var items = [];
+        for (var i = 0; i < blocks.length; i++) {
+            var item = parseArticleItem(blocks[i], base);
+            if (item && item.url) items.push(item);
         }
-        return uniqueBy(out, function (item) { return item.pageUrl; });
-    }
-
-    function cleanHdmovieSynopsis(block, fallback) {
-        var regex = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
-        var match;
-        var candidates = [];
-        while ((match = regex.exec(String(block || ""))) !== null) {
-            var text = stripTags(match[1]);
-            if (!text || text.length < 25) continue;
-            if (/(?:1080p|720p|480p|2160p|gdflix|gdtot|filepress|use vpn|signup|please use vpn)/i.test(text)) continue;
-            candidates.push(text);
-        }
-        return candidates.length ? candidates[0] : trim(fallback || "");
-    }
-
-    function parseHdmovieDetails(html, pageUrl, payload) {
-        var title = stripTags(firstMatch(html, [
-            /<div class=["']sheader["'][\s\S]*?<h1>([\s\S]*?)<\/h1>/i,
-            /<title>([^<]+?)\s*-\s*Hdmovie2/i
-        ])) || trim(payload && payload.title || "");
-        var originalTitle = stripTags(firstMatch(html, [
-            /<b class=["']variante["']>\s*Original title\s*<\/b>\s*<span class=["']valor["']>([\s\S]*?)<\/span>/i
-        ])) || trim(payload && payload.originalTitle || title);
-        var posterUrl = normalizeResolvedUrl(firstMatch(html, [
-            /<div class=["']poster["']>\s*<img[^>]*src=["']([^"']+)["']/i,
-            /<meta property=['"]og:image['"] content=['"]([^'"]+)['"]/i
-        ]), pageUrl);
-        var bannerUrl = normalizeResolvedUrl(firstMatch(html, [
-            /<img class=['"]cover['"] src=['"]([^'"]+)['"]/i,
-            /<meta property=['"]og:image['"] content=['"]([^'"]+)['"]/i
-        ]), pageUrl) || posterUrl;
-        var metaDescription = decodeHtml(firstMatch(html, [/<meta name=["']description["'] content=["']([^"']+)["']/i]));
-        var synopsisBlock = firstRawMatch(html, [/<div itemprop=["']description["'] class=["']wp-content["']>([\s\S]*?)<\/div>\s*<div class=["']custom_fields["']/i]);
-        var description = cleanHdmovieSynopsis(synopsisBlock, metaDescription);
-        var year = yearFromText(title + " " + stripTags(firstMatch(html, [
-            /<span class=['"]date['"][^>]*>([^<]+)<\/span>/i,
-            /<meta itemprop=['"]dateCreated['"] content=['"]([^'"]+)['"]/i
-        ]))) || Number(payload && payload.year) || 0;
-        return {
-            title: title,
-            originalTitle: originalTitle,
-            pageUrl: pageUrl,
-            posterUrl: posterUrl,
-            bannerUrl: bannerUrl,
-            description: description,
-            year: year,
-            type: "movie"
-        };
-    }
-
-    async function getSitePage(url) {
-        return getText(url, commonHeaders({ "Referer": (await getMainUrl()) + "/" }), true);
-    }
-
-    async function fetchHdmovieHomeSection(mainUrl, section) {
-        var path = typeof section.path === "function" ? section.path() : section.path;
-        var url = absoluteUrl(mainUrl + "/", String(path || "").replace(/^\/+/, ""));
-        var html = await getText(url, commonHeaders({ "Referer": mainUrl + "/" }), true);
-        return {
-            title: section.title,
-            items: uniqueBy(parseHdmovieArchiveItems(html, mainUrl), function (item) {
-                return item.pageUrl || item.url;
-            }).map(buildSiteCard)
-        };
+        return uniqueBy(items, function (it) { return it.url; });
     }
 
     async function getHome(cb) {
         try {
             var mainUrl = await getMainUrl();
-            var data = {};
-            var sections = await Promise.all(HDMOVIE2_HOME_SECTIONS.map(function (section) {
-                return fetchHdmovieHomeSection(mainUrl, section).catch(function () {
+            var results = {};
+
+            var sectionPromises = HDMOVIE2_HOME_SECTIONS.map(async function (section) {
+                var sectionPath = typeof section.path === "function" ? section.path() : section.path;
+                var url = mainUrl + "/" + String(sectionPath || "").replace(/^\/+/, "") + "/";
+                try {
+                    var html = await getText(url, defaultHeaders({ "Referer": mainUrl + "/" }));
+                    var items = parseArticles(html, mainUrl);
+                    return { title: section.title, items: items };
+                } catch (e) {
                     return { title: section.title, items: [] };
-                });
-            }));
+                }
+            });
+
+            var sections = await Promise.all(sectionPromises);
             for (var i = 0; i < sections.length; i++) {
                 if (sections[i].items && sections[i].items.length) {
-                    data[sections[i].title] = sections[i].items;
+                    results[sections[i].title] = sections[i].items;
                 }
             }
-            if (!Object.keys(data).length) {
-                var html = await getText(mainUrl + "/", commonHeaders({ "Referer": mainUrl + "/" }), true);
-                var featured = parseHdmovieFeatured(html, mainUrl).map(buildSiteCard);
-                var latest = parseHdmovieLatest(html, mainUrl).map(buildSiteCard);
-                var popular = parseHdmoviePopular(html, mainUrl).map(buildSiteCard);
-                if (featured.length) data["Featured"] = featured;
-                if (latest.length) data["Latest"] = latest;
-                if (popular.length) data["Popular"] = popular;
+
+            // Fallback to home page if all sections empty
+            if (!Object.keys(results).length) {
+                var homeHtml = await getText(mainUrl + "/", defaultHeaders({ "Referer": mainUrl + "/" }));
+                var allItems = parseArticles(homeHtml, mainUrl);
+                if (allItems.length) {
+                    results["Trending"] = allItems.slice(0, 20);
+                    results["Latest"] = allItems.slice(20);
+                }
             }
+
+            // Enrich Trending items with TMDB metadata (banner, logo, genres) for carousel
+            if (results["Trending"] && results["Trending"].length) {
+                try {
+                    var enrichCount = Math.min(results["Trending"].length, 10);
+                    var enrichPromises = [];
+                    for (var t = 0; t < enrichCount; t++) {
+                        var it = results["Trending"][t];
+                        var tmdbType = it.type === "series" ? "tv" : "movie";
+                        var tmdbSearchUrl = TMDB_WORKER_API + "/search/" + tmdbType + "?api_key=" + TMDB_API_KEY + "&query=" + encodeURIComponent(it.title) + (it.year ? "&year=" + it.year : "");
+                        enrichPromises.push(getJson(tmdbSearchUrl).catch(function () { return {}; }));
+                    }
+                    var tmdbResults = await Promise.all(enrichPromises);
+                    for (var e = 0; e < tmdbResults.length; e++) {
+                        var tmdbJson = tmdbResults[e];
+                        if (tmdbJson && tmdbJson.results && tmdbJson.results[0]) {
+                            var best = tmdbJson.results[0];
+                            if (best.backdrop_path) {
+                                results["Trending"][e].bannerUrl = TMDB_IMAGE_BASE + best.backdrop_path;
+                            }
+                            if (best.vote_average && !results["Trending"][e].score) {
+                                results["Trending"][e].score = Number(best.vote_average.toFixed(1));
+                            }
+                        }
+                    }
+                } catch (_) {}
+            }
+
             Analytics.logEvent('hdmovie2_home', {});
-            cb({ success: true, data: data });
+            cb({ success: true, data: results });
         } catch (error) {
-            cb({ success: false, errorCode: "SITE_OFFLINE", message: String(error && error.message || error) });
+            cb({ success: false, errorCode: "SITE_OFFLINE", message: toErrorMessage(error) });
         }
     }
 
     async function search(query, cb) {
         try {
             var mainUrl = await getMainUrl();
-            var html = await getText(mainUrl + "/?s=" + encodeURIComponent(query), commonHeaders({ "Referer": mainUrl + "/" }), true);
-            Analytics.logEvent('hdmovie2_search', {});
-            cb({ success: true, data: parseHdmovieSearchResults(html, mainUrl).map(buildSiteCard) });
-        } catch (error) {
-            cb({ success: false, errorCode: "SEARCH_ERROR", message: String(error && error.message || error) });
+            var q = encodeURIComponent(trim(query));
+            var searchUrls = [
+                mainUrl + "/?s=" + q,
+                mainUrl + "/search/" + q + "/"
+            ];
+            var items = [];
+            for (var i = 0; i < searchUrls.length; i++) {
+                try {
+                    var html = await getText(searchUrls[i], defaultHeaders({ "Referer": mainUrl + "/" }));
+                    var parsed = parseArticles(html, mainUrl);
+                    if (parsed.length) {
+                        items = parsed;
+                        break;
+                    }
+                } catch (err) {
+            console.log("extractGdflixStreams exception:", err && err.message);
         }
+            }
+
+            Analytics.logEvent('hdmovie2_search', {});
+            cb({ success: true, data: items });
+        } catch (error) {
+            cb({ success: false, errorCode: "SEARCH_ERROR", message: toErrorMessage(error) });
+        }
+    }
+
+    function cleanSynopsis(block, fallback) {
+        var regex = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+        var match;
+        var candidates = [];
+        while ((match = regex.exec(String(block || ""))) !== null) {
+            var text = stripTags(match[1]);
+            if (!text || text.length < 20) continue;
+            if (/(?:1080p|720p|480p|2160p|gdflix|gdtot|filepress|use vpn|signup|telegram)/i.test(text)) continue;
+            candidates.push(text);
+        }
+        return candidates.length ? candidates[0] : trim(fallback || "");
     }
 
     async function load(url, cb) {
         try {
-            var payload = parsePayload(url);
-            var pageUrl = trim(payload.pageUrl || payload.url || "");
-            if (!pageUrl) throw new Error("Missing page URL");
-            var html = await getSitePage(pageUrl);
-            var details = parseHdmovieDetails(html, pageUrl, payload);
+            var mainUrl = await getMainUrl();
+            var pageUrl = String(url || "");
+            if (pageUrl.startsWith("{")) {
+                var parsedPayload = parseJsonSafe(pageUrl, null);
+                if (parsedPayload && (parsedPayload.url || parsedPayload.sourceUrl)) {
+                    pageUrl = parsedPayload.url || parsedPayload.sourceUrl;
+                }
+            }
+
+            var html = await getText(pageUrl, defaultHeaders({ "Referer": mainUrl + "/" }));
+            var title = stripTags(firstMatch(html, [
+                /<div\b[^>]*class=["'][^"']*data[^"']*["'][\s\S]*?<h1\b[^>]*>([\s\S]*?)<\/h1>/i,
+                /<h1\b[^>]*class=["'][^"']*entry-title[^"']*["'][^>]*>([\s\S]*?)<\/h1>/i,
+                /<h1\b[^>]*>([\s\S]*?)<\/h1>/i,
+                /<title>([^<]+?)\s*-\s*Hdmovie2/i
+            ]));
+            title = trim(title.replace(/\(\d{4}\)/g, "")).split(" |")[0];
+
+            var posterImgHtml = firstRawMatch(html, [/<div\b[^>]*class=["'][^"']*poster[^"']*["'][\s\S]*?<img\b[^>]*>/i, /<img\b[^>]*>/i]);
+            var posterUrl = parseImageAttr(posterImgHtml);
+            if (posterUrl) posterUrl = absoluteUrl(mainUrl, posterUrl);
+
+            var coverImgHtml = firstRawMatch(html, [
+                /<div\b[^>]*class=["'][^"']*(?:playbox|dooplay-player)[^"']*["'][\s\S]*?<img\b[^>]*class=["'][^"']*cover[^"']*["'][^>]*>/i,
+                /<img\b[^>]*class=["'][^"']*cover[^"']*["'][^>]*>/i
+            ]);
+            var bannerUrl = parseImageAttr(coverImgHtml);
+            if (bannerUrl) bannerUrl = absoluteUrl(mainUrl, bannerUrl);
+            else bannerUrl = posterUrl;
+
+            var genres = [];
+            var genreRegex = /<div\b[^>]*class=["'][^"']*sgeneros[^"']*["'][\s\S]*?<\/div>/i;
+            var genreBlock = firstRawMatch(html, [genreRegex]);
+            if (genreBlock) {
+                var gMatches = [...genreBlock.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/gi)];
+                genres = gMatches.map(function (m) { return stripTags(m[1]); }).filter(Boolean);
+            }
+
+            var yearMatch = firstMatch(html, [/<span\b[^>]*class=["']date["'][^>]*>([\s\S]*?)<\/span>/i]).match(/,\s*((?:19|20)\d{2})/)
+                || title.match(/\b((?:19|20)\d{2})\b/)
+                || html.match(/\b((?:19|20)\d{2})\b/);
+            var year = yearMatch ? parseInt(yearMatch[1] || yearMatch[0], 10) : undefined;
+            if (isNaN(year) || year < 1900 || year > 2100) year = undefined;
+
+            var descriptionBlock = firstRawMatch(html, [/<div\b[^>]*class=["'][^"']*wp-content[^"']*["']>([\s\S]*?)<\/div>/i]);
+            var metaDesc = decodeHtml(firstMatch(html, [/<meta\b[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i]));
+            var description = cleanSynopsis(descriptionBlock, metaDesc);
+
+            var trailerIframe = firstMatch(html, [/<div\b[^>]*class=["'][^"']*embed[^"']*["'][\s\S]*?<iframe\b[^>]*src=["']([^"']+)["']/i]);
+            var trailerUrl = trailerIframe ? absoluteUrl(mainUrl, trailerIframe) : undefined;
+
+            var ratingStr = stripTags(firstMatch(html, [/<span\b[^>]*class=["']dt_rating_vgs["'][^>]*>([\s\S]*?)<\/span>/i]));
+            var score = ratingStr ? parseFloat(ratingStr) : undefined;
+            if (isNaN(score)) score = undefined;
+
+            var cast = [];
+            var actorBlocks = [...html.matchAll(/<div\b[^>]*itemprop=["']actor["'][^>]*>([\s\S]*?)<\/div>/gi)];
+            for (var a = 0; a < actorBlocks.length; a++) {
+                var aBlock = actorBlocks[a][1];
+                var actorName = decodeHtml(firstMatch(aBlock, [/<meta\b[^>]*itemprop=["']name["'][^>]*content=["']([^"']+)["']/i, /<img\b[^>]*alt=["']([^"']+)["']/i]));
+                var actorImg = parseImageAttr(aBlock);
+                if (actorName) {
+                    cast.push(new Actor({ name: actorName, image: actorImg ? absoluteUrl(mainUrl, actorImg) : undefined }));
+                }
+            }
+
+            var recommendations = [];
+            var recBlocks = [...html.matchAll(/<div\b[^>]*class=["'][^"']*owl-item[^"']*["'][\s\S]*?<article\b[^>]*>([\s\S]*?)<\/article>/gi)];
+            for (var r = 0; r < recBlocks.length; r++) {
+                var recItem = parseArticleItem(recBlocks[r][1], mainUrl);
+                if (recItem && recItem.url) recommendations.push(recItem);
+            }
+
+            var isTv = /Episodes/i.test(firstMatch(html, [/<ul\b[^>]*id=["']section["'][\s\S]*?<li\b[^>]*:first-child>([\s\S]*?)<\/li>/i]))
+                || /\b(?:Episode\s*\d+|EP\s*\d+|S\d+E\d+)\b/i.test(html)
+                || /tvshows|season/i.test(pageUrl);
+            var type = isTv ? "series" : "movie";
+
+            // Download Links: Look for all p > a links (hdm.im redirect links)
+            var downloadLinks = [];
+            var pAnchors = [...html.matchAll(/<p\b[^>]*>\s*<a\b[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>\s*<\/p>/gi)];
+            for (var p = 0; p < pAnchors.length; p++) {
+                var pHref = absoluteUrl(mainUrl, pAnchors[p][1]);
+                var pLabel = stripTags(pAnchors[p][2]);
+                if (pHref && pHref.indexOf("http") === 0) {
+                    downloadLinks.push({ href: pHref, label: pLabel });
+                }
+            }
+
+            // DooPlay player ajax options (post, nume, type)
+            var playerOptions = [];
+            var optLiMatches = [...html.matchAll(/<li\b[^>]*class=["'][^"']*dooplay_player_option[^"']*["'][^>]*data-type=["']([^"']*)["'][^>]*data-post=["']([^"']*)["'][^>]*data-nume=["']([^"']*)["'][^>]*>([\s\S]*?)<\/li>/gi)];
+            if (!optLiMatches.length) {
+                optLiMatches = [...html.matchAll(/<li\b[^>]*data-type=["']([^"']*)["'][^>]*data-post=["']([^"']*)["'][^>]*data-nume=["']([^"']*)["'][^>]*>([\s\S]*?)<\/li>/gi)];
+            }
+            for (var o = 0; o < optLiMatches.length; o++) {
+                var oType = optLiMatches[o][1];
+                var oPost = optLiMatches[o][2];
+                var oNume = optLiMatches[o][3];
+                var oTitle = stripTags(firstMatch(optLiMatches[o][4], [/<span\b[^>]*class=["']title["'][^>]*>([\s\S]*?)<\/span>/i]));
+                if (oNume && !/trailer/i.test(oNume)) {
+                    playerOptions.push({ type: oType, post: oPost, nume: oNume, title: oTitle || ("Server " + oNume) });
+                }
+            }
+
+            // Parse episodes
+            var episodes = [];
+            var episodeLiMatches = [...html.matchAll(/<ul\b[^>]*class=["'][^"']*episodios[^"']*["'][\s\S]*?<li\b[^>]*>([\s\S]*?)<\/li>/gi)];
+            if (episodeLiMatches.length && isTv) {
+                for (var ep = 0; ep < episodeLiMatches.length; ep++) {
+                    var epBlock = episodeLiMatches[ep][1];
+                    var epHref = absoluteUrl(mainUrl, firstMatch(epBlock, [/<a\b[^>]*href=["']([^"']+)["']/i]));
+                    var epName = stripTags(firstMatch(epBlock, [/<div\b[^>]*class=["']episodiotitle["'][\s\S]*?<a\b[^>]*>([\s\S]*?)<\/a>/i])) || ("Episode " + (ep + 1));
+                    var epNumText = stripTags(firstMatch(epBlock, [/<div\b[^>]*class=["']numerando["'][^>]*>([\s\S]*?)<\/div>/i])).replace(/\s+/g, "");
+                    var epParts = epNumText.split("-");
+                    var seasonNum = epParts.length > 1 ? (parseInt(epParts[0], 10) || 1) : 1;
+                    var epNum = epParts.length > 1 ? (parseInt(epParts[1], 10) || (ep + 1)) : (parseInt(epParts[0], 10) || (ep + 1));
+                    var epImg = parseImageAttr(epBlock);
+
+                    episodes.push(new Episode({
+                        name: epName,
+                        season: seasonNum,
+                        episode: epNum,
+                        posterUrl: epImg ? absoluteUrl(mainUrl, epImg) : posterUrl,
+                        url: JSON.stringify({
+                            sourceUrl: epHref || pageUrl,
+                            title: title,
+                            season: seasonNum,
+                            episode: epNum,
+                            downloadLinks: downloadLinks,
+                            playerOptions: playerOptions
+                        }),
+                        headers: { "Referer": mainUrl + "/" }
+                    }));
+                }
+            }
+
+            // For movies or series without episodes list: return Movie Episode with season 1, episode 1
+            if (!episodes.length) {
+                episodes.push(new Episode({
+                    name: isTv ? "Full Series" : "Full Movie",
+                    season: 1,
+                    episode: 1,
+                    posterUrl: posterUrl,
+                    description: description,
+                    url: JSON.stringify({
+                        sourceUrl: pageUrl,
+                        title: title,
+                        year: year,
+                        type: type,
+                        season: 1,
+                        episode: 1,
+                        downloadLinks: downloadLinks,
+                        playerOptions: playerOptions
+                    }),
+                    headers: { "Referer": mainUrl + "/" }
+                }));
+            }
+
             Analytics.logEvent('hdmovie2_load', {});
             cb({
                 success: true,
                 data: new MultimediaItem({
-                    title: details.title,
-                    url: buildSitePayload(details),
-                    posterUrl: details.posterUrl,
-                    bannerUrl: details.bannerUrl,
-                    description: details.description,
-                    year: details.year,
-                    type: "movie",
-                    episodes: [new Episode({
-                        name: "Movie",
-                        url: buildSitePayload(details),
-                        season: 0,
-                        episode: 0,
-                        posterUrl: details.posterUrl,
-                        description: details.description
-                    })]
+                    title: title,
+                    url: pageUrl,
+                    posterUrl: posterUrl || undefined,
+                    bannerUrl: bannerUrl || undefined,
+                    type: type,
+                    description: description || undefined,
+                    year: year,
+                    score: score,
+                    genres: genres.length ? genres : undefined,
+                    trailers: trailerUrl ? [new Trailer({ url: trailerUrl })] : undefined,
+                    cast: cast.length ? cast : undefined,
+                    recommendations: recommendations.length ? recommendations : undefined,
+                    headers: { "Referer": mainUrl + "/" },
+                    episodes: episodes
                 })
             });
         } catch (error) {
-            cb({ success: false, errorCode: "LOAD_ERROR", message: String(error && error.message || error) });
+            cb({ success: false, errorCode: "LOAD_ERROR", message: toErrorMessage(error) });
         }
     }
 
-    function parseWpArticleCard(block, base) {
-        var href = firstMatch(block, [
-            /<h2\b[^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i,
-            /<h3\b[^>]*>\s*<a\b[^>]*href=["']([^"']+)["']/i,
-            /<a\b[^>]*href=["']([^"']+)["'][^>]*class=["'][^"']*post-image[^"']*["']/i,
-            /<a\b[^>]*href=["']([^"']+)["'][^>]*>/i
-        ]);
-        if (!href) return null;
-        var rawTitle = stripTags(firstMatch(block, [
-            /<h2\b[^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i,
-            /<h3\b[^>]*>\s*<a\b[^>]*>([\s\S]*?)<\/a>/i,
-            /\btitle=["']([^"']+)["']/i,
-            /<img\b[^>]*alt=["']([^"']+)["']/i
-        ]));
-        if (!rawTitle) return null;
-        return {
-            title: trim(rawTitle.split(" |")[0]),
-            year: Number(firstMatch(rawTitle, [/\((\d{4})\)/])) || undefined,
-            type: /season|series|tv/i.test(rawTitle) ? "series" : "movie",
-            url: absoluteUrl(base, href)
-        };
+    // -------------------------------------------------------------
+    // Extractors: GDFlix, HubCloud, Filepress, PixelDrain, HDm2, Abyass
+    // -------------------------------------------------------------
+
+    function isDirectMediaUrl(url) {
+        var str = String(url || "");
+        return /\.(m3u8|mp4|mkv|webm|avi)(?:[?#]|$)/i.test(str)
+            || /busycdn\.xyz|r2\.dev|cloudfront\.net|pixeldrain\.dev\/api\/file|workers\.dev|awscdn\.rest|y5acuyojym/i.test(str);
     }
 
-    function parseWpArticleResults(html, base) {
-        return extractBlocks(html, "article").map(function (block) {
-            return parseWpArticleCard(block, base);
-        }).filter(Boolean);
+    async function extractGdflixStreams(targetUrl, sourceName, defaultQuality) {
+        var streams = [];
+        try {
+            var res = await getText(targetUrl, defaultHeaders({ "Referer": "https://hdm.im/" }));
+            var anchors = parseAnchors(res, baseOrigin(targetUrl));
+            for (var i = 0; i < anchors.length; i++) {
+                var a = anchors[i];
+                var label = a.text.toLowerCase();
+                var href = a.href;
+                if (!href || /login|sign in|privacy|terms|dmca|about us|telegram/i.test(label)) continue;
+
+                var qual = qualityFromText(a.text) || defaultQuality;
+
+                // 1. Instant DL [10GBPS]
+                if (label.indexOf("instant dl") !== -1 || href.indexOf("busycdn") !== -1) {
+                    streams.push(new StreamResult({
+                        url: href,
+                        source: (sourceName || "HDMovie2") + " [Instant 10Gbps]",
+                        quality: qual || 1080,
+                        headers: defaultHeaders({ "Referer": targetUrl })
+                    }));
+                }
+                // 2. CLOUD DOWNLOAD [R2]
+                else if (label.indexOf("cloud download") !== -1 || href.indexOf("fastcdn-dl") !== -1 || href.indexOf("r2.dev") !== -1) {
+                    var r2Url = href;
+                    var matchUrl = href.match(/[?&]url=([^&]+)/i);
+                    if (matchUrl && matchUrl[1]) {
+                        try { r2Url = decodeURIComponent(matchUrl[1]); } catch (_) {}
+                    }
+                    streams.push(new StreamResult({
+                        url: r2Url,
+                        source: (sourceName || "HDMovie2") + " [Cloud R2]",
+                        quality: qual || 1080,
+                        headers: defaultHeaders({ "Referer": targetUrl })
+                    }));
+                }
+                // 3. FAST CLOUD / ZIPDISK / CFlare
+                else if (label.indexOf("fast cloud") !== -1 || label.indexOf("zipdisk") !== -1 || href.indexOf("/cflare/") !== -1) {
+                    var cflareHref = href.indexOf("http") === 0 ? href : absoluteUrl(baseOrigin(targetUrl), href);
+                    try {
+                        var cflareHtml = await getText(cflareHref, defaultHeaders({ "Referer": targetUrl }));
+                        var cflareAnchors = parseAnchors(cflareHtml, baseOrigin(cflareHref));
+                        for (var c = 0; c < cflareAnchors.length; c++) {
+                            var cAnchor = cflareAnchors[c];
+                            var cLabel = cAnchor.text.toLowerCase();
+                            var cHref = cAnchor.href;
+                            if (cLabel.indexOf("cloud resume") !== -1 || cHref.indexOf("workers.dev") !== -1 || cHref.indexOf("awscdn") !== -1 || isDirectMediaUrl(cHref)) {
+                                streams.push(new StreamResult({
+                                    url: cHref,
+                                    source: (sourceName || "HDMovie2") + " [Cloud Resume]",
+                                    quality: qual || 1080,
+                                    headers: defaultHeaders({ "Referer": cflareHref })
+                                }));
+                            }
+                        }
+                    } catch (_) {}
+                }
+                // 4. Pixeldrain
+                else if (label.indexOf("pixel") !== -1 || href.indexOf("pixeldrain") !== -1) {
+                    var pixId = href.split("/").pop();
+                    streams.push(new StreamResult({
+                        url: "https://pixeldrain.dev/api/file/" + pixId + "?download",
+                        source: (sourceName || "HDMovie2") + " [Pixeldrain]",
+                        quality: qual || 1080,
+                        headers: defaultHeaders()
+                    }));
+                }
+                // 5. Direct / Fast Cloud
+                else if (label.indexOf("direct dl") !== -1 || label.indexOf("fast cloud") !== -1) {
+                    if (isDirectMediaUrl(href)) {
+                        streams.push(new StreamResult({
+                            url: href,
+                            source: (sourceName || "HDMovie2") + " [Fast Direct]",
+                            quality: qual || 1080,
+                            headers: defaultHeaders({ "Referer": targetUrl })
+                        }));
+                    }
+                }
+            }
+        } catch (_) {}
+        return streams;
     }
 
-    function normalizeResolvedUrl(rawValue, base) {
-        var value = String(rawValue || "");
-        if (!value) return "";
-        value = decodeHtml(value)
-            .replace(/\\\//g, "/")
-            .replace(/^["'`(]+/, "")
-            .replace(/["'`),;]+$/, "");
-        if (/^\/\//.test(value)) value = "https:" + value;
-        if (/^www\./i.test(value)) value = "https://" + value;
-        if (!/^https?:\/\//i.test(value) && base) value = absoluteUrl(base, value);
-        return value;
+    async function extractHubcloudStreams(targetUrl, sourceName, defaultQuality) {
+        var streams = [];
+        try {
+            var html = await getText(targetUrl, defaultHeaders({ "Referer": baseOrigin(targetUrl) + "/" }));
+            var anchors = parseAnchors(html, baseOrigin(targetUrl));
+            for (var i = 0; i < anchors.length; i++) {
+                var a = anchors[i];
+                var label = a.text.toLowerCase();
+                var href = a.href;
+                var qual = qualityFromText(a.text) || defaultQuality;
+
+                if (label.indexOf("10gbps") !== -1 || label.indexOf("download") !== -1 || href.indexOf("r2.dev") !== -1 || href.indexOf("cloudfront") !== -1) {
+                    if (href.indexOf("http") === 0) {
+                        streams.push(new StreamResult({
+                            url: href,
+                            source: (sourceName || "HDMovie2") + " [HubCloud " + (qual ? qual + "p" : "Direct") + "]",
+                            quality: qual || 1080,
+                            headers: defaultHeaders({ "Referer": targetUrl })
+                        }));
+                    }
+                }
+            }
+        } catch (_) {}
+        return streams;
     }
 
-    function isCommonDirectMediaUrl(url) {
-        var value = String(url || "");
-        return /\.(?:m3u8|mp4|mkv|webm|avi|mpd)(?:[?#].*)?$/i.test(value)
-            || /hdm2\.ink\/playlist\//i.test(value);
+    async function extractHDm2Streams(playUrl) {
+        var streams = [];
+        try {
+            var resText = await getText(playUrl, {
+                "User-Agent": "okhttp/4.12.0",
+                "Referer": "https://hdm2.ink/"
+            });
+            var streamMatch = resText.match(/data-stream-url=["'](.*?)["']/i);
+            if (streamMatch && streamMatch[1]) {
+                var rawStream = streamMatch[1].trim();
+                var cleaned = rawStream.replace(/&amp;/g, "&");
+                var m3u8Url = cleaned.indexOf("http") === 0 ? cleaned : ("https://hdm2.ink/" + cleaned.replace(/^\/+/, ""));
+                streams.push(new StreamResult({
+                    url: m3u8Url,
+                    source: "Ultra Stream V3 [HDm2]",
+                    quality: qualityFromText(resText) || 1080,
+                    headers: {
+                        "User-Agent": "okhttp/4.12.0",
+                        "Referer": "https://hdm2.ink/"
+                    }
+                }));
+            }
+        } catch (_) {}
+        return streams;
     }
 
-    function buildResolvedStream(url, source, quality, headers) {
-        return {
-            url: url,
-            source: source || "HDMovie2",
-            quality: quality || qualityFromText(url),
-            headers: headers || {}
-        };
+    async function extractAbyassStreams(url) {
+        var streams = [];
+        try {
+            var html = await getText(url, defaultHeaders({
+                "Origin": "https://playhydrax.com",
+                "Referer": "https://playhydrax.com/"
+            }));
+            var encMatch = html.match(/const\s+datas\s*=\s*"([^"]*)"/i);
+            if (encMatch && encMatch[1]) {
+                var encText = encMatch[1];
+                var decRes = await request("https://enc-dec.app/api/dec-abyss", {
+                    method: "POST",
+                    body: JSON.stringify({ text: encText }),
+                    headers: {
+                        "Content-Type": "application/json",
+                        "User-Agent": COMMON_USER_AGENT
+                    }
+                });
+                var decJson = parseJsonSafe(decRes.body, {});
+                if (decJson && decJson.result && decJson.result.sources) {
+                    var sources = decJson.result.sources;
+                    for (var s = 0; s < sources.length; s++) {
+                        var src = sources[s];
+                        if (src.status && src.url) {
+                            streams.push(new StreamResult({
+                                url: src.url,
+                                source: "Abyass [" + String(src.codec || "HLS").toUpperCase() + "]",
+                                quality: qualityFromText(src.type || "") || 1080,
+                                headers: defaultHeaders({
+                                    "Origin": "https://playhydrax.com",
+                                    "Referer": "https://playhydrax.com/"
+                                })
+                            }));
+                        }
+                    }
+                }
+            }
+        } catch (_) {}
+        return streams;
     }
 
-    function extractInterestingUrls(html, base) {
-        var out = [];
-        var regex = /(?:href|src)=["']([^"']+)["']/gi;
-        var match;
-        while ((match = regex.exec(String(html || "")))) {
-            var value = normalizeResolvedUrl(match[1], base);
-            if (!value) continue;
-            out.push(value);
-        }
-        return uniqueBy(out, function (item) { return item; });
+    async function resolveSingleHdmLink(hdmHref, buttonLabel) {
+        var streams = [];
+        try {
+            var res = await getText(hdmHref, defaultHeaders({ "Referer": "https://hdmovie2a.icu/" }));
+            console.log("resolveSingleHdmLink fetched", hdmHref, "length:", (res && res.length) || 0);
+            var buttons = [...res.matchAll(/<p\b[^>]*>\s*<a\b[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>\s*<\/p>/gi)];
+            console.log("resolveSingleHdmLink buttons found:", buttons.length);
+            var targetTasks = buttons.map(async function (btn) {
+                var btnHref = btn[1];
+                var btnText = stripTags(btn[2]);
+                var btnQual = qualityFromText(btnText) || qualityFromText(buttonLabel) || 1080;
+                try {
+                    var redir = await request(btnHref, { allowRedirects: true }).catch(function (err) {
+                        console.log("redir err for", btnHref, err && err.message);
+                        return null;
+                    });
+                    var targetUrl = (redir && redir.finalUrl) || (redir && redir.headers && (redir.headers.location || redir.headers["location"])) || btnHref;
+                    console.log("Button targetUrl:", targetUrl, "btnText:", btnText);
+
+                    if (/gdflix|gdlink/i.test(targetUrl) || /gdflix|gdlink/i.test(btnHref)) {
+                        return await extractGdflixStreams(targetUrl, "HDMovie2 " + (btnQual ? btnQual + "p" : ""), btnQual);
+                    } else if (/hubcloud|gamerxyt/i.test(targetUrl) || /hubcloud/i.test(btnHref)) {
+                        return await extractHubcloudStreams(targetUrl, "HDMovie2 " + (btnQual ? btnQual + "p" : ""), btnQual);
+                    } else if (/pixeldrain/i.test(targetUrl)) {
+                        var pId = targetUrl.split("/").pop();
+                        return [new StreamResult({
+                            url: "https://pixeldrain.dev/api/file/" + pId + "?download",
+                            source: "HDMovie2 [Pixeldrain " + (btnQual ? btnQual + "p" : "") + "]",
+                            quality: btnQual,
+                            headers: defaultHeaders()
+                        })];
+                    } else if (isDirectMediaUrl(targetUrl)) {
+                        return [new StreamResult({
+                            url: targetUrl,
+                            source: "HDMovie2 [Direct " + (btnQual ? btnQual + "p" : "") + "]",
+                            quality: btnQual,
+                            headers: defaultHeaders({ "Referer": hdmHref })
+                        })];
+                    }
+                } catch (e) {
+                    console.log("targetTask error:", e && e.message);
+                }
+                return [];
+            });
+
+            var subResults = await Promise.all(targetTasks);
+            for (var s = 0; s < subResults.length; s++) {
+                streams = streams.concat(subResults[s]);
+            }
+        } catch (_) {}
+        return streams;
     }
 
-    async function resolveHdm2Play(url, label) {
-        var headers = commonHeaders({ "Referer": baseOrigin(url) + "/" });
-        var html = await getText(url, headers, true).catch(function () { return ""; });
-        if (!html) return [];
-        var streamPath = normalizeResolvedUrl(firstMatch(html, [/data-stream-url=["']([^"']+)["']/i]), baseOrigin(url));
-        if (!streamPath) return [];
-        var title = decodeHtml(firstMatch(html, [/data-player-title=["']([^"']+)["']/i])) || label || "HDMovie2";
-        return [buildResolvedStream(streamPath, label || "HDMovie2", qualityFromText(title), commonHeaders({
-            "Referer": url,
-            "Origin": baseOrigin(url)
-        }))];
-    }
-
-    async function resolveGenericPage(url, label, depth) {
-        if (depth > 3) return [];
-        var res = await request(url, { headers: commonHeaders({ "Referer": baseOrigin(url) + "/" }), allowRedirects: true }).catch(function () { return null; });
-        var finalUrl = res && res.finalUrl || url;
-        var html = res ? String(res.body || "") : "";
-        var candidates = extractInterestingUrls(html, baseOrigin(finalUrl)).filter(function (item) {
-            return item && item !== url;
-        });
-        var out = [];
-        for (var i = 0; i < candidates.length; i++) {
-            out = out.concat(await resolveCommonExtractorUrl(candidates[i], label, depth + 1));
-        }
-        return out;
-    }
-
-    async function resolveCommonExtractorUrl(url, label, depth) {
-        var normalized = normalizeResolvedUrl(url, "");
-        if (!normalized) return [];
-        if (isCommonDirectMediaUrl(normalized)) {
-            return [buildResolvedStream(normalized, label || "HDMovie2", qualityFromText(normalized), commonHeaders())];
-        }
-        if (/hdm2\.ink\/play/i.test(normalized)) return resolveHdm2Play(normalized, label || "HDMovie2");
-        return resolveGenericPage(normalized, label || "HDMovie2", depth || 0);
-    }
-
-    async function getMainUrl() {
-        return getDynamicDomain("hdmovie2", "https://hdmovie2.restaurant");
-    }
-
-    async function searchTitles(queries) {
-        var mainUrl = await getMainUrl();
-        for (var i = 0; i < queries.length; i++) {
-            var query = trim(queries[i]);
-            if (!query) continue;
-            try {
-                var html = await getText(mainUrl + "/?s=" + encodeURIComponent(query), commonHeaders({ "Referer": mainUrl + "/" }), true);
-                var results = parseHdmovieSearchResults(html, mainUrl);
-                if (results.length) return results;
-            } catch (_) {}
-        }
-        return [];
-    }
-
-    function parsePlayerOptions(html) {
-        var out = [];
-        var regex = /<li\b[^>]*class=["'][^"']*dooplay_player_option[^"']*["'][^>]*data-(?:type|post|nume)=["'][^"']+["'][^>]*>/gi;
-        var match;
-        while ((match = regex.exec(String(html || "")))) {
-            var start = match.index;
-            var end = html.indexOf("</li>", start);
-            if (end === -1) continue;
-            var block = html.slice(start, end + 5);
-            var nume = firstMatch(block, [/data-nume=["']([^"']+)["']/i]);
-            var postId = firstMatch(block, [/data-post=["']([^"']+)["']/i]);
-            var type = firstMatch(block, [/data-type=["']([^"']+)["']/i]);
-            var title = stripTags(firstMatch(block, [/<span[^>]*class=["'][^"']*title[^"']*["'][^>]*>([\s\S]*?)<\/span>/i]));
-            if (!nume || !postId || !type || /trailer/i.test(nume)) continue;
-            out.push({ nume: nume, postId: postId, type: type, title: title || ("Server " + nume) });
-        }
-        return uniqueBy(out, function (item) { return item.nume; });
-    }
-
-    function dedupeStreams(list) {
-        return uniqueBy((list || []).filter(function (item) { return item && item.url; }), function (item) {
-            return item.url + "|" + JSON.stringify(item.headers || {});
-        });
-    }
-
-    function sortStreams(list) {
-        return list.slice().sort(function (a, b) { return Number(b.quality || 0) - Number(a.quality || 0); });
+    async function resolveDooPlayerOption(opt, mainUrl, sourceUrl) {
+        var streams = [];
+        try {
+            var formData = "action=doo_player_ajax&post=" + encodeURIComponent(opt.post)
+                + "&nume=" + encodeURIComponent(opt.nume)
+                + "&type=" + encodeURIComponent(opt.type);
+            var res = await request(mainUrl + "/wp-admin/admin-ajax.php", {
+                method: "POST",
+                body: formData,
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                    "X-Requested-With": "XMLHttpRequest",
+                    "User-Agent": COMMON_USER_AGENT,
+                    "Referer": sourceUrl || (mainUrl + "/"),
+                    "Origin": mainUrl
+                }
+            });
+            var json = parseJsonSafe(res.body, {});
+            var embedUrl = firstMatch(String(json.embed_url || ""), [/<iframe\b[^>]*src=["']([^"']+)["']/i, /^https?:\/\/[^\s]+/i]);
+            if (embedUrl) {
+                if (/hdm2\.ink/i.test(embedUrl)) {
+                    streams = streams.concat(await extractHDm2Streams(embedUrl));
+                } else if (/prvs\.top|playhydrax/i.test(embedUrl)) {
+                    streams = streams.concat(await extractAbyassStreams(embedUrl));
+                } else if (isDirectMediaUrl(embedUrl)) {
+                    streams.push(new StreamResult({
+                        url: embedUrl,
+                        source: "HDMovie2 [Server " + (opt.nume || "1") + "]",
+                        quality: qualityFromText(opt.title || "") || 1080,
+                        headers: defaultHeaders({ "Referer": sourceUrl })
+                    }));
+                }
+            }
+        } catch (_) {}
+        return streams;
     }
 
     async function loadStreams(url, cb) {
         try {
-            var payload = parsePayload(url);
-            var pageUrl = trim(payload.pageUrl || payload.url || "");
-            var match = pageUrl ? { url: pageUrl, title: payload.title || "" } : null;
-            if (!match) {
-                var queries = uniqueBy([payload.title, payload.originalTitle], function (item) { return normalizeTitle(item); }).filter(Boolean);
-                var rows = await searchTitles(queries);
-                match = bestMatch(rows, queries, payload.year, "movie");
-            }
-            if (!match || !match.url) return cb({ success: true, data: [] });
-            var pageHtml = await getText(match.url, commonHeaders({ "Referer": (await getMainUrl()) + "/" }), true).catch(function () { return ""; });
-            if (!pageHtml) return cb({ success: true, data: [] });
+            var mainUrl = await getMainUrl();
+            var payload = parseJsonSafe(url, null);
+            var sourceUrl = "";
+            var downloadLinks = [];
+            var playerOptions = [];
 
-            var options = parsePlayerOptions(pageHtml);
-            var streams = [];
-            for (var i = 0; i < options.length; i++) {
-                var form = "action=doo_player_ajax&post=" + encodeURIComponent(options[i].postId)
-                    + "&nume=" + encodeURIComponent(options[i].nume)
-                    + "&type=" + encodeURIComponent(options[i].type);
-                var res = await request((await getMainUrl()) + "/wp-admin/admin-ajax.php", {
-                    method: "POST",
-                    body: form,
-                    headers: commonHeaders({
-                        "Referer": match.url,
-                        "Origin": await getMainUrl(),
-                        "X-Requested-With": "XMLHttpRequest",
-                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
-                    })
-                }).catch(function () { return null; });
-                var json = res ? parseJsonSafe(res.body, {}) : {};
-                var embedUrl = normalizeResolvedUrl(firstMatch(String(json && json.embed_url || ""), [/<iframe[^>]+src=["']([^"']+)["']/i]), match.url);
-                if (!embedUrl) continue;
-                var resolved = await resolveCommonExtractorUrl(embedUrl, "HDMovie2", 0);
-                for (var j = 0; j < resolved.length; j++) {
-                    if (!resolved[j].quality) resolved[j].quality = qualityFromText(options[i].title || payload.title || match.title);
-                    streams.push(resolved[j]);
+            if (payload && typeof payload === "object") {
+                sourceUrl = payload.sourceUrl || payload.url || "";
+                downloadLinks = payload.downloadLinks || [];
+                playerOptions = payload.playerOptions || [];
+            } else if (typeof url === "string" && url.indexOf("http") === 0) {
+                sourceUrl = url;
+            }
+
+            // If payload had no download links, fetch the page to extract them
+            if (sourceUrl && !downloadLinks.length && !playerOptions.length) {
+                var html = await getText(sourceUrl, defaultHeaders({ "Referer": mainUrl + "/" }));
+                var pAnchors = [...html.matchAll(/<p\b[^>]*>\s*<a\b[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>\s*<\/p>/gi)];
+                for (var p = 0; p < pAnchors.length; p++) {
+                    var pHref = absoluteUrl(mainUrl, pAnchors[p][1]);
+                    var pLabel = stripTags(pAnchors[p][2]);
+                    if (pHref && pHref.indexOf("http") === 0) {
+                        downloadLinks.push({ href: pHref, label: pLabel });
+                    }
+                }
+                var optLiMatches = [...html.matchAll(/<li\b[^>]*data-type=["']([^"']*)["'][^>]*data-post=["']([^"']*)["'][^>]*data-nume=["']([^"']*)["'][^>]*>([\s\S]*?)<\/li>/gi)];
+                for (var o = 0; o < optLiMatches.length; o++) {
+                    var oType = optLiMatches[o][1];
+                    var oPost = optLiMatches[o][2];
+                    var oNume = optLiMatches[o][3];
+                    var oTitle = stripTags(firstMatch(optLiMatches[o][4], [/<span\b[^>]*class=["']title["'][^>]*>([\s\S]*?)<\/span>/i]));
+                    if (oNume && !/trailer/i.test(oNume)) {
+                        playerOptions.push({ type: oType, post: oPost, nume: oNume, title: oTitle || ("Server " + oNume) });
+                    }
                 }
             }
+
+            var allStreams = [];
+
+            // 1. Resolve hdm.im download buttons in parallel
+            var hdmTasks = downloadLinks.map(function (link) {
+                return resolveSingleHdmLink(link.href, link.label);
+            });
+
+            // 2. Resolve doo_player_ajax options in parallel
+            var optTasks = playerOptions.map(function (opt) {
+                return resolveDooPlayerOption(opt, mainUrl, sourceUrl);
+            });
+
+            var results = await Promise.all(hdmTasks.concat(optTasks));
+            for (var r = 0; r < results.length; r++) {
+                allStreams = allStreams.concat(results[r]);
+            }
+
+            // Deduplicate and filter direct streams only
+            var directStreams = uniqueBy(allStreams.filter(function (it) {
+                return it && it.url && isDirectMediaUrl(it.url);
+            }), function (it) {
+                return it.url;
+            });
+
+            // Sort descending by quality
+            directStreams.sort(function (a, b) {
+                return (b.quality || 0) - (a.quality || 0);
+            });
+
             Analytics.logEvent('hdmovie2_loadstreams', {});
-            cb({ success: true, data: sortStreams(dedupeStreams(streams)).map(function (item) { return new StreamResult(item); }) });
+            cb({ success: true, data: directStreams });
         } catch (error) {
-            cb({ success: false, errorCode: "STREAM_ERROR", message: String(error && error.message || error) });
+            cb({ success: false, errorCode: "STREAM_ERROR", message: toErrorMessage(error) });
         }
     }
 
-    globalThis.getHome = getHome;
-    globalThis.search = search;
-    globalThis.load = load;
-    globalThis.loadStreams = loadStreams;
+    var root = typeof globalThis !== "undefined" ? globalThis
+        : typeof self !== "undefined" ? self
+        : typeof window !== "undefined" ? window
+        : typeof global !== "undefined" ? global
+        : this;
+
+    root.getHome = getHome;
+    root.loadHome = getHome;
+    root.loadhome = getHome;
+    root.search = search;
+    root.load = load;
+    root.loadStreams = loadStreams;
+
 })();
