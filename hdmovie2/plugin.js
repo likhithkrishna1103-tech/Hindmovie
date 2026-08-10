@@ -278,7 +278,7 @@
         var source = String(text || "");
         for (var i = 0; i < patterns.length; i++) {
             var match = source.match(patterns[i]);
-            if (match && typeof match[1] !== "undefined") return String(match[1] || "");
+            if (match) return match[1] ? String(match[1]) : String(match[0]);
         }
         return "";
     }
@@ -353,6 +353,13 @@
             .replace(/[^a-z0-9]+/g, " "));
     }
 
+    function cleanTmdbTitle(title) {
+        return trim(String(title || "")
+            .replace(/\(\d{4}\)/g, "")
+            .replace(/\b(Hindi|English|Tamil|Telugu|Kannada|Malayalam|Dubbed|HQ Dubbed|HQ|Dual Audio|Season\s*\d+|Complete|AMZN|Netflix|Zee5|Hotstar|JioCinema|HD|CAMRip|HDTC|CAM|Pre DVD|V2|V3|V4|Multi)\b/gi, "")
+            .replace(/\s{2,}/g, " "));
+    }
+
     async function getMainUrl() {
         var now = Date.now();
         if (cachedBaseUrl && (now - cachedBaseUrlTime < CACHE_TTL)) {
@@ -376,7 +383,7 @@
         if (!uri) return "";
         if (uri.indexOf("/episodes/") !== -1) {
             var title = uri.split("/episodes/")[1] || "";
-            var match = title.match(/(.+?)-season/i);
+            var match = title.match(/(.+?)-season-\d+-episode-\d+/i);
             var titleSlug = match ? match[1] : title.replace(/\/+$/, "");
             return (mainUrl || DEFAULT_BASE_URL) + "/tvshows/" + titleSlug;
         }
@@ -395,11 +402,13 @@
             /\bdata-src=["']([^"']+)["']/i,
             /\bdata-wpfc-original-src=["']([^"']+)["']/i,
             /\bdata-lazy-src=["']([^"']+)["']/i,
+            /\bdata-original=["']([^"']+)["']/i,
             /\bsrc=["']([^"']+)["']/i
         ]);
-        if (dataSrc && dataSrc.indexOf(".gif") === -1) return dataSrc;
+        if (dataSrc && dataSrc.indexOf(".gif") === -1 && !dataSrc.startsWith("data:image")) return dataSrc;
         var src = firstMatch(imgHtml, [/\bsrc=["']([^"']+)["']/i]);
-        return src || dataSrc || "";
+        if (src && src.indexOf(".gif") === -1 && !src.startsWith("data:image")) return src;
+        return dataSrc || src || "";
     }
 
     function parseArticleItem(block, base) {
@@ -425,7 +434,10 @@
 
         var cleanTitle = trim(rawTitle.replace(/\(\d{4}\)/g, "")).split(" |")[0];
         var properHref = getProperLink(absoluteUrl(base, href), base);
-        var imgHtml = firstRawMatch(block, [/<div\b[^>]*class=["'][^"']*poster[^"']*["'][\s\S]*?<img\b[^>]*>/i, /<img\b[^>]*>/i]);
+        var imgHtml = firstRawMatch(block, [
+            /<div\b[^>]*class=["'][^"']*poster[^"']*["'][\s\S]*?<img\b[^>]*>/i,
+            /<img\b[^>]*>/i
+        ]);
         var posterUrl = parseImageAttr(imgHtml);
         if (posterUrl) posterUrl = absoluteUrl(base, posterUrl);
 
@@ -498,7 +510,7 @@
                 }
             }
 
-            // Enrich Trending items with TMDB metadata (banner, logo, genres) for carousel
+            // Enrich Trending items with TMDB metadata (banner, logo, genres, score) for carousel
             if (results["Trending"] && results["Trending"].length) {
                 try {
                     var enrichCount = Math.min(results["Trending"].length, 10);
@@ -506,7 +518,8 @@
                     for (var t = 0; t < enrichCount; t++) {
                         var it = results["Trending"][t];
                         var tmdbType = it.type === "series" ? "tv" : "movie";
-                        var tmdbSearchUrl = TMDB_WORKER_API + "/search/" + tmdbType + "?api_key=" + TMDB_API_KEY + "&query=" + encodeURIComponent(it.title) + (it.year ? "&year=" + it.year : "");
+                        var cleanQ = cleanTmdbTitle(it.title);
+                        var tmdbSearchUrl = TMDB_WORKER_API + "/search/" + tmdbType + "?api_key=" + TMDB_API_KEY + "&query=" + encodeURIComponent(cleanQ) + (it.year ? "&year=" + it.year : "");
                         enrichPromises.push(getJson(tmdbSearchUrl).catch(function () { return {}; }));
                     }
                     var tmdbResults = await Promise.all(enrichPromises);
@@ -516,6 +529,9 @@
                             var best = tmdbJson.results[0];
                             if (best.backdrop_path) {
                                 results["Trending"][e].bannerUrl = TMDB_IMAGE_BASE + best.backdrop_path;
+                            }
+                            if (best.poster_path && !results["Trending"][e].posterUrl) {
+                                results["Trending"][e].posterUrl = TMDB_IMAGE_BASE + best.poster_path;
                             }
                             if (best.vote_average && !results["Trending"][e].score) {
                                 results["Trending"][e].score = Number(best.vote_average.toFixed(1));
@@ -654,16 +670,35 @@
                 || /tvshows|season/i.test(pageUrl);
             var type = isTv ? "series" : "movie";
 
-            // Download Links: Look for all p > a links (hdm.im redirect links)
+            // Download Links: Look for all download links across the page and deduplicate
             var downloadLinks = [];
-            var pAnchors = [...html.matchAll(/<p\b[^>]*>\s*<a\b[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>\s*<\/p>/gi)];
-            for (var p = 0; p < pAnchors.length; p++) {
-                var pHref = absoluteUrl(mainUrl, pAnchors[p][1]);
-                var pLabel = stripTags(pAnchors[p][2]);
-                if (pHref && pHref.indexOf("http") === 0) {
-                    downloadLinks.push({ href: pHref, label: pLabel });
+            var dlAnchors = [...html.matchAll(/<a\b[^>]*href=["'](https?:\/\/(?:hdm\.im|[^\/]*gdflix|[^\/]*gdtot|[^\/]*filepress|[^\/]*filebee|[^\/]*hubcloud)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+            for (var d = 0; d < dlAnchors.length; d++) {
+                var dHref = absoluteUrl(mainUrl, dlAnchors[d][1]);
+                var dLabel = stripTags(dlAnchors[d][2]);
+                if (dHref && !downloadLinks.some(function (x) { return x.href === dHref; })) {
+                    downloadLinks.push({ href: dHref, label: dLabel });
                 }
             }
+
+            // Enrich load with TMDB details (backdrop, poster, logo, score)
+            try {
+                var cleanLoadTitle = cleanTmdbTitle(title);
+                var tmdbType = type === "series" ? "tv" : "movie";
+                var searchRes = await getJson(TMDB_WORKER_API + "/search/" + tmdbType + "?api_key=" + TMDB_API_KEY + "&query=" + encodeURIComponent(cleanLoadTitle) + (year ? "&year=" + year : ""));
+                if (searchRes && searchRes.results && searchRes.results[0]) {
+                    var tmdbItem = searchRes.results[0];
+                    if (tmdbItem.backdrop_path && (!bannerUrl || bannerUrl === posterUrl)) {
+                        bannerUrl = TMDB_IMAGE_BASE + tmdbItem.backdrop_path;
+                    }
+                    if (tmdbItem.poster_path && !posterUrl) {
+                        posterUrl = TMDB_IMAGE_BASE + tmdbItem.poster_path;
+                    }
+                    if (tmdbItem.vote_average && !score) {
+                        score = Number(tmdbItem.vote_average.toFixed(1));
+                    }
+                }
+            } catch (_) {}
 
             // DooPlay player ajax options (post, nume, type)
             var playerOptions = [];
@@ -710,6 +745,46 @@
                         }),
                         headers: { "Referer": mainUrl + "/" }
                     }));
+                }
+            }
+
+            // Check for option-based episode list (e.g. Ultra Stream V3 EP01 ... EP14)
+            if (!episodes.length) {
+                var optionEpisodes = [...html.matchAll(/<li\b[^>]*class=["'][^"']*dooplay_player_option[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi)];
+                for (var oe = 0; oe < optionEpisodes.length; oe++) {
+                    var oeBlock = optionEpisodes[oe][1];
+                    var oeTitle = stripTags(firstMatch(oeBlock, [/<span\b[^>]*class=["']title["'][^>]*>([\s\S]*?)<\/span>/i]));
+                    var oeSource = firstMatch(oeBlock, [/data-source=["']([^"']+)["']/i]);
+                    var epMatch = oeTitle.match(/(?:EP|Episode|E)\s*0*(\d+)/i);
+                    if (epMatch) {
+                        var parsedEpNum = parseInt(epMatch[1], 10);
+                        var relDl = downloadLinks.filter(function (dl) {
+                            var rangeMatch = dl.label.match(/(?:EP|Episode|E)\s*0*(\d+)\s*-\s*0*(\d+)/i);
+                            if (rangeMatch) {
+                                var rStart = parseInt(rangeMatch[1], 10);
+                                var rEnd = parseInt(rangeMatch[2], 10);
+                                return parsedEpNum >= rStart && parsedEpNum <= rEnd;
+                            }
+                            return true;
+                        });
+
+                        episodes.push(new Episode({
+                            name: oeTitle || ("Episode " + parsedEpNum),
+                            season: 1,
+                            episode: parsedEpNum,
+                            posterUrl: posterUrl,
+                            description: description,
+                            url: JSON.stringify({
+                                sourceUrl: oeSource || pageUrl,
+                                title: title,
+                                season: 1,
+                                episode: parsedEpNum,
+                                downloadLinks: relDl,
+                                playerOptions: []
+                            }),
+                            headers: { "Referer": mainUrl + "/" }
+                        }));
+                    }
                 }
             }
 
@@ -764,10 +839,226 @@
     // Extractors: GDFlix, HubCloud, Filepress, PixelDrain, HDm2, Abyass
     // -------------------------------------------------------------
 
+    // -------------------------------------------------------------
+    // Extractors: CloudStream standard embed & stream extractors
+    // -------------------------------------------------------------
+
+    function unpackPacker(code) {
+        if (!code) return "";
+        try {
+            if (typeof getAndUnpack === "function") {
+                var res = getAndUnpack(code);
+                if (res) return res;
+            }
+            var match = code.match(/eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*[rd]\s*\)[\s\S]*?\}\s*\(([\s\S]*?)\)\s*\)/);
+            if (!match) return code;
+            var args = match[1];
+            var fn = new Function('return (function(p,a,c,k,e,d){while(c--)if(k[c])p=p.replace(new RegExp("\\\\b"+c.toString(a)+"\\\\b","g"),k[c]);return p;}(' + args + '))');
+            return fn() || "";
+        } catch (_) {
+            return code;
+        }
+    }
+
     function isDirectMediaUrl(url) {
         var str = String(url || "");
         return /\.(m3u8|mp4|mkv|webm|avi)(?:[?#]|$)/i.test(str)
-            || /busycdn\.xyz|r2\.dev|cloudfront\.net|pixeldrain\.dev\/api\/file|workers\.dev|awscdn\.rest|y5acuyojym/i.test(str);
+            || /busycdn\.xyz|r2\.dev|cloudfront\.net|pixeldrain\.dev\/api\/file|workers\.dev|awscdn\.rest|y5acuyojym|hdm2\.ink\/playlist/i.test(str);
+    }
+
+    // 1. Streamtape Extractor (streamtape.com, streamta.pe, streamtape.net, streamtape.to)
+    async function extractStreamtape(url, sourceName) {
+        var streams = [];
+        try {
+            var res = await getText(url, defaultHeaders({ "Referer": "https://streamtape.com/" }));
+            var linkMatch = res.match(/document\.getElementById\(['"](?:robotlink|videolink)['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]/i)
+                || res.match(/(?:'|")(\/\/streamtape\.com\/get_video\?[^'"]+)(?:'|")/i)
+                || res.match(/(?:'|")(https?:\/\/[^'"]*\.mp4(?:\?[^'"]*)?)(?:'|")/i);
+            if (linkMatch && linkMatch[1]) {
+                var streamUrl = linkMatch[1].indexOf("//") === 0 ? ("https:" + linkMatch[1]) : linkMatch[1];
+                streams.push(new StreamResult({
+                    url: streamUrl,
+                    source: (sourceName || "Streamtape") + " [Direct]",
+                    quality: qualityFromText(url) || 1080,
+                    headers: defaultHeaders({ "Referer": "https://streamtape.com/" })
+                }));
+            }
+        } catch (_) {}
+        return streams;
+    }
+
+    // 2. Streamwish / VidHide / FileLions / WishFast Extractor
+    async function extractStreamwish(url, sourceName) {
+        var streams = [];
+        try {
+            var html = await getText(url, defaultHeaders({ "Referer": baseOrigin(url) + "/" }));
+            var unpacked = unpackPacker(html) || html;
+            var m3u8Match = unpacked.match(/https?:\/\/[^"'\s]+\.m3u8(?:[^"'\s]*)?/i)
+                || unpacked.match(/file\s*:\s*["']([^"']+\.m3u8[^"']*)["']/i)
+                || unpacked.match(/sources\s*:\s*\[\s*\{[^}]*file\s*:\s*["']([^"']+)["']/i);
+            if (m3u8Match) {
+                var m3u8Url = (m3u8Match[1] || m3u8Match[0]).replace(/&amp;/g, "&");
+                streams.push(new StreamResult({
+                    url: m3u8Url,
+                    source: (sourceName || "Streamwish") + " [HLS]",
+                    quality: qualityFromText(m3u8Url) || 1080,
+                    headers: defaultHeaders({ "Referer": baseOrigin(url) + "/" })
+                }));
+            }
+        } catch (_) {}
+        return streams;
+    }
+
+    // 3. DoodStream / Dood Extractor (doodstream.com, dood.to, dood.so, dood.ws, ds2play.com)
+    async function extractDoodStream(url, sourceName) {
+        var streams = [];
+        try {
+            var html = await getText(url, defaultHeaders({ "Referer": baseOrigin(url) + "/" }));
+            var md5Match = html.match(/\/pass_md5\/([^'"]*)/i);
+            if (md5Match) {
+                var passUrl = baseOrigin(url) + "/pass_md5/" + md5Match[1];
+                var tokenRes = await getText(passUrl, defaultHeaders({ "Referer": url }));
+                if (tokenRes && tokenRes.indexOf("http") === 0) {
+                    var expiry = Date.now();
+                    var directUrl = tokenRes + "1234567890?token=" + md5Match[1] + "&expiry=" + expiry;
+                    streams.push(new StreamResult({
+                        url: directUrl,
+                        source: (sourceName || "DoodStream") + " [Direct]",
+                        quality: qualityFromText(url) || 1080,
+                        headers: defaultHeaders({ "Referer": baseOrigin(url) + "/" })
+                    }));
+                }
+            }
+        } catch (_) {}
+        return streams;
+    }
+
+    // 4. Mixdrop Extractor (mixdrop.co, mixdrop.to, mixdrop.sx, mixdrop.bz)
+    async function extractMixdrop(url, sourceName) {
+        var streams = [];
+        try {
+            var html = await getText(url, defaultHeaders({ "Referer": "https://mixdrop.co/" }));
+            var unpacked = unpackPacker(html) || html;
+            var vurlMatch = unpacked.match(/MDCore\.(?:vurl|wurl)\s*=\s*["']([^"']+)["']/i);
+            if (vurlMatch && vurlMatch[1]) {
+                var vurl = vurlMatch[1];
+                if (vurl.indexOf("//") === 0) vurl = "https:" + vurl;
+                streams.push(new StreamResult({
+                    url: vurl,
+                    source: (sourceName || "Mixdrop") + " [Direct]",
+                    quality: qualityFromText(url) || 1080,
+                    headers: defaultHeaders({ "Referer": "https://mixdrop.co/" })
+                }));
+            }
+        } catch (_) {}
+        return streams;
+    }
+
+    // 5. Voe Extractor (voe.sx, voe-network.net, tubeless.cc)
+    async function extractVoe(url, sourceName) {
+        var streams = [];
+        try {
+            var html = await getText(url, defaultHeaders({ "Referer": baseOrigin(url) + "/" }));
+            var hlsMatch = html.match(/["']hls["']\s*:\s*["']([^"']+)["']/i)
+                || html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/i);
+            if (hlsMatch && hlsMatch[1]) {
+                streams.push(new StreamResult({
+                    url: hlsMatch[1],
+                    source: (sourceName || "Voe") + " [HLS]",
+                    quality: qualityFromText(hlsMatch[1]) || 1080,
+                    headers: defaultHeaders({ "Referer": baseOrigin(url) + "/" })
+                }));
+            }
+        } catch (_) {}
+        return streams;
+    }
+
+    // 6. Filemoon Extractor (filemoon.sx, filemoon.to)
+    async function extractFilemoon(url, sourceName) {
+        var streams = [];
+        try {
+            var html = await getText(url, defaultHeaders({ "Referer": baseOrigin(url) + "/" }));
+            var unpacked = unpackPacker(html) || html;
+            var m3u8Match = unpacked.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/i);
+            if (m3u8Match && m3u8Match[1]) {
+                streams.push(new StreamResult({
+                    url: m3u8Match[1],
+                    source: (sourceName || "Filemoon") + " [HLS]",
+                    quality: qualityFromText(m3u8Match[1]) || 1080,
+                    headers: defaultHeaders({ "Referer": baseOrigin(url) + "/" })
+                }));
+            }
+        } catch (_) {}
+        return streams;
+    }
+
+    // 7. Mp4Upload Extractor (mp4upload.com)
+    async function extractMp4Upload(url, sourceName) {
+        var streams = [];
+        try {
+            var html = await getText(url, defaultHeaders({ "Referer": "https://www.mp4upload.com/" }));
+            var unpacked = unpackPacker(html) || html;
+            var srcMatch = unpacked.match(/player\.src\(\s*\{\s*type:\s*["']video\/mp4["'],\s*src:\s*["']([^"']+)["']/i)
+                || unpacked.match(/(https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/i);
+            if (srcMatch && srcMatch[1]) {
+                streams.push(new StreamResult({
+                    url: srcMatch[1],
+                    source: (sourceName || "Mp4Upload") + " [Direct]",
+                    quality: qualityFromText(srcMatch[1]) || 1080,
+                    headers: defaultHeaders({ "Referer": "https://www.mp4upload.com/" })
+                }));
+            }
+        } catch (_) {}
+        return streams;
+    }
+
+    // Universal Embed Router
+    async function extractUniversalEmbed(url, sourceName, defaultQuality) {
+        if (!url) return [];
+        var val = String(url).toLowerCase();
+
+        if (val.indexOf("hdm2.ink") !== -1) {
+            return await extractHDm2Streams(url);
+        }
+        if (val.indexOf("prvs.top") !== -1 || val.indexOf("hydrax") !== -1 || val.indexOf("abyss") !== -1) {
+            return await extractAbyassStreams(url);
+        }
+        if (val.indexOf("streamtape") !== -1 || val.indexOf("streamta.pe") !== -1) {
+            return await extractStreamtape(url, sourceName);
+        }
+        if (val.indexOf("streamwish") !== -1 || val.indexOf("vidhide") !== -1 || val.indexOf("filelions") !== -1 || val.indexOf("wishfast") !== -1) {
+            return await extractStreamwish(url, sourceName);
+        }
+        if (val.indexOf("dood") !== -1 || val.indexOf("ds2play") !== -1) {
+            return await extractDoodStream(url, sourceName);
+        }
+        if (val.indexOf("mixdrop") !== -1) {
+            return await extractMixdrop(url, sourceName);
+        }
+        if (val.indexOf("voe") !== -1 || val.indexOf("tubeless") !== -1) {
+            return await extractVoe(url, sourceName);
+        }
+        if (val.indexOf("filemoon") !== -1 || val.indexOf("moonplayer") !== -1) {
+            return await extractFilemoon(url, sourceName);
+        }
+        if (val.indexOf("mp4upload") !== -1) {
+            return await extractMp4Upload(url, sourceName);
+        }
+        if (val.indexOf("gdflix") !== -1 || val.indexOf("gdlink") !== -1) {
+            return await extractGdflixStreams(url, sourceName, defaultQuality);
+        }
+        if (val.indexOf("hubcloud") !== -1 || val.indexOf("gamerxyt") !== -1) {
+            return await extractHubcloudStreams(url, sourceName, defaultQuality);
+        }
+        if (isDirectMediaUrl(url)) {
+            return [new StreamResult({
+                url: url,
+                source: (sourceName || "HDMovie2") + " [Direct]",
+                quality: defaultQuality || qualityFromText(url) || 1080,
+                headers: defaultHeaders()
+            })];
+        }
+        return [];
     }
 
     async function extractGdflixStreams(targetUrl, sourceName, defaultQuality) {
@@ -884,7 +1175,7 @@
         try {
             var resText = await getText(playUrl, {
                 "User-Agent": "okhttp/4.12.0",
-                "Referer": "https://hdm2.ink/"
+                "Referer": "https://hdmovie2a.icu/"
             });
             var streamMatch = resText.match(/data-stream-url=["'](.*?)["']/i);
             if (streamMatch && streamMatch[1]) {
@@ -949,42 +1240,32 @@
     async function resolveSingleHdmLink(hdmHref, buttonLabel) {
         var streams = [];
         try {
-            var res = await getText(hdmHref, defaultHeaders({ "Referer": "https://hdmovie2a.icu/" }));
-            console.log("resolveSingleHdmLink fetched", hdmHref, "length:", (res && res.length) || 0);
+            var normalizedHdm = normalizeExtractorDomain(hdmHref);
+            if (/gdflix|gdlink/i.test(normalizedHdm)) {
+                return await extractGdflixStreams(normalizedHdm, "HDMovie2", qualityFromText(buttonLabel) || 1080);
+            }
+            if (/hubcloud|gamerxyt/i.test(normalizedHdm)) {
+                return await extractHubcloudStreams(normalizedHdm, "HDMovie2", qualityFromText(buttonLabel) || 1080);
+            }
+            if (/hdm2\.ink/i.test(normalizedHdm)) {
+                return await extractHDm2Streams(normalizedHdm);
+            }
+
+            var res = await getText(normalizedHdm, defaultHeaders({ "Referer": "https://hdmovie2a.icu/" }));
             var buttons = [...res.matchAll(/<p\b[^>]*>\s*<a\b[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>\s*<\/p>/gi)];
-            console.log("resolveSingleHdmLink buttons found:", buttons.length);
+            if (!buttons.length) {
+                buttons = [...res.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)].filter(function (m) {
+                    return /gdflix|gdtot|filepress|filebee|hubcloud/i.test(m[1]);
+                });
+            }
+
             var targetTasks = buttons.map(async function (btn) {
-                var btnHref = btn[1];
+                var btnHref = normalizeExtractorDomain(btn[1]);
                 var btnText = stripTags(btn[2]);
                 var btnQual = qualityFromText(btnText) || qualityFromText(buttonLabel) || 1080;
-                try {
-                    var redir = await request(btnHref, { allowRedirects: true }).catch(function (err) {
-                        console.log("redir err for", btnHref, err && err.message);
-                        return null;
-                    });
-                    var targetUrl = (redir && redir.finalUrl) || (redir && redir.headers && (redir.headers.location || redir.headers["location"])) || btnHref;
-                    console.log("Button targetUrl:", targetUrl, "btnText:", btnText);
 
-                    if (/gdflix|gdlink/i.test(targetUrl) || /gdflix|gdlink/i.test(btnHref)) {
-                        return await extractGdflixStreams(targetUrl, "HDMovie2 " + (btnQual ? btnQual + "p" : ""), btnQual);
-                    } else if (/hubcloud|gamerxyt/i.test(targetUrl) || /hubcloud/i.test(btnHref)) {
-                        return await extractHubcloudStreams(targetUrl, "HDMovie2 " + (btnQual ? btnQual + "p" : ""), btnQual);
-                    } else if (/pixeldrain/i.test(targetUrl)) {
-                        var pId = targetUrl.split("/").pop();
-                        return [new StreamResult({
-                            url: "https://pixeldrain.dev/api/file/" + pId + "?download",
-                            source: "HDMovie2 [Pixeldrain " + (btnQual ? btnQual + "p" : "") + "]",
-                            quality: btnQual,
-                            headers: defaultHeaders()
-                        })];
-                    } else if (isDirectMediaUrl(targetUrl)) {
-                        return [new StreamResult({
-                            url: targetUrl,
-                            source: "HDMovie2 [Direct " + (btnQual ? btnQual + "p" : "") + "]",
-                            quality: btnQual,
-                            headers: defaultHeaders({ "Referer": hdmHref })
-                        })];
-                    }
+                try {
+                    return await extractUniversalEmbed(btnHref, "HDMovie2 " + (btnQual ? btnQual + "p" : ""), btnQual);
                 } catch (e) {
                     console.log("targetTask error:", e && e.message);
                 }
@@ -1019,17 +1300,9 @@
             var json = parseJsonSafe(res.body, {});
             var embedUrl = firstMatch(String(json.embed_url || ""), [/<iframe\b[^>]*src=["']([^"']+)["']/i, /^https?:\/\/[^\s]+/i]);
             if (embedUrl) {
-                if (/hdm2\.ink/i.test(embedUrl)) {
-                    streams = streams.concat(await extractHDm2Streams(embedUrl));
-                } else if (/prvs\.top|playhydrax/i.test(embedUrl)) {
-                    streams = streams.concat(await extractAbyassStreams(embedUrl));
-                } else if (isDirectMediaUrl(embedUrl)) {
-                    streams.push(new StreamResult({
-                        url: embedUrl,
-                        source: "HDMovie2 [Server " + (opt.nume || "1") + "]",
-                        quality: qualityFromText(opt.title || "") || 1080,
-                        headers: defaultHeaders({ "Referer": sourceUrl })
-                    }));
+                var extracted = await extractUniversalEmbed(embedUrl, opt.title || "Ultra Stream", 1080);
+                if (extracted && extracted.length) {
+                    streams = streams.concat(extracted);
                 }
             }
         } catch (_) {}
@@ -1077,8 +1350,12 @@
 
             var allStreams = [];
 
-            // 1. Resolve hdm.im download buttons in parallel
-            var hdmTasks = downloadLinks.map(function (link) {
+            // 0. Direct hdm2.ink stream task
+            var hdm2Task = (/hdm2\.ink/i.test(sourceUrl)) ? extractHDm2Streams(sourceUrl) : Promise.resolve([]);
+
+            // 1. Resolve hdm.im download buttons in parallel (deduplicated by href)
+            var uniqueLinks = uniqueBy(downloadLinks, function (link) { return link.href; });
+            var hdmTasks = uniqueLinks.map(function (link) {
                 return resolveSingleHdmLink(link.href, link.label);
             });
 
@@ -1087,7 +1364,7 @@
                 return resolveDooPlayerOption(opt, mainUrl, sourceUrl);
             });
 
-            var results = await Promise.all(hdmTasks.concat(optTasks));
+            var results = await Promise.all([hdm2Task].concat(hdmTasks, optTasks));
             for (var r = 0; r < results.length; r++) {
                 allStreams = allStreams.concat(results[r]);
             }
