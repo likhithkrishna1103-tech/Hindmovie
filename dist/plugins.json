@@ -97,24 +97,6 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animeq.sky"
   },
   {
-    "packageName": "com.igris.repo.animetsu",
-    "name": "Animetsu",
-    "version": 14,
-    "baseUrl": "https://animetsu.net/",
-    "description": "Clean anime picks with sub and dub.",
-    "authors": [
-      "IGRIS"
-    ],
-    "languages": [
-      "en",
-      "ja"
-    ],
-    "categories": [
-      "Anime"
-    ],
-    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animetsu.sky"
-  },
-  {
     "packageName": "com.igris.repo.animewave",
     "name": "AnimeWave + AniKoto",
     "version": 9,
