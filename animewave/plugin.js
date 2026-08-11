@@ -110,11 +110,30 @@
             .trim();
     }
 
+    var MIRROR_HOSTS = ["animewave.to", "anikoto.net", "anikototv.to", "anikoto.cz", "anikoto.me", "anikototv.se"];
+
+    function rebaseDomain(urlStr, targetBase) {
+        urlStr = trim(urlStr);
+        if (!urlStr) return "";
+        var base = targetBase || BASE_URL;
+        try {
+            var u = new URL(urlStr, base);
+            var b = new URL(base);
+            if (MIRROR_HOSTS.indexOf(u.hostname.toLowerCase()) !== -1) {
+                u.protocol = b.protocol;
+                u.host = b.host;
+            }
+            return u.toString();
+        } catch (_) {
+            return urlStr;
+        }
+    }
+
     function absoluteUrl(base, value) {
         value = trim(value);
         if (!value) return "";
-        if (/^https?:\/\//i.test(value)) return value;
-        if (value.indexOf("//") === 0) return "https:" + value;
+        if (/^https?:\/\//i.test(value)) return rebaseDomain(value, base || BASE_URL);
+        if (value.indexOf("//") === 0) return rebaseDomain("https:" + value, base || BASE_URL);
         try {
             return new URL(value, base || BASE_URL).toString();
         } catch (_) {
