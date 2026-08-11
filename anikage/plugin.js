@@ -59,7 +59,7 @@
 
     // ========== Config ==========
     var BASE_URL = typeof manifest !== "undefined" && manifest && manifest.baseUrl ? manifest.baseUrl : "https://anikage.cc";
-    var PROXY_URL = "https://prox.anicore.tv";
+    var PROXY_URL = "https://gg.akage.lol";
 
     var HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",
@@ -606,11 +606,17 @@
 
             var providers = [];
             if (Array.isArray(serversData) && serversData.length > 0) {
-                providers = serversData.map(function(s) { return s.id; });
+                providers = serversData.filter(function(s) {
+                    if (!s) return false;
+                    if (Array.isArray(s.subTypes) && s.subTypes.length > 0) {
+                        return s.subTypes.indexOf(lang) !== -1;
+                    }
+                    return true;
+                }).map(function(s) { return s.id || s.providerId; });
             } else {
-                // Real, live-verified server union on anikage.cc (no "niko"/"anya"/"verse" exist).
-                // Per-anime server sets vary; this covers all observed working providers.
-                providers = ["neko", "koto", "megg", "wave", "miko", "dib"];
+                // Real, live-verified server union on anikage.cc.
+                // Per-anime server sets vary; filter according to dub vs sub availability.
+                providers = lang === "dub" ? ["koto", "kiwi", "uwu", "neko", "wave"] : ["koto", "kiwi", "uwu", "neko", "dib", "wave", "megg"];
             }
 
             // === PARALLEL provider fetching via Dart-native http_parallel ===
