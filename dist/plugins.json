@@ -553,7 +553,7 @@
   {
     "packageName": "com.igris.repo.vegamovies",
     "name": "VegaMovies & RogMovies",
-    "version": 1,
+    "version": 2,
     "baseUrl": "https://vegamovies.mq",
     "description": "VegaMovies and RogMovies providers",
     "providers": [
