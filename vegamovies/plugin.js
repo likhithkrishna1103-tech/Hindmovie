@@ -5,12 +5,31 @@
   const defaults = { vegamovies: "https://vegamovies.mq", rogmovies: "https://rogmovies.vip" };
   const abs = (u, b) => { try { return new URL(u, b).href; } catch (_) { return u || ""; } };
   const root = u => { try { return new URL(u).origin; } catch (_) { return u; } };
-  const clean = s => String(s || "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#8217;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
+  const clean = s => String(s || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;|&#8217;|&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   const attr = (tag, key) => ((String(tag).match(new RegExp("\\b" + key + "\\s*=\\s*([\\\"'])(.*?)\\1", "i")) || [])[2] || "");
   const links = html => [...String(html).matchAll(/<a\b[^>]*>[\s\S]*?<\/a\s*>/gi)].map(m => ({ tag: m[0], href: attr(m[0], "href"), text: clean(m[0]) }));
   const title = s => clean(s).replace(/^Download\s+/i, "");
   const imageUrl = (tag, base) => { const src = attr(tag, "src"), lazy = attr(tag, "data-src") || attr(tag, "data-lazy-src") || attr(tag, "data-original"); return abs(lazy || (/^data:/i.test(src) ? "" : src), base); };
   const image = (html, base) => imageUrl((String(html).match(/<img\b[^>]*>/i) || [""])[0], base);
+  function getGridSection(html) {
+    const idx = html.search(/class=["'][^"']*movies-grid/i);
+    if (idx === -1) return html;
+    const endIdx = html.indexOf('id="pagination"', idx) !== -1 
+      ? html.indexOf('id="pagination"', idx) 
+      : (html.indexOf('class="pagination"', idx) !== -1 ? html.indexOf('class="pagination"', idx) : html.indexOf('<footer', idx));
+    return endIdx !== -1 ? html.substring(idx, endIdx) : html.substring(idx);
+  }
   async function http(u, o = {}) {
     const method = o.method || "GET", headers = o.headers || {};
     let raw;
@@ -32,13 +51,15 @@
     const responseHeaders = raw && raw.headers || {};
     const header = name => responseHeaders[name] || responseHeaders[String(name).toLowerCase()] || responseHeaders[String(name).toUpperCase()] || null;
     return { ok: status >= 200 && status < 300, status, headers: { get: header }, text: async () => typeof body === "string" ? body : JSON.stringify(body), json: async () => typeof body === "string" ? JSON.parse(body) : body };
-  }  const fetchText = async (u, o) => { const r = await http(u, o); if (!r.ok) throw Error("HTTP " + r.status); return r.text(); };
-  const fetchJson = async u => { const r = await http(u); if (!r.ok) throw Error("HTTP " + r.status); return r.json(); };  const provider = () => /rog/i.test(manifest.providerId || manifest.baseUrl || "") ? "rogmovies" : "vegamovies";
+  }
+  const fetchText = async (u, o) => { const r = await http(u, o); if (!r.ok) throw Error("HTTP " + r.status); return r.text(); };
+  const fetchJson = async u => { const r = await http(u); if (!r.ok) throw Error("HTTP " + r.status); return r.json(); };
+  const provider = () => /rog/i.test(manifest.providerId || manifest.baseUrl || "") ? "rogmovies" : "vegamovies";
   async function base() { const key = provider(); try { const urls = await fetchJson(MIRRORS); return (urls[key] || manifest.baseUrl || defaults[key]).replace(/\/$/, ""); } catch (_) { return (manifest.baseUrl || defaults[key]).replace(/\/$/, ""); } }
   const item = x => new MultimediaItem(x);
   function card(a, b) { const img = (a.tag.match(/<img\b[^>]*>/i) || [""])[0], t = title(attr(img, "alt") || a.text), u = abs(a.href, b); return t && u ? item({ title: t, url: u, posterUrl: imageUrl(img, b), type: "movie" }) : null; }
   const categories = key => key === "rogmovies" ? [["Home", "/page/1/"], ["Netflix", "/category/web-series/netflix/page/1/"], ["Disney Plus Hotstar", "/category/web-series/disney-plus-hotstar/page/1/"], ["Amazon Prime", "/category/web-series/amazon-prime-video/page/1/"], ["MX Original", "/category/web-series/mx-original/page/1/"]] : [["Home", "/page/1/"], ["Netflix", "/category/web-series/netflix/page/1/"], ["Disney Plus Hotstar", "/category/web-series/disney-plus-hotstar/page/1/"], ["Amazon Prime", "/category/web-series/amazon-prime-video/page/1/"], ["MX Original", "/category/web-series/mx-original/page/1/"], ["Anime Series", "/category/anime-series/page/1/"], ["Korean Series", "/category/korean-series/page/1/"]];
-  async function getHome(cb) { try { const b = await base(), rows = await Promise.all(categories(provider()).map(async ([n, p]) => { try { const h = await fetchText(b + p); return [n, links(h).filter(a => /<img\b/i.test(a.tag)).map(a => card(a, b)).filter(Boolean)]; } catch (_) { return [n, []]; } })); const data = {}; rows.forEach(([n, v]) => { if (v.length) data[n === "Home" ? "Trending" : n] = v; }); cb({ success: true, data }); } catch (e) { cb({ success: false, errorCode: "HOME_ERROR", message: String(e) }); } }
+  async function getHome(cb) { try { const b = await base(), rows = await Promise.all(categories(provider()).map(async ([n, p]) => { try { const h = await fetchText(b + p); const grid = getGridSection(h); return [n, links(grid).filter(a => /<img\b/i.test(a.tag)).map(a => card(a, b)).filter(Boolean)]; } catch (_) { return [n, []]; } })); const data = {}; rows.forEach(([n, v]) => { if (v.length) data[n === "Home" ? "Trending" : n] = v; }); cb({ success: true, data }); } catch (e) { cb({ success: false, errorCode: "HOME_ERROR", message: String(e) }); } }
   async function search(query, cb) { try { const b = await base(), r = await fetchJson(b + "/search.php?q=" + encodeURIComponent(query) + "&page=1"); cb({ success: true, data: (r.hits || []).map(x => x.document || x).map(d => item({ title: title(d.post_title), url: abs(d.permalink, b), posterUrl: abs(d.post_thumbnail, b), type: "movie" })) }); } catch (e) { cb({ success: false, errorCode: "SEARCH_ERROR", message: String(e) }); } }
   async function meta(id, type) { if (!id) return null; try { return (await fetchJson(CINEMETA + "/" + type + "/" + id + ".json")).meta || null; } catch (_) { return null; } }
   async function movieSources(html, b) { const buttons = links(html).filter(a => /dwd-button/i.test(a.tag)); const pages = await Promise.all(buttons.map(a => fetchText(abs(a.href, b)).catch(() => ""))); return pages.map(h => links(h).find(a => /V-Cloud/i.test(a.text))?.href).filter(Boolean).map(u => abs(u, b)); }
