@@ -199,21 +199,23 @@
     }
 
     function absoluteUrl(base, path) {
-        if (!path) return String(base || "");
+        var cleanBase = String(base || "").trim();
+        var cleanPath = String(path || "").trim();
+        if (!cleanPath) return cleanBase;
         try {
-            return new URL(path, base).toString();
+            return new URL(cleanPath, cleanBase).toString();
         } catch (_) {
-            return String(path || "");
+            return cleanPath;
         }
     }
 
     function normalizeBaseUrl(url) {
-        return String(url || "").replace(/\/+$/g, "");
+        return String(url || "").trim().replace(/\/+$/g, "");
     }
 
     function baseOrigin(url) {
         try {
-            var parsed = new URL(url);
+            var parsed = new URL(String(url || "").trim());
             return parsed.protocol + "//" + parsed.host;
         } catch (_) {
             return "";
@@ -221,11 +223,8 @@
     }
 
     function decodeQueryParam(url, name) {
-        try {
-            return new URL(url).searchParams.get(name) || "";
-        } catch (_) {
-            return "";
-        }
+        var match = String(url || "").match(new RegExp("[?&]" + escapeRegExp(name) + "=([^&#]*)", "i"));
+        return match ? decodeURIComponent(match[1].replace(/\+/g, " ")) : "";
     }
 
     function safeDecodeURIComponent(value) {
@@ -310,6 +309,7 @@
     }
 
     function request(url, options) {
+        url = String(url || "").trim();
         options = options || {};
         var method = options.method || "GET";
         var headers = options.headers || {};
@@ -504,15 +504,6 @@
             });
         }
         return out;
-    }
-
-    function escapeRegExp(string) {
-        return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
-
-    function decodeQueryParam(url, name) {
-        var match = String(url || "").match(new RegExp("[?&]" + escapeRegExp(name) + "=([^&#]*)", "i"));
-        return match ? decodeURIComponent(match[1].replace(/\+/g, " ")) : "";
     }
 
     function resolveDynamicJsHrefs(html) {
@@ -1072,7 +1063,7 @@
 
     function buildStreamResult(url, source, headers, quality) {
         return new StreamResult({
-            url: url,
+            url: String(url || "").trim(),
             source: quality ? (source + " [" + quality + "p]") : source,
             quality: quality || undefined,
             headers: headers || {}
@@ -1861,17 +1852,17 @@
     }
 
     async function httpParallelGet(requests) {
-        var items = Array.isArray(requests) ? requests.filter(function (item) { return item && item.url; }) : [];
+        var items = Array.isArray(requests) ? requests.filter(function (item) { return item && item.url; }).map(function (item) {
+            return {
+                method: item.method || "GET",
+                url: String(item.url || "").trim(),
+                headers: item.headers || defaultHeaders()
+            };
+        }) : [];
         if (!items.length) return [];
         if (typeof http_parallel === "function") {
             try {
-                var parallelRes = await http_parallel(items.map(function (item) {
-                    return {
-                        method: "GET",
-                        url: item.url,
-                        headers: item.headers || defaultHeaders()
-                    };
-                }));
+                var parallelRes = await http_parallel(items);
                 return items.map(function (item, index) {
                     var res = parallelRes && parallelRes[index];
                     return {
@@ -1884,7 +1875,7 @@
             } catch (_) {}
         }
         return await Promise.all(items.map(function (item) {
-            return request(item.url, { headers: item.headers || defaultHeaders(), timeout: 15000 }).catch(function () {
+            return request(item.url, { headers: item.headers, timeout: 15000 }).catch(function () {
                 return { status: 599, body: "", headers: {}, url: item.url };
             });
         }));
@@ -2012,7 +2003,7 @@
     async function search(query, cb) {
         try {
             var mainUrl = await getMainUrl();
-            var url = mainUrl + "/?s=" + encodeURIComponent(query || "");
+            var url = mainUrl + "/?s=" + encodeURIComponent(trim(query));
             var html = await getText(url, defaultHeaders());
             var results = parseSearchResultsKotlin(html, mainUrl);
             if (!results.length) {
@@ -2031,7 +2022,7 @@
 
     async function load(url, cb) {
         try {
-            var sourceUrl = String(url || "");
+            var sourceUrl = String(url || "").trim();
             var html = await getText(sourceUrl, defaultHeaders());
 
             var rawOgTitle = extractMetaContent(html, "og:title") || "Unknown Title";
@@ -2238,11 +2229,12 @@
                 };
             }
             if (!payload || !payload.links || !payload.links.length) {
-                if (/^https?:\/\//i.test(String(url || ""))) {
-                    var html = await getText(String(url), defaultHeaders());
+                var cleanUrl = String(url || "").trim();
+                if (/^https?:\/\//i.test(cleanUrl)) {
+                    var html = await getText(cleanUrl, defaultHeaders());
                     payload = {
-                        sourceUrl: String(url),
-                        links: extractDownloadLinks(html, baseOrigin(String(url))),
+                        sourceUrl: cleanUrl,
+                        links: extractDownloadLinks(html, baseOrigin(cleanUrl)),
                         type: "movie",
                         title: ""
                     };
