@@ -1,8 +1,8 @@
 {
     "packageName": "com.igris.repo.movies4u",
     "name": "Movies4U",
-    "version": 31,
-    "baseUrl": "https://new4.movies4u.clinic",
+    "version": 30,
+    "baseUrl": "",
     "description": "Movie picks with straightforward stream links.",
     "authors": [
         "IGRIS"
@@ -19,6 +19,6 @@
         "Movies"
     ],
     "domains": [
-        { "name": "movies4u.style (Primary)", "url": "https://new4.movies4u.clinic" }
+        { "name": "movies4u.style (Primary)", "url": "https://new2.movies4u.style" }
     ]
 }
