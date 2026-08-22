@@ -72,26 +72,31 @@
         appBuild: "4"
     };
     const DEFAULT_BASE_URLS = [
-        "https://adsflw.xyz",
-        "https://playztv2828.store"
+        "https://tourniquest.site",
+        "https://adsflw.xyz"
     ];
-    const PLAYZ_AES_KEY = "bTVLbDVuazR4SzFrTjdwTg==";
-    const PLAYZ_AES_IV = "azVLNG5NOG1LbE5MN2wxNQ==";
-    const PLAYZ_PRIMARY_AES_KEY = "Yi8xam1sNW5rNHg1azdwTg==";
-    const PLAYZ_PRIMARY_AES_IV = "MTRuTWs4bU41S2w1S0w3bA==";
-    const AES_JS_URL = "https://cdnjs.cloudflare.com/ajax/libs/aes-js/3.1.2/index.min.js";
+
+    const PLAYZ_NATIVE_KEY = new Uint8Array([99, 122, 49, 52, 82, 83, 116, 107, 78, 48, 49, 80, 86, 69, 53, 119]);
+    const PLAYZ_NATIVE_IV = new Uint8Array([87, 84, 108, 69, 118, 99, 107, 100, 50, 85, 82, 52, 49, 115, 100, 107]);
+    const PLAYZ_PRIMARY_KEY = new Uint8Array([98, 47, 49, 106, 109, 108, 53, 110, 107, 52, 120, 53, 107, 55, 112, 78]);
+    const PLAYZ_PRIMARY_IV = new Uint8Array([49, 52, 110, 77, 107, 56, 109, 78, 53, 75, 108, 53, 75, 76, 55, 108]);
+    const PLAYZ_FALLBACK_KEY = new Uint8Array([109, 53, 75, 108, 53, 110, 107, 52, 120, 75, 49, 107, 78, 55, 112, 78]);
+    const PLAYZ_FALLBACK_IV = new Uint8Array([107, 53, 75, 52, 110, 77, 56, 109, 75, 108, 78, 76, 55, 108, 49, 53]);
+
     const PLAYZ_SUBSTITUTION_FROM = "aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ";
     const PLAYZ_SUBSTITUTION_TO = "fFgGjJkKaApPbBmMoOzZeEnNcCdDrRqQtTvVuUxXhHiIwWyYlLsS";
     const PLAYZ_SUBSTITUTION_REVERSE = {};
     for (let index = 0; index < PLAYZ_SUBSTITUTION_TO.length; index++) {
         PLAYZ_SUBSTITUTION_REVERSE[PLAYZ_SUBSTITUTION_TO[index]] = PLAYZ_SUBSTITUTION_FROM[index];
     }
+
     const DEFAULT_PLAYLIST_HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:78.0) Gecko/20100101 Firefox/78.0",
         Accept: "*/*",
         "Accept-Language": "en-US,en;q=0.5",
         Connection: "keep-alive"
     };
+
     const STREAM_TRUSTED_HOSTS = [
         "a151aivottlinear-a.akamaihd.net",
         "a201aivottlinear-a.akamaihd.net",
@@ -106,6 +111,7 @@
         "livestream1.sunnxt.com",
         "d1g8wgjurz8via.cloudfront.net"
     ];
+
     const STREAM_WEAK_HOSTS = [
         "winner-api.icu",
         "mainstreams.pro",
@@ -115,6 +121,7 @@
         "firebase-api.com",
         "195.178.110.2"
     ];
+
     const PLAYLIST_CACHE_TTL_MS = 5 * 60 * 1000;
     const PROVIDER_CATALOG_TTL_MS = 5 * 60 * 1000;
 
@@ -189,9 +196,147 @@
         }
     };
 
+    // Built-in zero-dependency Pure JavaScript AES-CBC decryptor
+    const AES = (function() {
+        const S = [
+            99, 124, 119, 123, 242, 107, 111, 197, 48, 1, 103, 43, 254, 215, 171, 118,
+            202, 130, 201, 125, 250, 89, 71, 240, 173, 212, 162, 175, 156, 164, 114, 192,
+            183, 253, 147, 38, 54, 63, 247, 204, 52, 165, 229, 241, 113, 216, 49, 21,
+            4, 199, 35, 195, 24, 150, 5, 154, 7, 18, 128, 226, 235, 39, 178, 117,
+            9, 131, 44, 26, 27, 110, 90, 160, 82, 59, 214, 179, 41, 227, 47, 132,
+            83, 209, 0, 237, 32, 252, 177, 91, 106, 203, 190, 57, 74, 76, 88, 207,
+            208, 239, 170, 251, 67, 77, 51, 133, 69, 249, 2, 127, 80, 60, 159, 168,
+            81, 163, 64, 143, 146, 157, 56, 245, 188, 182, 218, 33, 16, 255, 243, 210,
+            205, 12, 19, 236, 95, 151, 68, 23, 196, 167, 126, 61, 100, 93, 25, 115,
+            96, 129, 79, 220, 34, 42, 144, 136, 70, 238, 184, 20, 222, 94, 11, 219,
+            224, 50, 58, 10, 73, 6, 36, 92, 194, 211, 172, 98, 145, 149, 228, 121,
+            231, 200, 55, 109, 141, 213, 78, 169, 108, 86, 244, 234, 101, 122, 174, 8,
+            186, 120, 37, 46, 28, 166, 180, 198, 232, 221, 116, 31, 75, 189, 139, 138,
+            112, 62, 181, 102, 72, 3, 246, 14, 97, 53, 87, 185, 134, 193, 29, 158,
+            225, 248, 152, 17, 105, 217, 142, 148, 155, 30, 135, 233, 206, 85, 40, 223,
+            140, 161, 137, 13, 191, 230, 66, 104, 65, 153, 45, 15, 176, 84, 187, 22
+        ];
+        const Si = new Array(256);
+        for (let i = 0; i < 256; i++) Si[S[i]] = i;
+        const Rcon = [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36];
+        const Td0 = new Uint32Array(256), Td1 = new Uint32Array(256), Td2 = new Uint32Array(256), Td3 = new Uint32Array(256);
+        for (let i = 0; i < 256; i++) {
+            const s = Si[i];
+            let s2 = (s << 1) ^ ((s & 0x80) ? 0x11b : 0);
+            let s4 = (s2 << 1) ^ ((s2 & 0x80) ? 0x11b : 0);
+            let s8 = (s4 << 1) ^ ((s4 & 0x80) ? 0x11b : 0);
+            let e = s8 ^ s4 ^ s2;
+            let b = s8 ^ s2 ^ s;
+            let d = s8 ^ s4 ^ s;
+            let nine = s8 ^ s;
+            Td0[i] = ((e << 24) | (nine << 16) | (d << 8) | b) >>> 0;
+            Td1[i] = ((b << 24) | (e << 16) | (nine << 8) | d) >>> 0;
+            Td2[i] = ((d << 24) | (b << 16) | (e << 8) | nine) >>> 0;
+            Td3[i] = ((nine << 24) | (d << 16) | (b << 8) | e) >>> 0;
+        }
+        function keyExpansion(key) {
+            const keyLen = key.length;
+            const Nk = Math.floor(keyLen / 4);
+            const Nr = Nk + 6;
+            const w = new Uint32Array(4 * (Nr + 1));
+            for (let i = 0; i < Nk; i++) {
+                w[i] = ((key[4 * i] << 24) | (key[4 * i + 1] << 16) | (key[4 * i + 2] << 8) | key[4 * i + 3]) >>> 0;
+            }
+            for (let i = Nk; i < 4 * (Nr + 1); i++) {
+                let temp = w[i - 1];
+                if (i % Nk === 0) {
+                    temp = (temp << 8) | (temp >>> 24);
+                    temp = ((S[(temp >>> 24) & 0xff] << 24) |
+                            (S[(temp >>> 16) & 0xff] << 16) |
+                            (S[(temp >>> 8) & 0xff] << 8) |
+                            S[temp & 0xff]) ^ (Rcon[Math.floor(i / Nk)] << 24);
+                } else if (Nk > 6 && i % Nk === 4) {
+                    temp = (S[(temp >>> 24) & 0xff] << 24) |
+                           (S[(temp >>> 16) & 0xff] << 16) |
+                           (S[(temp >>> 8) & 0xff] << 8) |
+                           S[temp & 0xff];
+                }
+                w[i] = (w[i - Nk] ^ temp) >>> 0;
+            }
+            const dw = new Uint32Array(w.length);
+            for (let r = 0; r <= Nr; r++) {
+                for (let c = 0; c < 4; c++) {
+                    const idx = r * 4 + c;
+                    if (r === 0 || r === Nr) {
+                        dw[idx] = w[idx];
+                    } else {
+                        const val = w[idx];
+                        const v0 = (val >>> 24) & 0xff;
+                        const v1 = (val >>> 16) & 0xff;
+                        const v2 = (val >>> 8) & 0xff;
+                        const v3 = val & 0xff;
+                        dw[idx] = (Td0[S[v0]] ^ Td1[S[v1]] ^ Td2[S[v2]] ^ Td3[S[v3]]) >>> 0;
+                    }
+                }
+            }
+            return { dw, Nr };
+        }
+        function decryptBlock(inBytes, inOffset, outBytes, outOffset, dw, Nr) {
+            let s0 = ((inBytes[inOffset] << 24) | (inBytes[inOffset + 1] << 16) | (inBytes[inOffset + 2] << 8) | inBytes[inOffset + 3]) ^ dw[Nr * 4];
+            let s1 = ((inBytes[inOffset + 4] << 24) | (inBytes[inOffset + 5] << 16) | (inBytes[inOffset + 6] << 8) | inBytes[inOffset + 7]) ^ dw[Nr * 4 + 1];
+            let s2 = ((inBytes[inOffset + 8] << 24) | (inBytes[inOffset + 9] << 16) | (inBytes[inOffset + 10] << 8) | inBytes[inOffset + 11]) ^ dw[Nr * 4 + 2];
+            let s3 = ((inBytes[inOffset + 12] << 24) | (inBytes[inOffset + 13] << 16) | (inBytes[inOffset + 14] << 8) | inBytes[inOffset + 15]) ^ dw[Nr * 4 + 3];
+            s0 >>>= 0; s1 >>>= 0; s2 >>>= 0; s3 >>>= 0;
+            let t0, t1, t2, t3;
+            for (let r = Nr - 1; r > 0; r--) {
+                const kOffset = r * 4;
+                t0 = (Td0[(s0 >>> 24) & 0xff] ^ Td1[(s3 >>> 16) & 0xff] ^ Td2[(s2 >>> 8) & 0xff] ^ Td3[s1 & 0xff] ^ dw[kOffset]) >>> 0;
+                t1 = (Td0[(s1 >>> 24) & 0xff] ^ Td1[(s0 >>> 16) & 0xff] ^ Td2[(s3 >>> 8) & 0xff] ^ Td3[s2 & 0xff] ^ dw[kOffset + 1]) >>> 0;
+                t2 = (Td0[(s2 >>> 24) & 0xff] ^ Td1[(s1 >>> 16) & 0xff] ^ Td2[(s0 >>> 8) & 0xff] ^ Td3[s3 & 0xff] ^ dw[kOffset + 2]) >>> 0;
+                t3 = (Td0[(s3 >>> 24) & 0xff] ^ Td1[(s2 >>> 16) & 0xff] ^ Td2[(s1 >>> 8) & 0xff] ^ Td3[s0 & 0xff] ^ dw[kOffset + 3]) >>> 0;
+                s0 = t0; s1 = t1; s2 = t2; s3 = t3;
+            }
+            const k0 = dw[0], k1 = dw[1], k2 = dw[2], k3 = dw[3];
+            outBytes[outOffset]      = ((Si[(s0 >>> 24) & 0xff] << 24) ^ k0) >>> 24;
+            outBytes[outOffset + 1]  = ((Si[(s3 >>> 16) & 0xff] << 16) ^ k0) >>> 16;
+            outBytes[outOffset + 2]  = ((Si[(s2 >>> 8) & 0xff] << 8) ^ k0) >>> 8;
+            outBytes[outOffset + 3]  = (Si[s1 & 0xff] ^ k0) & 0xff;
+            outBytes[outOffset + 4]  = ((Si[(s1 >>> 24) & 0xff] << 24) ^ k1) >>> 24;
+            outBytes[outOffset + 5]  = ((Si[(s0 >>> 16) & 0xff] << 16) ^ k1) >>> 16;
+            outBytes[outOffset + 6]  = ((Si[(s3 >>> 8) & 0xff] << 8) ^ k1) >>> 8;
+            outBytes[outOffset + 7]  = (Si[s2 & 0xff] ^ k1) & 0xff;
+            outBytes[outOffset + 8]  = ((Si[(s2 >>> 24) & 0xff] << 24) ^ k2) >>> 24;
+            outBytes[outOffset + 9]  = ((Si[(s1 >>> 16) & 0xff] << 16) ^ k2) >>> 16;
+            outBytes[outOffset + 10] = ((Si[(s0 >>> 8) & 0xff] << 8) ^ k2) >>> 8;
+            outBytes[outOffset + 11] = (Si[s3 & 0xff] ^ k2) & 0xff;
+            outBytes[outOffset + 12] = ((Si[(s3 >>> 24) & 0xff] << 24) ^ k3) >>> 24;
+            outBytes[outOffset + 13] = ((Si[(s2 >>> 16) & 0xff] << 16) ^ k3) >>> 16;
+            outBytes[outOffset + 14] = ((Si[(s1 >>> 8) & 0xff] << 8) ^ k3) >>> 8;
+            outBytes[outOffset + 15] = (Si[s0 & 0xff] ^ k3) & 0xff;
+        }
+        return {
+            decryptCbc: function(ciphertext, key, iv) {
+                if (!ciphertext || !ciphertext.length) return new Uint8Array(0);
+                const { dw, Nr } = keyExpansion(key);
+                const plain = new Uint8Array(ciphertext.length);
+                const blockOut = new Uint8Array(16);
+                let prev = iv;
+                for (let i = 0; i < ciphertext.length; i += 16) {
+                    decryptBlock(ciphertext, i, blockOut, 0, dw, Nr);
+                    for (let j = 0; j < 16; j++) {
+                        plain[i + j] = blockOut[j] ^ prev[j];
+                    }
+                    prev = ciphertext.subarray(i, i + 16);
+                }
+                const pad = plain[plain.length - 1];
+                if (pad > 0 && pad <= 16 && pad <= plain.length) {
+                    for (let k = plain.length - pad; k < plain.length; k++) {
+                        if (plain[k] !== pad) return plain;
+                    }
+                    return plain.subarray(0, plain.length - pad);
+                }
+                return plain;
+            }
+        };
+    })();
+
     let activeBaseUrl = null;
     let remoteBaseUrlsPromise = null;
-    let aesJsPromise = null;
     let providerCatalogCache = {
         timestamp: 0,
         entries: null
@@ -218,12 +363,14 @@
     }
 
     function extractResponseBody(response) {
+        if (!response) return "";
         if (typeof response === "string") return response;
         if (response && typeof response.body === "string") return response.body;
         return "";
     }
 
     function extractResponseStatus(response) {
+        if (!response) return 200;
         return response && typeof response.status !== "undefined" ? response.status : 200;
     }
 
@@ -387,35 +534,14 @@
         return urls;
     }
 
-    function buildPlayzHeaders(url) {
-        const headers = {
+    function buildPlayzHeaders() {
+        return {
             "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 10; SM-A505F)"
         };
-
-        try {
-            headers.Host = new URL(String(url || "")).hostname;
-        } catch (_) {
-            // Ignore invalid URLs.
-        }
-
-        return headers;
     }
 
-    function base64DecodeText(value) {
-        const normalized = String(value || "");
-        if (!normalized) return "";
-        
-        if (typeof atob === "function") {
-            return atob(normalized);
-        }
-        if (typeof Buffer !== "undefined") {
-            return Buffer.from(normalized, "base64").toString("utf8");
-        }
-        return "";
-    }
-
-    function base64DecodeBytes(value) {
-        let normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+    function base64ToBytes(value) {
+        let normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/").replace(/\s+/g, "");
         while (normalized.length % 4) normalized += "=";
         try {
             if (typeof Buffer !== "undefined") return new Uint8Array(Buffer.from(normalized, "base64"));
@@ -428,11 +554,24 @@
         return bytes;
     }
 
+    function bytesToAscii(bytes) {
+        let out = "";
+        for (let index = 0; index < bytes.length; index++) {
+            out += String.fromCharCode(bytes[index]);
+        }
+        return out;
+    }
+
     function bytesToUtf8(bytes) {
         if (!bytes || !bytes.length) return "";
         if (typeof TextDecoder !== "undefined") {
-            return new TextDecoder().decode(bytes);
+            try {
+                return new TextDecoder().decode(bytes);
+            } catch (_) {}
         }
+        try {
+            if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("utf8");
+        } catch (_) {}
         let out = "";
         for (let index = 0; index < bytes.length; index++) {
             out += String.fromCharCode(bytes[index]);
@@ -444,104 +583,14 @@
         }
     }
 
-    function stripPkcs7(bytes) {
-        if (!bytes || !bytes.length) return bytes || new Uint8Array(0);
-        const pad = bytes[bytes.length - 1];
-        if (!pad || pad > 16 || pad > bytes.length) return bytes;
-        for (let index = bytes.length - pad; index < bytes.length; index++) {
-            if (bytes[index] !== pad) return bytes;
+    function swapAdjacentPairs(bytes) {
+        const out = new Uint8Array(bytes);
+        for (let i = 0; i + 1 < out.length; i += 2) {
+            const tmp = out[i];
+            out[i] = out[i + 1];
+            out[i + 1] = tmp;
         }
-        return bytes.slice(0, bytes.length - pad);
-    }
-
-    function decodePlayzSubstitutionPayload(value) {
-        if (!value) return "";
-        
-        let restored = "";
-        for (const char of String(value)) {
-            restored += PLAYZ_SUBSTITUTION_REVERSE[char] || char;
-        }
-        return base64DecodeText(restored);
-    }
-
-    function decryptAesCbcWithNode(dataB64, keyB64, ivB64) {
-        if (typeof Buffer === "undefined" || typeof __crypto__ === "undefined" || !__crypto__.createDecipheriv) {
-            return "";
-        }
-
-        const key = Buffer.from(keyB64, "base64");
-        const iv = Buffer.from(ivB64, "base64");
-        const data = Buffer.from(dataB64, "base64");
-        const algorithm = key.length <= 16 ? "aes-128-cbc" : (key.length <= 24 ? "aes-192-cbc" : "aes-256-cbc");
-        const decipher = __crypto__.createDecipheriv(algorithm, key, iv);
-        return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
-    }
-
-    async function getAesJs() {
-        if (globalThis.aesjs) return globalThis.aesjs;
-        if (!aesJsPromise) {
-            aesJsPromise = (async () => {
-                const response = await fetchText(AES_JS_URL, {
-                    "User-Agent": "Mozilla/5.0",
-                    "Referer": "https://adsflw.xyz/"
-                });
-                const source = extractResponseBody(response);
-                if (!trimToString(source)) throw new Error("Failed to load AES runtime");
-                Function(String(source || ""))();
-                if (!globalThis.aesjs) throw new Error("AES runtime unavailable");
-                return globalThis.aesjs;
-            })();
-        }
-        return aesJsPromise;
-    }
-
-    async function decryptAesCbcWithWebCrypto(dataB64, keyB64, ivB64) {
-        if (!globalThis.crypto || !globalThis.crypto.subtle || typeof globalThis.crypto.subtle.importKey !== "function") {
-            return "";
-        }
-        const keyBytes = base64DecodeBytes(keyB64);
-        const ivBytes = base64DecodeBytes(ivB64);
-        const dataBytes = base64DecodeBytes(dataB64);
-        const imported = await globalThis.crypto.subtle.importKey("raw", keyBytes, { name: "AES-CBC" }, false, ["decrypt"]);
-        const plain = new Uint8Array(await globalThis.crypto.subtle.decrypt({ name: "AES-CBC", iv: ivBytes }, imported, dataBytes));
-        return trimToString(bytesToUtf8(stripPkcs7(plain)));
-    }
-
-    async function decryptAesCbcWithAesJs(dataB64, keyB64, ivB64) {
-        const aesjs = await getAesJs();
-        const keyBytes = base64DecodeBytes(keyB64);
-        const ivBytes = base64DecodeBytes(ivB64);
-        const dataBytes = base64DecodeBytes(dataB64);
-        const cipher = new aesjs.ModeOfOperation.cbc(keyBytes, ivBytes);
-        return trimToString(bytesToUtf8(stripPkcs7(cipher.decrypt(dataBytes))));
-    }
-
-    async function decryptAesCbc(dataB64, keyB64, ivB64) {
-        try {
-            if (globalThis.crypto && typeof globalThis.crypto.decryptAES === "function") {
-                const decrypted = await globalThis.crypto.decryptAES(dataB64, keyB64, ivB64);
-                if (trimToString(decrypted)) return trimToString(decrypted);
-            }
-        } catch (_) {
-            // Continue through the runtime fallbacks below.
-        }
-
-        try {
-            const decrypted = await decryptAesCbcWithWebCrypto(dataB64, keyB64, ivB64);
-            if (trimToString(decrypted)) return decrypted;
-        } catch (_) {}
-
-        try {
-            const decrypted = decryptAesCbcWithNode(dataB64, keyB64, ivB64);
-            if (trimToString(decrypted)) return trimToString(decrypted);
-        } catch (_) {}
-
-        try {
-            const decrypted = await decryptAesCbcWithAesJs(dataB64, keyB64, ivB64);
-            if (trimToString(decrypted)) return decrypted;
-        } catch (_) {}
-
-        return "";
+        return out;
     }
 
     async function decryptPlayzPayload(body) {
@@ -549,35 +598,64 @@
         if (!raw) return "";
         if (raw.startsWith("{") || raw.startsWith("[") || raw.startsWith("<")) return raw;
 
+        // Strategy 1: Native Decrypt
         try {
-            const primaryPayload = decodePlayzSubstitutionPayload(raw.replace(/\s/g, ""));
-            const decrypted = await decryptAesCbc(primaryPayload, PLAYZ_PRIMARY_AES_KEY, PLAYZ_PRIMARY_AES_IV);
-            const normalized = trimToString(decrypted);
-            if (normalized) return normalized;
-        } catch (_) {
-            // Fall back to the older PlayZTV payload format below.
-        }
+            const stripped = raw.replace(/\s+/g, "");
+            const b1 = base64ToBytes(stripped);
+            const b1Rev = new Uint8Array(b1).reverse();
+            const b2 = swapAdjacentPairs(b1Rev);
+            const b2Str = bytesToAscii(b2).replace(/\s+/g, "");
+            const b3 = base64ToBytes(b2Str);
+            const pt = AES.decryptCbc(b3, PLAYZ_NATIVE_KEY, PLAYZ_NATIVE_IV);
+            const text = bytesToUtf8(pt).trim();
+            if (text.startsWith("{") || text.startsWith("[")) {
+                return text;
+            }
+        } catch (_) {}
 
+        // Strategy 2: Primary Decrypt
         try {
-            const decrypted = await decryptAesCbc(raw.replace(/\s/g, ""), PLAYZ_AES_KEY, PLAYZ_AES_IV);
-            return trimToString(decrypted);
-        } catch (_) {
-            return "";
-        }
+            const stripped = raw.replace(/\s+/g, "");
+            let restored = "";
+            for (let i = 0; i < stripped.length; i++) {
+                const ch = stripped[i];
+                restored += PLAYZ_SUBSTITUTION_REVERSE[ch] || ch;
+            }
+            const b1 = base64ToBytes(restored);
+            const b1Str = bytesToAscii(b1);
+            const ct = base64ToBytes(b1Str);
+            const pt = AES.decryptCbc(ct, PLAYZ_PRIMARY_KEY, PLAYZ_PRIMARY_IV);
+            const text = bytesToUtf8(pt).trim();
+            if (text.startsWith("{") || text.startsWith("[")) {
+                return text;
+            }
+        } catch (_) {}
+
+        // Strategy 3: Fallback Decrypt
+        try {
+            const stripped = raw.replace(/\s+/g, "");
+            const ct = base64ToBytes(stripped);
+            const pt = AES.decryptCbc(ct, PLAYZ_FALLBACK_KEY, PLAYZ_FALLBACK_IV);
+            const text = bytesToUtf8(pt).trim();
+            if (text.startsWith("{") || text.startsWith("[")) {
+                return text;
+            }
+        } catch (_) {}
+
+        return "";
     }
 
     async function fetchPlayzPayload(url) {
         if (!url || typeof url !== "string") {
-            console.error("Invalid URL for fetchPlayzPayload");
             return "";
         }
         
         try {
-            const response = await fetchText(url, buildPlayzHeaders(url));
+            const response = await fetchText(url, buildPlayzHeaders());
             if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) {
                 return "";
             }
-            return decryptPlayzPayload(extractResponseBody(response));
+            return await decryptPlayzPayload(extractResponseBody(response));
         } catch (error) {
             console.error("Failed to fetch payload from " + url + ": " + (error && error.message ? error.message : String(error)));
             return "";
@@ -586,13 +664,11 @@
 
     async function fetchPlayzJson(path) {
         if (!path || typeof path !== "string") {
-            console.error("Invalid path for fetchPlayzJson");
             return null;
         }
         
         const baseUrls = await getBaseUrls();
         if (!baseUrls || !Array.isArray(baseUrls) || !baseUrls.length) {
-            console.error("No base URLs available for fetchPlayzJson");
             return null;
         }
         
@@ -607,6 +683,7 @@
                 }
             } catch (error) {
                 console.error(`Failed to fetch ${path} from ${baseUrl}: ${error && error.message ? error.message : String(error)}`);
+                continue;
             }
         }
         return null;
@@ -636,26 +713,6 @@
             return normalized.replace(/-/g, "").toLowerCase();
         }
         return normalized;
-    }
-
-    function parseHeaderString(headerString) {
-        const headers = {};
-        trimToString(headerString).split("&").forEach((pair) => {
-            const equalsIndex = pair.indexOf("=");
-            if (equalsIndex === -1) return;
-
-            const key = normalizeHeaderName(pair.slice(0, equalsIndex));
-            if (!key) return;
-
-            let value = trimToString(pair.slice(equalsIndex + 1));
-            try {
-                value = decodeURIComponent(value);
-            } catch (_) {
-                // Keep raw value.
-            }
-            headers[key] = value;
-        });
-        return headers;
     }
 
     function splitUrlAndHeaders(rawUrl) {
@@ -1114,7 +1171,7 @@
 
     async function decryptBundledPlaylistContent(content) {
         const text = trimToString(content);
-        if (!text || isPlaylistResponse(text) || !crypto || typeof crypto.decryptAES !== "function") {
+        if (!text || isPlaylistResponse(text)) {
             return text;
         }
         if (!looksLikeEncryptedPlaylist(text)) return text;
@@ -1124,7 +1181,12 @@
             const encryptedData = compact.slice(0, 10) + compact.slice(34, compact.length - 54) + compact.slice(compact.length - 10);
             const ivBase64 = compact.slice(10, 34);
             const keyBase64 = compact.slice(compact.length - 54, compact.length - 10);
-            const decrypted = await crypto.decryptAES(encryptedData, keyBase64, ivBase64);
+            
+            const keyBytes = base64ToBytes(keyBase64);
+            const ivBytes = base64ToBytes(ivBase64);
+            const ctBytes = base64ToBytes(encryptedData);
+            const plain = AES.decryptCbc(ctBytes, keyBytes, ivBytes);
+            const decrypted = bytesToUtf8(plain);
             return trimToString(decrypted) || text;
         } catch (_) {
             return text;
@@ -1242,7 +1304,6 @@
 
     async function resolveCustomCategoryChannels(categoryEntry) {
         try {
-            // Use fetchPlayzJson which resolves baseUrl and feeds back activeBaseUrl
             const baseUrls = await getBaseUrls();
             if (!Array.isArray(baseUrls) || !baseUrls.length) {
                 console.error("No base URLs for custom category " + categoryEntry.label);
@@ -1277,7 +1338,6 @@
                 const linksPath = trimToString(channelData.links) || "";
 
                 if (linksPath) {
-                    // Store just the path — loadStreams will resolve via fetchPlayzJson
                     channels.push({
                         title: name,
                         group: categoryEntry.label,
@@ -1814,79 +1874,74 @@
         try {
             const specialProvider = getSpecialBundledProvider();
             if (specialProvider) {
-                const providerResult = await resolveSpecialProviderChannels(specialProvider);
-                if (!providerResult.channels.length) {
-                    return cb({
-                        success: false,
-                        errorCode: "SITE_OFFLINE",
-                        message: providerResult.error || `No playable channels are currently available for ${specialProvider.label}`
-                    });
+                const specialResult = await resolveSpecialProviderChannels(specialProvider);
+                if (specialResult.channels.length) {
+                    const sections = buildSectionsFromChannels(specialResult.channels);
+                    Analytics.logEvent('playztv_home', {});
+                    return cb({ success: true, data: sections });
                 }
-                return cb({ success: true, data: buildSectionsFromChannels(providerResult.channels) });
+
+                return cb({
+                    success: false,
+                    errorCode: "EMPTY_PLAYLIST",
+                    message: specialResult.error || `No channels found for ${specialProvider.label}`
+                });
             }
 
             const config = getPluginConfig();
             if (!config) {
-                return cb({ success: false, errorCode: "PARSE_ERROR", message: "Unsupported PlayZTV manifest configuration" });
+                return cb({
+                    success: false,
+                    errorCode: "UNSUPPORTED_PROVIDER",
+                    message: "Unsupported PlayZTV provider requested"
+                });
             }
 
             const providerResults = await resolveAllProviders();
-            const sections = {};
+            const channels = [];
+            const failures = [];
 
-            if (config.merged) {
-                providerResults.forEach((provider) => {
-                    if (!provider.channels.length) return;
-                    sections[provider.label] = provider.channels.map((channel) => createChannelItem(channel, false));
-                });
-            } else {
-                providerResults.forEach((provider) => {
-                    if (!provider.channels.length) return;
-                    const providerSections = buildSectionsFromChannels(provider.channels);
-                    Object.keys(providerSections).forEach((sectionName) => {
-                        if (!sections[sectionName]) sections[sectionName] = [];
-                        providerSections[sectionName].forEach((item) => sections[sectionName].push(item));
-                    });
-                });
-            }
+            providerResults.forEach((result) => {
+                if (result.channels.length) {
+                    result.channels.forEach((channel) => channels.push(channel));
+                } else if (result.error) {
+                    failures.push(`${result.label}: ${result.error}`);
+                }
+            });
 
-            // Resolve custom categories (FIFA WC26 Highlights etc.)
+            // Also load custom categories (FIFA WC26 Highlights etc.)
             const customResults = await Promise.all(
                 CUSTOM_CATEGORY_ENTRIES.map(function(entry) {
                     return resolveCustomCategoryChannels(entry);
                 })
             );
-            customResults.forEach(function(provider) {
-                if (!provider.channels.length) return;
-                if (config && config.merged) {
-                    sections[provider.label] = provider.channels.map(function(channel) {
-                        return createChannelItem(channel, false, "movie");
-                    });
-                } else {
-                    var customSections = buildSectionsFromChannels(provider.channels);
-                    Object.keys(customSections).forEach(function(sectionName) {
-                        if (!sections[sectionName]) sections[sectionName] = [];
-                        customSections[sectionName].forEach(function(item) {
-                            sections[sectionName].push(item);
-                        });
-                    });
+            customResults.forEach(function(result) {
+                if (result.channels.length) {
+                    result.channels.forEach(function(channel) { channels.push(channel); });
                 }
             });
 
-            const availableSections = Object.keys(sections).filter((sectionName) => Array.isArray(sections[sectionName]) && sections[sectionName].length);
-            if (!availableSections.length) {
+            if (!channels.length) {
                 return cb({
                     success: false,
-                    errorCode: "SITE_OFFLINE",
-                    message: "No playable PlayZTV providers are currently available for this plugin"
+                    errorCode: "EMPTY_CATALOG",
+                    message: failures.length ? failures.join(" | ") : "No channels resolved from the configured PlayZTV sources"
                 });
             }
+
+            const sections = {};
+            channels.forEach((channel) => {
+                const groupName = normalizeGroupName(channel.group);
+                if (!sections[groupName]) sections[groupName] = [];
+                sections[groupName].push(createChannelItem(channel, !!config.merged, channel.__customProvider ? "movie" : "livestream"));
+            });
 
             Analytics.logEvent('playztv_home', {});
             cb({ success: true, data: sections });
         } catch (error) {
             cb({
                 success: false,
-                errorCode: "PARSE_ERROR",
+                errorCode: "CATALOG_ERROR",
                 message: error && error.message ? error.message : String(error)
             });
         }
@@ -2020,11 +2075,6 @@
                         var streamName = trimToString(link.name) || "Stream " + (i + 1);
                         if (!streamUrl) continue;
 
-                        // Pass URLs directly — no HLS master expansion.
-                        // Custom providers serve VOD highlights with direct-playable
-                        // HLS URLs. Expanding master playlists into data-URI variants
-                        // breaks on multi-host CDNs (TikTok p16/p19) because MPV's
-                        // HTTP pool rejects cross-host segment requests.
                         const quality = getQualityFromName(streamName);
                         rankedStreams.push({
                             score: 1000 - i,
