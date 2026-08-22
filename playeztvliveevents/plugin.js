@@ -76,14 +76,21 @@
         "https://adsflw.xyz",
         "https://playztv2828.store"
     ];
-    const PLAYZ_AES_KEY = "bTVLbDVuazR4SzFrTjdwTg==";
-    const PLAYZ_AES_IV = "azVLNG5NOG1LbE5MN2wxNQ==";
-    const PLAYZ_PRIMARY_AES_KEY = "Yi8xam1sNW5rNHg1azdwTg==";
-    const PLAYZ_PRIMARY_AES_IV = "MTRuTWs4bU41S2w1S0w3bA==";
-    const AES_JS_URL = "https://cdnjs.cloudflare.com/ajax/libs/aes-js/3.1.2/index.min.js";
+
+    const PLAYZ_NATIVE_KEY = [99, 122, 49, 52, 82, 83, 116, 107, 78, 48, 49, 80, 86, 69, 53, 119];
+    const PLAYZ_NATIVE_IV = [87, 84, 108, 69, 118, 99, 107, 100, 50, 85, 82, 52, 49, 115, 100, 107];
+    const PLAYZ_PRIMARY_KEY = [98, 47, 49, 106, 109, 108, 53, 110, 107, 52, 120, 53, 107, 55, 112, 78];
+    const PLAYZ_PRIMARY_IV = [49, 52, 110, 77, 107, 56, 109, 78, 53, 75, 108, 53, 75, 76, 55, 108];
+    const PLAYZ_FALLBACK_KEY = [109, 53, 75, 108, 53, 110, 107, 52, 120, 75, 49, 107, 78, 55, 112, 78];
+    const PLAYZ_FALLBACK_IV = [107, 53, 75, 52, 110, 77, 56, 109, 75, 108, 78, 76, 55, 108, 49, 53];
+
     const PLAYZ_SUBSTITUTION_FROM = "aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ";
     const PLAYZ_SUBSTITUTION_TO = "fFgGjJkKaApPbBmMoOzZeEnNcCdDrRqQtTvVuUxXhHiIwWyYlLsS";
     const PLAYZ_SUBSTITUTION_REVERSE = {};
+    for (let index = 0; index < PLAYZ_SUBSTITUTION_TO.length; index++) {
+        PLAYZ_SUBSTITUTION_REVERSE[PLAYZ_SUBSTITUTION_TO[index]] = PLAYZ_SUBSTITUTION_FROM[index];
+    }
+
     const PLAYZ_TRUSTED_HOSTS = [
         "a201aivottlinear-a.akamaihd.net",
         "otte.live.cf.ww.aiv-cdn.net",
@@ -106,10 +113,6 @@
     let activeBaseUrl = null;
     let remoteBaseUrlsPromise = null;
     let aesJsPromise = null;
-
-    for (let index = 0; index < PLAYZ_SUBSTITUTION_TO.length; index++) {
-        PLAYZ_SUBSTITUTION_REVERSE[PLAYZ_SUBSTITUTION_TO[index]] = PLAYZ_SUBSTITUTION_FROM[index];
-    }
 
     function trimToString(value) {
         if (value === null || value === undefined) return "";
@@ -145,7 +148,6 @@
 
     function safeJsonParse(text) {
         if (!text) return null;
-        
         try {
             return JSON.parse(String(text));
         } catch (_) {
@@ -153,21 +155,8 @@
         }
     }
 
-    function base64DecodeText(value) {
-        const normalized = String(value || "");
-        if (!normalized) return "";
-        
-        if (typeof atob === "function") {
-            return atob(normalized);
-        }
-        if (typeof Buffer !== "undefined") {
-            return Buffer.from(normalized, "base64").toString("utf8");
-        }
-        return "";
-    }
-
-    function base64DecodeBytes(value) {
-        let normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+    function base64ToBytes(value) {
+        let normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/").replace(/\s+/g, "");
         while (normalized.length % 4) normalized += "=";
         try {
             if (typeof Buffer !== "undefined") return new Uint8Array(Buffer.from(normalized, "base64"));
@@ -180,11 +169,35 @@
         return bytes;
     }
 
+    function bytesToBase64(bytes) {
+        try {
+            if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
+        } catch (_) {}
+        let binary = "";
+        for (let index = 0; index < bytes.length; index++) {
+            binary += String.fromCharCode(bytes[index]);
+        }
+        return typeof btoa === "function" ? btoa(binary) : "";
+    }
+
+    function bytesToAscii(bytes) {
+        let out = "";
+        for (let index = 0; index < bytes.length; index++) {
+            out += String.fromCharCode(bytes[index]);
+        }
+        return out;
+    }
+
     function bytesToUtf8(bytes) {
         if (!bytes || !bytes.length) return "";
         if (typeof TextDecoder !== "undefined") {
-            return new TextDecoder().decode(bytes);
+            try {
+                return new TextDecoder().decode(bytes);
+            } catch (_) {}
         }
+        try {
+            if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("utf8");
+        } catch (_) {}
         let out = "";
         for (let index = 0; index < bytes.length; index++) {
             out += String.fromCharCode(bytes[index]);
@@ -206,27 +219,19 @@
         return bytes.slice(0, bytes.length - pad);
     }
 
-    function decodePlayzSubstitutionPayload(value) {
-        if (!value) return "";
-        
-        let restored = "";
-        for (const char of String(value)) {
-            restored += PLAYZ_SUBSTITUTION_REVERSE[char] || char;
+    function swapAdjacentPairs(bytes) {
+        const out = new Uint8Array(bytes);
+        for (let i = 0; i + 1 < out.length; i += 2) {
+            const tmp = out[i];
+            out[i] = out[i + 1];
+            out[i + 1] = tmp;
         }
-        return base64DecodeText(restored);
+        return out;
     }
 
     async function mapWithConcurrency(items, limit, worker) {
-        if (!Array.isArray(items)) {
-            console.error("Invalid items array for mapWithConcurrency");
-            return [];
-        }
-        
-        if (typeof worker !== "function") {
-            console.error("Invalid worker function for mapWithConcurrency");
-            return [];
-        }
-        
+        if (!Array.isArray(items)) return [];
+        if (typeof worker !== "function") return [];
         const source = items;
         const results = new Array(source.length);
         const maxWorkers = Math.max(1, Math.min(parseInt(limit, 10) || 1, source.length || 1));
@@ -252,95 +257,45 @@
         return results;
     }
 
-    function decryptAesCbcWithNode(dataB64, keyB64, ivB64) {
-        if (typeof Buffer === "undefined" || typeof __crypto__ === "undefined" || !__crypto__.createDecipheriv) {
-            return "";
+    async function decryptAesCbcBytes(cipherBytes, keyBytes, ivBytes) {
+        if (typeof __crypto__ !== "undefined" && __crypto__.createDecipheriv) {
+            try {
+                const keyBuf = Buffer.from(keyBytes);
+                const ivBuf = Buffer.from(ivBytes);
+                const dataBuf = Buffer.from(cipherBytes);
+                const algo = keyBuf.length <= 16 ? "aes-128-cbc" : (keyBuf.length <= 24 ? "aes-192-cbc" : "aes-256-cbc");
+                const decipher = __crypto__.createDecipheriv(algo, keyBuf, ivBuf);
+                return new Uint8Array(Buffer.concat([decipher.update(dataBuf), decipher.final()]));
+            } catch (_) {}
         }
 
-        const key = Buffer.from(keyB64, "base64");
-        const iv = Buffer.from(ivB64, "base64");
-        const data = Buffer.from(dataB64, "base64");
-        const algorithm = key.length <= 16 ? "aes-128-cbc" : (key.length <= 24 ? "aes-192-cbc" : "aes-256-cbc");
-        const decipher = __crypto__.createDecipheriv(algorithm, key, iv);
-        return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
-    }
-
-    async function getAesJs() {
-        if (globalThis.aesjs) return globalThis.aesjs;
-        if (!aesJsPromise) {
-            aesJsPromise = (async () => {
-                const response = await fetchText(AES_JS_URL, {
-                    "User-Agent": "Mozilla/5.0",
-                    "Referer": "https://adsflw.xyz/"
-                });
-                const source = extractResponseBody(response);
-                if (!trimToString(source)) throw new Error("Failed to load AES runtime");
-                Function(String(source || ""))();
-                if (!globalThis.aesjs) throw new Error("AES runtime unavailable");
-                return globalThis.aesjs;
-            })();
-        }
-        return aesJsPromise;
-    }
-
-    async function decryptAesCbcWithWebCrypto(dataB64, keyB64, ivB64) {
-        if (!globalThis.crypto || !globalThis.crypto.subtle || typeof globalThis.crypto.subtle.importKey !== "function") {
-            return "";
-        }
-        const keyBytes = base64DecodeBytes(keyB64);
-        const ivBytes = base64DecodeBytes(ivB64);
-        const dataBytes = base64DecodeBytes(dataB64);
-        const imported = await globalThis.crypto.subtle.importKey("raw", keyBytes, { name: "AES-CBC" }, false, ["decrypt"]);
-        const plain = new Uint8Array(await globalThis.crypto.subtle.decrypt({ name: "AES-CBC", iv: ivBytes }, imported, dataBytes));
-        return trimToString(bytesToUtf8(stripPkcs7(plain)));
-    }
-
-    async function decryptAesCbcWithAesJs(dataB64, keyB64, ivB64) {
-        const aesjs = await getAesJs();
-        const keyBytes = base64DecodeBytes(keyB64);
-        const ivBytes = base64DecodeBytes(ivB64);
-        const dataBytes = base64DecodeBytes(dataB64);
-        const cipher = new aesjs.ModeOfOperation.cbc(keyBytes, ivBytes);
-        return trimToString(bytesToUtf8(stripPkcs7(cipher.decrypt(dataBytes))));
-    }
-
-    async function decryptAesCbc(dataB64, keyB64, ivB64) {
-        try {
-            if (globalThis.crypto && typeof globalThis.crypto.decryptAES === "function") {
-                const decrypted = await globalThis.crypto.decryptAES(dataB64, keyB64, ivB64);
-                if (trimToString(decrypted)) return trimToString(decrypted);
-            }
-        } catch (_) {
-            // Continue through the runtime fallbacks below.
+        if (globalThis.crypto && typeof globalThis.crypto.decryptAES === "function") {
+            try {
+                const dataB64 = bytesToBase64(cipherBytes);
+                const keyB64 = bytesToBase64(keyBytes);
+                const ivB64 = bytesToBase64(ivBytes);
+                const ptStr = await globalThis.crypto.decryptAES(dataB64, keyB64, ivB64, { mode: "cbc" });
+                if (ptStr) {
+                    return new Uint8Array(typeof Buffer !== "undefined" ? Buffer.from(ptStr, "utf8") : new TextEncoder().encode(ptStr));
+                }
+            } catch (_) {}
         }
 
-        try {
-            const decrypted = await decryptAesCbcWithWebCrypto(dataB64, keyB64, ivB64);
-            if (trimToString(decrypted)) return decrypted;
-        } catch (_) {}
+        if (globalThis.crypto && globalThis.crypto.subtle && typeof globalThis.crypto.subtle.importKey === "function") {
+            try {
+                const key = await globalThis.crypto.subtle.importKey("raw", new Uint8Array(keyBytes), { name: "AES-CBC" }, false, ["decrypt"]);
+                const pt = await globalThis.crypto.subtle.decrypt({ name: "AES-CBC", iv: new Uint8Array(ivBytes) }, key, new Uint8Array(cipherBytes));
+                return new Uint8Array(pt);
+            } catch (_) {}
+        }
 
-        try {
-            const decrypted = decryptAesCbcWithNode(dataB64, keyB64, ivB64);
-            if (trimToString(decrypted)) return trimToString(decrypted);
-        } catch (_) {}
-
-        try {
-            const decrypted = await decryptAesCbcWithAesJs(dataB64, keyB64, ivB64);
-            if (trimToString(decrypted)) return decrypted;
-        } catch (_) {}
-
-        return "";
+        return new Uint8Array(0);
     }
 
     async function postJson(url, payload, headers) {
         if (!url || typeof url !== "string") {
             throw new Error("Invalid URL for postJson");
         }
-        
-        if (!payload || typeof payload !== "object") {
-            throw new Error("Invalid payload for postJson");
-        }
-        
         const body = JSON.stringify(payload);
         try {
             if (typeof http_post === "function") {
@@ -349,7 +304,7 @@
             if (typeof fetch === "function") {
                 const response = await fetch(url, {
                     method: "POST",
-                    headers,
+                    headers: headers || {},
                     body
                 });
                 return {
@@ -368,7 +323,6 @@
         if (!url || typeof url !== "string") {
             throw new Error("Invalid URL for fetchText");
         }
-        
         try {
             if (typeof http_get === "function") {
                 return http_get(url, headers || {});
@@ -415,7 +369,6 @@
             }
             throw new Error("POST requests are not supported in this runtime");
         }
-
         return fetchText(url, headers);
     }
 
@@ -496,13 +449,9 @@
         const headers = {
             "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 10; SM-A505F)"
         };
-
         try {
             headers.Host = new URL(String(url || "")).hostname;
-        } catch (_) {
-            // Ignore invalid URLs.
-        }
-
+        } catch (_) {}
         return headers;
     }
 
@@ -511,35 +460,61 @@
         if (!raw) return "";
         if (raw.startsWith("{") || raw.startsWith("[") || raw.startsWith("<")) return raw;
 
+        // Strategy 1: Native Decrypt
         try {
-            const primaryPayload = decodePlayzSubstitutionPayload(raw.replace(/\s/g, ""));
-            const decrypted = await decryptAesCbc(primaryPayload, PLAYZ_PRIMARY_AES_KEY, PLAYZ_PRIMARY_AES_IV);
-            const normalized = trimToString(decrypted);
-            if (normalized) return normalized;
-        } catch (_) {
-            // Fall back to the older PlayZTV payload format below.
-        }
+            const stripped = raw.replace(/\s+/g, "");
+            const b1 = base64ToBytes(stripped);
+            const b1Rev = new Uint8Array(b1).reverse();
+            const b2 = swapAdjacentPairs(b1Rev);
+            const b2Str = bytesToAscii(b2).replace(/\s+/g, "");
+            const b3 = base64ToBytes(b2Str);
+            const pt = await decryptAesCbcBytes(b3, PLAYZ_NATIVE_KEY, PLAYZ_NATIVE_IV);
+            const text = bytesToUtf8(pt).trim();
+            if (text.startsWith("{") || text.startsWith("[")) {
+                return text;
+            }
+        } catch (_) {}
 
+        // Strategy 2: Primary Decrypt
         try {
-            const decrypted = await decryptAesCbc(raw.replace(/\s/g, ""), PLAYZ_AES_KEY, PLAYZ_AES_IV);
-            return trimToString(decrypted);
-        } catch (_) {
-            return "";
-        }
+            const stripped = raw.replace(/\s+/g, "");
+            let restored = "";
+            for (let i = 0; i < stripped.length; i++) {
+                const ch = stripped[i];
+                restored += PLAYZ_SUBSTITUTION_REVERSE[ch] || ch;
+            }
+            const b1 = base64ToBytes(restored);
+            const b1Str = bytesToAscii(b1);
+            const ct = base64ToBytes(b1Str);
+            const pt = await decryptAesCbcBytes(ct, PLAYZ_PRIMARY_KEY, PLAYZ_PRIMARY_IV);
+            const text = bytesToUtf8(pt).trim();
+            if (text.startsWith("{") || text.startsWith("[")) {
+                return text;
+            }
+        } catch (_) {}
+
+        // Strategy 3: Fallback Decrypt
+        try {
+            const stripped = raw.replace(/\s+/g, "");
+            const ct = base64ToBytes(stripped);
+            const pt = await decryptAesCbcBytes(ct, PLAYZ_FALLBACK_KEY, PLAYZ_FALLBACK_IV);
+            const text = bytesToUtf8(pt).trim();
+            if (text.startsWith("{") || text.startsWith("[")) {
+                return text;
+            }
+        } catch (_) {}
+
+        return "";
     }
 
     async function fetchPlayzPayload(url) {
-        if (!url || typeof url !== "string") {
-            console.error("Invalid URL for fetchPlayzPayload");
-            return "";
-        }
-        
+        if (!url || typeof url !== "string") return "";
         try {
             const response = await fetchText(url, buildPlayzHeaders(url));
             if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) {
                 return "";
             }
-            return decryptPlayzPayload(extractResponseBody(response));
+            return await decryptPlayzPayload(extractResponseBody(response));
         } catch (error) {
             console.error(`Failed to fetch payload from ${url}: ${error && error.message ? error.message : String(error)}`);
             return "";
@@ -547,17 +522,10 @@
     }
 
     async function fetchPlayzJson(path) {
-        if (!path || typeof path !== "string") {
-            console.error("Invalid path for fetchPlayzJson");
-            return null;
-        }
-        
+        if (!path || typeof path !== "string") return null;
         const baseUrls = await getBaseUrls();
-        if (!baseUrls || !Array.isArray(baseUrls) || !baseUrls.length) {
-            console.error("No base URLs available for fetchPlayzJson");
-            return null;
-        }
-        
+        if (!baseUrls || !Array.isArray(baseUrls) || !baseUrls.length) return null;
+
         for (const baseUrl of baseUrls) {
             try {
                 const finalUrl = /^https?:\/\//i.test(path) ? path : `${baseUrl}/${String(path || "").replace(/^\/+/, "")}`;
@@ -569,7 +537,6 @@
                 }
             } catch (error) {
                 console.error(`Failed to fetch ${path} from ${baseUrl}: ${error && error.message ? error.message : String(error)}`);
-                // Continue to next URL for recovery
                 continue;
             }
         }
@@ -578,7 +545,6 @@
 
     function normalizeHeaderName(key) {
         if (!key) return "";
-        
         const lowered = trimToString(key).toLowerCase();
         if (lowered === "user-agent") return "User-Agent";
         if (lowered === "referer" || lowered === "referrer") return "Referer";
@@ -603,8 +569,6 @@
         }
         return normalized;
     }
-
-
 
     function splitUrlAndHeaders(rawUrl) {
         const value = trimToString(rawUrl);
@@ -635,9 +599,7 @@
             let rawValue = trimToString(pair.slice(equalsIndex + 1));
             try {
                 rawValue = decodeURIComponent(rawValue);
-            } catch (_) {
-                // Keep raw value.
-            }
+            } catch (_) {}
 
             const lowered = rawKey.toLowerCase();
             if (lowered === "drmlicense" || lowered === "licenseurl") {
@@ -674,7 +636,6 @@
 
     function decodeEscapedText(text) {
         if (!text) return "";
-        
         return String(text)
             .replace(/\\u0026/g, "&")
             .replace(/\\\//g, "/");
@@ -682,7 +643,6 @@
 
     function tryDecodeReversedTokenPayload(text, key) {
         if (!text || typeof text !== "string") return "";
-        
         try {
             const reversed = String(text).split("").reverse().join("");
             const decoded = typeof atob === "function"
@@ -713,7 +673,6 @@
 
     function extractJsonPlaybackUrl(text, key) {
         if (!text) return "";
-        
         const normalizedKey = trimToString(key) || "playback_url";
         const data = safeJsonParse(text);
         if (data && typeof data === "object") {
@@ -733,7 +692,6 @@
 
     function extractDirectMediaUrl(text, preferredHost) {
         if (!text) return "";
-        
         const patterns = [
             /https?:\/\/[^"'\\\s<>]+?\.(?:m3u8|mpd)(?:[^"'\\\s<>]*)/ig,
             /https?:\\\/\\\/[^"'\\\s<>]+?\.(?:m3u8|mpd)(?:[^"'\\\s<>]*)/ig,
@@ -756,9 +714,7 @@
                     try {
                         const host = new URL(normalized).hostname.replace(/^www\./i, "");
                         if (host !== preferredHost) continue;
-                    } catch (_) {
-                        // Ignore invalid URLs.
-                    }
+                    } catch (_) {}
                 }
 
                 if (/\.m3u8/i.test(normalized) || /\.mpd/i.test(normalized)) {
@@ -766,84 +722,13 @@
                 }
             }
         }
-
         return "";
-    }
-
-    function extractHtmlPackedSource(text) {
-        if (!text) return "";
-        
-        const sourceMatch = /player\.load\(\{[^}]*source:\s*([a-zA-Z0-9_]+)\(/i.exec(String(text));
-        if (!sourceMatch || !sourceMatch[1]) return "";
-
-        const functionPattern = new RegExp(`function\\s+${sourceMatch[1]}\\s*\\(\\)\\s*\\{([\\s\\S]*?)\\}`, "i");
-        const functionMatch = functionPattern.exec(String(text));
-        if (!functionMatch || !functionMatch[1]) return "";
-
-        const joinMatch = /\[([\s\S]*?)\]\.join/i.exec(functionMatch[1]);
-        if (!joinMatch || !joinMatch[1]) return "";
-
-        return joinMatch[1]
-            .split(/","|"/)
-            .map((entry) => trimToString(entry))
-            .filter(Boolean)
-            .join("")
-            .replace(/\\\//g, "/");
-    }
-
-    function extractPlaybackUrlFromObfuscatedHtml(text) {
-        if (!text) return "";
-        
-        const html = String(text);
-        const playbackVarMatch = /var\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*""\s*,\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*\[\s*\]/.exec(html);
-        if (!playbackVarMatch) return "";
-
-        const arrayVar = playbackVarMatch[2];
-        const arrayMatch = new RegExp(`${arrayVar}\\s*=\\s*(\\[[\\s\\S]*?\\]);`).exec(html);
-        if (!arrayMatch || !arrayMatch[1]) return "";
-
-        const arrayData = safeJsonParse(arrayMatch[1]);
-        if (!Array.isArray(arrayData) || !arrayData.length) return "";
-
-        const functionNamesMatch = new RegExp(`var\\s+k\\s*=\\s*([A-Za-z_$][A-Za-z0-9_$]*)\\(\\)\\s*\\+\\s*([A-Za-z_$][A-Za-z0-9_$]*)\\(\\)`).exec(html);
-        if (!functionNamesMatch) return "";
-
-        const firstValueMatch = new RegExp(`function\\s+${functionNamesMatch[1]}\\s*\\(\\)\\s*\\{\\s*return\\s+([0-9]+);\\s*\\}`).exec(html);
-        const secondValueMatch = new RegExp(`function\\s+${functionNamesMatch[2]}\\s*\\(\\)\\s*\\{\\s*return\\s+([0-9]+);\\s*\\}`).exec(html);
-        const firstValue = firstValueMatch ? parseInt(firstValueMatch[1], 10) : NaN;
-        const secondValue = secondValueMatch ? parseInt(secondValueMatch[1], 10) : NaN;
-        if (!Number.isFinite(firstValue) || !Number.isFinite(secondValue)) return "";
-
-        const offset = firstValue + secondValue;
-        const sorted = arrayData.slice().sort((left, right) => {
-            const leftIndex = Array.isArray(left) ? parseInt(left[0], 10) : 0;
-            const rightIndex = Array.isArray(right) ? parseInt(right[0], 10) : 0;
-            return leftIndex - rightIndex;
-        });
-
-        let url = "";
-        for (const entry of sorted) {
-            if (!Array.isArray(entry) || entry.length < 2) continue;
-            try {
-                const decoded = typeof atob === "function"
-                    ? atob(String(entry[1]))
-                    : Buffer.from(String(entry[1]), "base64").toString("utf8");
-                const digits = decoded.replace(/\D/g, "");
-                if (!digits) continue;
-                url += String.fromCharCode(parseInt(digits, 10) - offset);
-            } catch (_) {
-                return "";
-            }
-        }
-
-        return trimToString(url);
     }
 
     async function resolveEmbedToken(tokenConfig) {
         if (!tokenConfig || typeof tokenConfig !== "object") {
             return { url: "", headers: {} };
         }
-        
         const request = splitUrlAndHeaders(tokenConfig.api || "");
         if (!request.url || request.url.includes("%s")) return { url: "", headers: {} };
 
@@ -857,16 +742,7 @@
 
             const html = extractResponseBody(response);
             let resolved = extractJsonPlaybackUrl(html, tokenConfig.link_key || "playback_url");
-            if (!resolved) resolved = extractPlaybackUrlFromObfuscatedHtml(html);
-            if (!resolved) resolved = extractHtmlPackedSource(html);
-
-            let preferredHost = "";
-            try {
-                preferredHost = trimToString(tokenConfig.url ? new URL(tokenConfig.url).hostname.replace(/^www\./i, "") : "");
-            } catch (_) {
-                preferredHost = "";
-            }
-            if (!resolved) resolved = extractDirectMediaUrl(html, preferredHost);
+            if (!resolved) resolved = extractDirectMediaUrl(html);
 
             const parsed = splitUrlAndHeaders(resolved);
             return {
@@ -883,7 +759,6 @@
         if (!tokenConfig || typeof tokenConfig !== "object") {
             return { url: "", headers: {} };
         }
-        
         const request = splitUrlAndHeaders(tokenConfig.api || "");
         if (!request.url || request.url.includes("%s")) return { url: "", headers: {} };
 
@@ -918,7 +793,6 @@
 
     async function resolveTokenizedStream(entry) {
         if (!entry || typeof entry !== "object") return null;
-        
         if (!entry.tokenApi || typeof entry.tokenApi !== "string") return null;
 
         const tokenConfig = safeJsonParse(entry.tokenApi);
@@ -936,34 +810,7 @@
         } catch (error) {
             console.error("Token resolution failed for " + ((entry && entry.name) || "stream") + ": " + (error && error.message ? error.message : String(error)));
         }
-
         return null;
-    }
-
-    function buildEventStatus(event) {
-        if (!event || typeof event !== "object") {
-            return "LIVE";
-        }
-        
-        const now = Date.now();
-        const start = parsePlayzUtcDateTime(event && event.date, event && event.time);
-        const end = parsePlayzUtcDateTime(event && event.endDate, event && event.endTime);
-
-        if (Number.isFinite(end) && now >= end) return "ENDED";
-        if (Number.isFinite(start) && now >= start) return "LIVE";
-        if (Number.isFinite(start) && now < start) return "UPCOMING";
-        return "LIVE";
-    }
-
-    function buildEventStatusPrefix(event) {
-        if (!event || typeof event !== "object") {
-            return "[LIVE]";
-        }
-        
-        const status = buildEventStatus(event);
-        if (status === "LIVE") return "[LIVE]";
-        if (status === "UPCOMING") return "[SOON]";
-        return "[ENDED]";
     }
 
     function parsePlayzUtcDateTime(dateText, timeText) {
@@ -982,43 +829,70 @@
         return Date.UTC(year, month, day, hour, minute, second);
     }
 
+    function buildEventStatus(event) {
+        if (!event || typeof event !== "object") return "LIVE";
+        const now = Date.now();
+        const start = parsePlayzUtcDateTime(event && event.date, event && event.time);
+        const end = parsePlayzUtcDateTime(event && event.endDate, event && event.endTime);
+
+        if (Number.isFinite(end) && now >= end) return "ENDED";
+        if (Number.isFinite(start) && now >= start) return "LIVE";
+        if (Number.isFinite(start) && now < start) return "UPCOMING";
+        return "LIVE";
+    }
+
+    function buildEventStatusPrefix(event) {
+        const status = buildEventStatus(event);
+        if (status === "LIVE") return "🔴";
+        if (status === "UPCOMING") return "🔜";
+        if (status === "ENDED") return "✅";
+        return "";
+    }
+
     function normalizeCategoryName(name) {
         const value = trimToString(name) || "Other";
         return value.replace(/\s+/g, " ").trim();
     }
 
-    function getCategoryLabel(name) {
-        const category = normalizeCategoryName(name);
-        if (/cricket/i.test(category)) return "Cricket";
-        if (/football|soccer/i.test(category)) return "Football";
-        if (/basketball/i.test(category)) return "Basketball";
-        if (/tennis/i.test(category)) return "Tennis";
-        if (/boxing/i.test(category)) return "Boxing";
-        if (/motorsport|motorsports|formula|racing/i.test(category)) return "Motorsport";
-        if (/wwe|wrestling/i.test(category)) return "WWE";
-        return category;
+    function getCategoryIcon(name) {
+        const lowered = String(name || "").toLowerCase();
+        if (lowered.includes("cricket")) return "🏏";
+        if (lowered.includes("football") || lowered.includes("soccer")) return "⚽";
+        if (lowered.includes("motorsport") || lowered.includes("formula") || lowered.includes("racing") || lowered.includes("f1")) return "🏎️";
+        if (lowered.includes("basketball") || lowered.includes("nba")) return "🏀";
+        if (lowered.includes("tennis")) return "🎾";
+        if (lowered.includes("boxing") || lowered.includes("fight") || lowered.includes("ufc") || lowered.includes("mma")) return "🥊";
+        if (lowered.includes("hockey")) return "🏒";
+        if (lowered.includes("wwe") || lowered.includes("wrestling")) return "🤼";
+        if (lowered.includes("badminton")) return "🏸";
+        if (lowered.includes("volleyball")) return "🏐";
+        if (lowered.includes("baseball")) return "⚾";
+        if (lowered.includes("rugby") || lowered.includes("nfl") || lowered.includes("american football")) return "🏈";
+        return "📺";
+    }
+
+    function getCategorySectionTitle(name) {
+        const cleanName = normalizeCategoryName(name);
+        const icon = getCategoryIcon(cleanName);
+        return `${icon} ${cleanName}`;
     }
 
     function buildEventTitle(event) {
-        if (!event || typeof event !== "object") {
-            return "Live Event";
-        }
-        
+        if (!event || typeof event !== "object") return "Live Event";
         const teamA = trimToString(event && event.teamAName);
         const teamB = trimToString(event && event.teamBName);
         if (teamA && teamB) {
             if (teamA === teamB) return teamA;
             return `${teamA} vs ${teamB}`;
         }
-        return trimToString(event && event.eventName) || "Live Event";
+        return trimToString(event && event.teamAName) || trimToString(event && event.eventName) || "Live Event";
     }
 
     function buildEventPoster(event) {
         if (!event || typeof event !== "object") {
             return `${MATCH_CARD_API}?title=${encodeURIComponent("Live Event")}&teamA=${encodeURIComponent("Team A")}&teamB=${encodeURIComponent("Team B")}`;
         }
-        
-        const title = encodeURIComponent(trimToString(event && event.eventName));
+        const title = encodeURIComponent(trimToString(event && event.eventName) || "Live Event");
         let url = `${MATCH_CARD_API}?title=${title}&teamA=${encodeURIComponent(trimToString(event && event.teamAName) || "Team A")}&teamB=${encodeURIComponent(trimToString(event && event.teamBName) || "Team B")}`;
         if (trimToString(event && event.teamAFlag)) url += "&teamAImg=" + encodeURIComponent(event.teamAFlag);
         if (trimToString(event && event.teamBFlag)) url += "&teamBImg=" + encodeURIComponent(event.teamBFlag);
@@ -1026,17 +900,28 @@
         if (trimToString(event && event.date) && trimToString(event && event.time)) {
             url += "&time=" + encodeURIComponent(`${event.date} ${event.time} UTC`);
         }
+        const status = buildEventStatus(event);
+        url += `&isLive=${status === "LIVE"}&isEnded=${status === "ENDED"}`;
         return url;
     }
 
-    function parseEventEntry(rawEntry) {
-        if (!rawEntry || typeof rawEntry !== "object") return null;
-        const eventObject = rawEntry.event && typeof rawEntry.event === "string"
-            ? safeJsonParse(rawEntry.event)
-            : rawEntry;
-        if (!eventObject || eventObject.visible === false) return null;
+    function parseEventEntry(rawEntry, index) {
+        if (!rawEntry) return null;
+        let eventObject = rawEntry;
+        if (typeof rawEntry === "string") {
+            eventObject = safeJsonParse(rawEntry);
+        } else if (rawEntry.event) {
+            eventObject = typeof rawEntry.event === "string" ? safeJsonParse(rawEntry.event) : rawEntry.event;
+        }
+        if (!eventObject || typeof eventObject !== "object") return null;
+        if (eventObject.visible === false) return null;
 
+        const linksPath = trimToString(eventObject.links);
+        if (!linksPath) return null;
+
+        const slug = linksPath.replace(/\.txt$/i, "");
         return {
+            id: index + 1,
             category: normalizeCategoryName(eventObject.category),
             eventName: trimToString(eventObject.eventName),
             eventLogo: trimToString(eventObject.eventLogo),
@@ -1044,7 +929,8 @@
             teamBName: trimToString(eventObject.teamBName),
             teamAFlag: trimToString(eventObject.teamAFlag),
             teamBFlag: trimToString(eventObject.teamBFlag),
-            linksPath: trimToString(eventObject.links),
+            linksPath: linksPath,
+            slug: slug,
             date: trimToString(eventObject.date),
             time: trimToString(eventObject.time),
             endDate: trimToString(eventObject.end_date),
@@ -1056,10 +942,7 @@
     }
 
     function sortEvents(events) {
-        if (!Array.isArray(events)) {
-            return [];
-        }
-        
+        if (!Array.isArray(events)) return [];
         const weight = {
             LIVE: 0,
             UPCOMING: 1,
@@ -1072,15 +955,15 @@
             const statusDiff = (weight[leftStatus] || 9) - (weight[rightStatus] || 9);
             if (statusDiff !== 0) return statusDiff;
 
-            const leftPriority = Number.isFinite(left.priority) ? left.priority : 9999;
-            const rightPriority = Number.isFinite(right.priority) ? right.priority : 9999;
-            if (leftPriority !== rightPriority) return leftPriority - rightPriority;
-
             const leftStart = parsePlayzUtcDateTime(left.date, left.time);
             const rightStart = parsePlayzUtcDateTime(right.date, right.time);
             if (Number.isFinite(leftStart) && Number.isFinite(rightStart) && leftStart !== rightStart) {
                 return leftStart - rightStart;
             }
+
+            const leftPriority = Number.isFinite(left.priority) ? left.priority : 9999;
+            const rightPriority = Number.isFinite(right.priority) ? right.priority : 9999;
+            if (leftPriority !== rightPriority) return leftPriority - rightPriority;
 
             return buildEventTitle(left).localeCompare(buildEventTitle(right));
         });
@@ -1090,20 +973,10 @@
         try {
             const data = await fetchPlayzJson("events.txt");
             if (!Array.isArray(data)) return [];
-            return sortEvents(data.map(parseEventEntry).filter(Boolean));
+            return sortEvents(data.map((entry, idx) => parseEventEntry(entry, idx)).filter(Boolean));
         } catch (error) {
             console.error(`Failed to fetch PlayZTV events: ${error && error.message ? error.message : String(error)}`);
             return [];
-        }
-    }
-
-    async function fetchPlayzCategories() {
-        try {
-            const data = await fetchPlayzJson("event_cats.txt");
-            return data && typeof data === "object" && !Array.isArray(data) ? data : {};
-        } catch (error) {
-            console.error(`Failed to fetch PlayZTV categories: ${error && error.message ? error.message : String(error)}`);
-            return {};
         }
     }
 
@@ -1111,36 +984,38 @@
         if (!event || typeof event !== "object") {
             throw new Error("Invalid event data for buildHomeItem");
         }
-        
         const displayTitle = buildEventTitle(event);
+        const prefix = buildEventStatusPrefix(event);
+        const fullTitle = prefix ? `${prefix} ${displayTitle}` : displayTitle;
         const poster = buildEventPoster(event);
+
         return new MultimediaItem({
-            title: `${buildEventStatusPrefix(event)} ${displayTitle}`,
+            title: fullTitle,
             description: trimToString(event.eventName) || "Live Event",
             posterUrl: poster,
             type: "livestream",
             url: JSON.stringify({
                 title: displayTitle,
-                poster,
+                fullTitle: fullTitle,
+                poster: poster,
                 category: event.category,
                 eventName: event.eventName,
                 linksPath: event.linksPath,
+                slug: event.slug,
                 date: event.date,
                 time: event.time,
                 endDate: event.endDate,
                 endTime: event.endTime,
                 teamAName: event.teamAName,
                 teamBName: event.teamBName,
-                eventLogo: event.eventLogo
+                eventLogo: event.eventLogo,
+                linkNames: event.linkNames
             })
         });
     }
 
     function getStreamHost(url) {
-        if (!url || typeof url !== "string") {
-            return "";
-        }
-        
+        if (!url || typeof url !== "string") return "";
         try {
             return new URL(String(url)).hostname.toLowerCase();
         } catch (_) {
@@ -1149,38 +1024,26 @@
     }
 
     function matchesHost(host, entries) {
-        if (!host || typeof host !== "string" || !Array.isArray(entries)) {
-            return false;
-        }
-        
+        if (!host || typeof host !== "string" || !Array.isArray(entries)) return false;
         const normalized = trimToString(host).toLowerCase();
         return entries.some((entry) => normalized === entry || normalized.endsWith(`.${entry}`));
-    }
-
-    function shouldExpandHlsVariants(url) {
-        const value = trimToString(url).toLowerCase();
-        if (!value || /\.mpd(?:$|[?#])/i.test(value)) return false;
-        return /\.m3u8(?:$|[?#])/i.test(value) || value.includes("/hls/") || value.includes("m3u8");
     }
 
     function parseHlsAttributes(line) {
         const attributes = {};
         const regex = /([A-Z0-9-]+)=("[^"]*"|[^,]*)/g;
         let match;
-
         while ((match = regex.exec(String(line || ""))) !== null) {
             const key = trimToString(match[1]).toUpperCase();
             const value = trimToString(match[2]).replace(/^"|"$/g, "");
             if (key) attributes[key] = value;
         }
-
         return attributes;
     }
 
     function resolveVariantUrl(baseUrl, variantPath) {
         const target = trimToString(variantPath);
         if (!target) return "";
-
         try {
             const resolved = new URL(target, baseUrl);
             const base = new URL(baseUrl);
@@ -1193,28 +1056,13 @@
         }
     }
 
-    function parseVariantQuality(attributes, isMpd = false) {
-        if (!attributes || typeof attributes !== "object") {
-            return 0;
-        }
-        
-        let resolution = trimToString(attributes && attributes.RESOLUTION);
-        if (!resolution && isMpd) {
-            const width = attributes && attributes.width;
-            const height = attributes && attributes.height;
-            if (width && height) {
-                resolution = `${width}x${height}`;
-            }
-        }
-        
+    function parseVariantQuality(attributes) {
+        if (!attributes || typeof attributes !== "object") return 0;
+        let resolution = trimToString(attributes.RESOLUTION);
         const resolutionMatch = /(\d+)\s*x\s*(\d+)/i.exec(resolution);
         if (resolutionMatch) return parseInt(resolutionMatch[2], 10) || 0;
 
-        let bandwidth = parseInt(attributes && (attributes["AVERAGE-BANDWIDTH"] || attributes.BANDWIDTH || "0"), 10);
-        if (!bandwidth && isMpd) {
-            bandwidth = attributes && attributes.bandwidth;
-        }
-        
+        let bandwidth = parseInt(attributes["AVERAGE-BANDWIDTH"] || attributes.BANDWIDTH || "0", 10);
         if (!bandwidth || bandwidth < 1) return 0;
         if (bandwidth >= 20000000) return 8160;
         if (bandwidth >= 10000000) return 4320;
@@ -1227,37 +1075,21 @@
         return 0;
     }
 
-    function buildVariantSource(baseSource, attributes, fallbackIndex, isMpd = false) {
-        if (!baseSource || typeof baseSource !== "string") {
-            baseSource = "";
-        }
-        
-        const quality = parseVariantQuality(attributes, isMpd);
+    function buildVariantSource(baseSource, attributes, fallbackIndex) {
+        const quality = parseVariantQuality(attributes);
         if (quality > 0) {
             return {
                 quality,
                 source: `${baseSource} ${quality}p`
             };
         }
-
         const bandwidth = parseInt(attributes && (attributes["AVERAGE-BANDWIDTH"] || attributes.BANDWIDTH || "0"), 10);
-        if (!bandwidth && isMpd) {
-            const mpdBandwidth = attributes && attributes.bandwidth;
-            if (mpdBandwidth) {
-                return {
-                    quality: 0,
-                    source: `${baseSource} ${Math.max(1, Math.round(mpdBandwidth / 1000))}kbps`
-                };
-            }
-        }
-        
         if (bandwidth > 0) {
             return {
                 quality: 0,
                 source: `${baseSource} ${Math.max(1, Math.round(bandwidth / 1000))}kbps`
             };
         }
-
         return {
             quality: 0,
             source: `${baseSource} Variant ${fallbackIndex + 1}`
@@ -1265,52 +1097,17 @@
     }
 
     function parseHlsMasterPlaylist(manifestText, manifestUrl) {
-        const info = {
-            variants: [],
-            version: "",
-            independentSegments: false,
-            mediaGroups: {
-                AUDIO: {},
-                SUBTITLES: {},
-                "CLOSED-CAPTIONS": {}
-            }
-        };
+        const info = { variants: [] };
         const lines = String(manifestText || "").split(/\r?\n/);
         let pendingAttributes = null;
 
         lines.forEach((rawLine) => {
             const line = trimToString(rawLine);
             if (!line) return;
-
-            if (line.startsWith("#EXT-X-VERSION:")) {
-                info.version = trimToString(line.slice("#EXT-X-VERSION:".length));
-                return;
-            }
-
-            if (line === "#EXT-X-INDEPENDENT-SEGMENTS") {
-                info.independentSegments = true;
-                return;
-            }
-
-            if (line.startsWith("#EXT-X-MEDIA:")) {
-                const attributes = parseHlsAttributes(line.slice("#EXT-X-MEDIA:".length));
-                const mediaType = trimToString(attributes.TYPE).toUpperCase();
-                const groupId = trimToString(attributes["GROUP-ID"]);
-                if (!mediaType || !groupId) return;
-                if (attributes.URI) {
-                    attributes.URI = resolveVariantUrl(manifestUrl, attributes.URI);
-                }
-                if (!info.mediaGroups[mediaType]) info.mediaGroups[mediaType] = {};
-                if (!info.mediaGroups[mediaType][groupId]) info.mediaGroups[mediaType][groupId] = [];
-                info.mediaGroups[mediaType][groupId].push(attributes);
-                return;
-            }
-
             if (line.startsWith("#EXT-X-STREAM-INF:")) {
                 pendingAttributes = parseHlsAttributes(line.slice("#EXT-X-STREAM-INF:".length));
                 return;
             }
-
             if (line.startsWith("#")) return;
 
             if (pendingAttributes) {
@@ -1324,169 +1121,49 @@
                 pendingAttributes = null;
             }
         });
-
         return info;
     }
 
-function buildVariantPlaybackUrl(variant) {
-        // Always return the direct variant URL.
-        // Inline data: manifests (previously used to embed audio groups) crash
-        // WinRT's AdaptiveMediaSource which only accepts http/https URIs, even
-        // though hasExtension() matches .m3u8 inside the encoded data: body.
-        // Audio group selection is handled by the player from the master manifest.
-        if (!variant || typeof variant !== "object") {
-            return "";
-}
-
-        return trimToString(variant.url);
-    }
-    function extractClearKeyPairFromJson(value) {
-        const data = safeJsonParse(value);
-        if (!data || typeof data !== "object") return null;
-        
-        const entries = data && Array.isArray(data.keys) ? data.keys : [];
-        const firstEntry = entries.find((entry) => entry && (entry.k || entry.key) && (entry.kid || entry.keyid));
-        if (!firstEntry) return null;
-
-        const drmKey = normalizeDrmToken(firstEntry.k || firstEntry.key);
-        const drmKid = normalizeDrmToken(firstEntry.kid || firstEntry.keyid);
-        if (!drmKey || !drmKid) return null;
-        return { drmKey, drmKid };
-    }
-
-    function extractClearKeyPairFromValue(value) {
-        const text = trimToString(value);
-        if (!text || /^https?:\/\//i.test(text)) return null;
-        if (text.startsWith("{")) {
-            return extractClearKeyPairFromJson(text);
-        }
-
-        const delimiter = text.includes(":") ? ":" : (text.includes(",") ? "," : "");
-        if (!delimiter) return null;
-
-        const parts = text.split(delimiter, 2);
-        const drmKid = normalizeDrmToken(parts[0]);
-        const drmKey = normalizeDrmToken(parts[1]);
-        if (!drmKey || !drmKid) return null;
-        return { drmKey, drmKid };
-    }
-
-    function hexToBase64Url(hex) {
-        const normalized = trimToString(hex).replace(/-/g, "");
-        if (!normalized || !/^[0-9a-f]+$/i.test(normalized) || normalized.length % 2 !== 0) return "";
-        const bytes = [];
-        for (let index = 0; index < normalized.length; index += 2) {
-            bytes.push(parseInt(normalized.slice(index, index + 2), 16));
-        }
-        const binary = String.fromCharCode.apply(null, bytes);
-        if (typeof btoa === "function") {
-            return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-        }
-        return "";
-    }
-
-    async function extractDefaultKidFromMpd(streamUrl, headers) {
-        if (!streamUrl || typeof streamUrl !== "string") return "";
-        if (!/\.mpd(?:$|[?#])/i.test(trimToString(streamUrl))) return "";
-        try {
-            const response = await fetchText(streamUrl, headers || {});
-            if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) return "";
-            const body = extractResponseBody(response);
-            const match = /cenc:default_KID=["']([0-9a-fA-F-]{32,36})["']/i.exec(body);
-            if (!match) return "";
-            return hexToBase64Url(match[1]);
-        } catch (_) {
-            return "";
-        }
-    }
-
-    async function fetchClearKeyFromLicenseServer(url, kid, headers) {
-        const licenseUrl = trimToString(url);
-        const drmKid = trimToString(kid);
-        if (!licenseUrl || !drmKid) return "";
+    async function expandHlsStreams(sourceLabel, parsed, drmInfo) {
+        if (!parsed || !parsed.url) return [];
+        const isHls = /\.m3u8(?:$|[?#])/i.test(parsed.url) || parsed.url.includes("/hls/");
+        if (!isHls) return [];
 
         try {
-            const response = await postJson(licenseUrl, {
-                kids: [drmKid],
-                type: "temporary"
-            }, mergeHeaders(headers || {}, {
-                "Content-Type": "application/json;charset=UTF-8"
-            }));
+            const response = await fetchText(parsed.url, drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {}));
+            if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) return [];
 
-            if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) return "";
-            const data = safeJsonParse(extractResponseBody(response));
-            const keys = data && Array.isArray(data.keys) ? data.keys : [];
-            const firstKey = keys.find((entry) => entry && (entry.k || entry.key));
-            return normalizeDrmToken(firstKey && (firstKey.k || firstKey.key));
+            const manifestText = trimToString(extractResponseBody(response));
+            if (!manifestText.startsWith("#EXTM3U") || !manifestText.includes("#EXT-X-STREAM-INF")) return [];
+
+            const manifestInfo = parseHlsMasterPlaylist(manifestText, parsed.url);
+            const variants = manifestInfo && Array.isArray(manifestInfo.variants) ? manifestInfo.variants : [];
+            const seen = {};
+            const streams = [];
+
+            variants.forEach((variant, index) => {
+                const playbackUrl = trimToString(variant.url);
+                if (!variant || !playbackUrl || seen[playbackUrl]) return;
+                seen[playbackUrl] = true;
+                const variantInfo = buildVariantSource(sourceLabel, variant.attributes || {}, index);
+                streams.push(createStreamResult(variantInfo.source, {
+                    url: playbackUrl,
+                    headers: drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {})
+                }, drmInfo, variantInfo.quality));
+            });
+            return streams;
         } catch (_) {
-            return "";
+            return [];
         }
-    }
-
-    async function resolveStreamDrm(rawApi, parsed, streamUrl, baseHeaders) {
-        if (!parsed || typeof parsed !== "object") {
-            return {
-                headers: mergeHeaders({}, baseHeaders || {}),
-                drmType: "",
-                drmKey: "",
-                drmKid: "",
-                licenseUrl: ""
-            };
-        }
-        
-        const streamHeaders = mergeHeaders({}, baseHeaders || {}, parsed && parsed.headers ? parsed.headers : {});
-        let drmScheme = normalizeDrmScheme(parsed && parsed.drmScheme);
-        let drmKey = normalizeDrmToken(parsed && parsed.key);
-        let drmKid = normalizeDrmToken(parsed && parsed.keyid);
-        let licenseUrl = trimToString(parsed && parsed.licenseUrl);
-
-        const rawValue = trimToString(rawApi);
-        if (rawValue) {
-            const parsedApi = splitUrlAndHeaders(rawValue);
-            Object.assign(streamHeaders, mergeHeaders(streamHeaders, parsedApi.headers || {}));
-            drmScheme = drmScheme || normalizeDrmScheme(parsedApi.drmScheme);
-            licenseUrl = licenseUrl || trimToString(parsedApi.licenseUrl || (/^https?:\/\//i.test(parsedApi.url) ? parsedApi.url : ""));
-            if (!drmKey || !drmKid) {
-                const pair = extractClearKeyPairFromValue(parsedApi.url);
-                if (pair) {
-                    drmKey = drmKey || pair.drmKey;
-                    drmKid = drmKid || pair.drmKid;
-                }
-            }
-        }
-
-        if ((!drmKey || !drmKid) && drmScheme === "clearkey" && licenseUrl && /\.mpd(?:$|[?#])/i.test(trimToString(streamUrl))) {
-            try {
-                const mpdKid = await extractDefaultKidFromMpd(streamUrl, streamHeaders);
-                if (mpdKid) {
-                    const fetchedKey = await fetchClearKeyFromLicenseServer(licenseUrl, mpdKid, streamHeaders);
-                    if (fetchedKey) {
-                        drmKid = mpdKid;
-                        drmKey = fetchedKey;
-                    }
-                }
-            } catch (error) {
-                console.error(`Failed to resolve DRM from stream URL ${streamUrl}: ${error && error.message ? error.message : String(error)}`);
-            }
-        }
-
-        return {
-            headers: streamHeaders,
-            drmType: drmKey && drmKid ? "clearkey" : (drmScheme || (licenseUrl ? "widevine" : "")),
-            drmKey,
-            drmKid,
-            licenseUrl
-        };
     }
 
     function createStreamResult(source, parsed, drmInfo, quality) {
         if (!parsed || typeof parsed !== "object") {
             throw new Error("Invalid parsed data for createStreamResult");
         }
-        
         const streamHeaders = mergeHeaders({}, drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {}));
         const stream = new StreamResult({
-            source,
+            source: source || "Auto",
             url: parsed.url,
             headers: streamHeaders
         });
@@ -1506,10 +1183,7 @@ function buildVariantPlaybackUrl(variant) {
     }
 
     function scoreStream(sourceLabel, parsed, rawApi, quality, isVariant) {
-        if (!parsed || typeof parsed !== "object") {
-            return 0;
-        }
-        
+        if (!parsed || typeof parsed !== "object") return 0;
         const url = trimToString(parsed && parsed.url);
         const headers = parsed && parsed.headers && typeof parsed.headers === "object" ? parsed.headers : {};
         const source = trimToString(sourceLabel).toLowerCase();
@@ -1541,10 +1215,6 @@ function buildVariantPlaybackUrl(variant) {
     }
 
     function createRankedStream(source, parsed, drmInfo, quality, order, isVariant) {
-        if (!parsed || typeof parsed !== "object") {
-            throw new Error("Invalid parsed data for createRankedStream");
-        }
-        
         return {
             score: scoreStream(source, {
                 url: parsed.url,
@@ -1555,77 +1225,9 @@ function buildVariantPlaybackUrl(variant) {
         };
     }
 
-    async function expandHlsStreams(sourceLabel, parsed, drmInfo) {
-        if (!parsed || !parsed.url || !shouldExpandHlsVariants(parsed.url)) return [];
-
-        try {
-            const response = await fetchText(parsed.url, drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {}));
-            if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) return [];
-
-            const manifestText = trimToString(extractResponseBody(response));
-            if (!manifestText.startsWith("#EXTM3U") || manifestText.indexOf("#EXT-X-STREAM-INF") === -1) return [];
-
-            const manifestInfo = parseHlsMasterPlaylist(manifestText, parsed.url);
-            const variants = manifestInfo && Array.isArray(manifestInfo.variants) ? manifestInfo.variants : [];
-            const seen = {};
-            const streams = [];
-
-            variants.forEach((variant, index) => {
-                const playbackUrl = buildVariantPlaybackUrl(variant);
-                if (!variant || !variant.url || !playbackUrl || seen[playbackUrl]) return;
-                seen[playbackUrl] = true;
-                const variantInfo = buildVariantSource(sourceLabel, variant.attributes || {}, index, false);
-                streams.push(createStreamResult(variantInfo.source, {
-                    url: playbackUrl,
-                    headers: drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {})
-                }, drmInfo, variantInfo.quality));
-            });
-
-            return streams;
-        } catch (error) {
-            console.error(`Failed to expand HLS streams from ${parsed.url}: ${error && error.message ? error.message : String(error)}`);
-            return [];
-        }
-    }
-
-    async function expandMpdStreams(sourceLabel, parsed, drmInfo) {
-        if (!parsed || !parsed.url || !/\.mpd(?:$|[?#])/i.test(trimToString(parsed.url))) return [];
-
-        try {
-            const response = await fetchText(parsed.url, drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {}));
-            if (extractResponseStatus(response) < 200 || extractResponseStatus(response) >= 300) return [];
-
-            const manifestText = trimToString(extractResponseBody(response));
-            if (!manifestText.startsWith("<?xml") || !manifestText.includes("<MPD")) return [];
-
-            const manifestInfo = parseMpdMasterPlaylist(manifestText, parsed.url);
-            const variants = manifestInfo && Array.isArray(manifestInfo.variants) ? manifestInfo.variants : [];
-            const seen = {};
-            const streams = [];
-
-            variants.forEach((variant, index) => {
-                const playbackUrl = buildVariantPlaybackUrl(variant);
-                if (!variant || !variant.url || !playbackUrl || seen[playbackUrl]) return;
-                seen[playbackUrl] = true;
-                const variantInfo = buildVariantSource(sourceLabel, variant.attributes || {}, index, true);
-                streams.push(createStreamResult(variantInfo.source, {
-                    url: playbackUrl,
-                    headers: drmInfo && drmInfo.headers ? drmInfo.headers : (parsed.headers || {})
-                }, drmInfo, variantInfo.quality));
-            });
-
-            return streams;
-        } catch (error) {
-            console.error(`Failed to expand MPD streams from ${parsed.url}: ${error && error.message ? error.message : String(error)}`);
-            return [];
-        }
-    }
-
     async function buildResolvedStream(entry) {
-        if (!entry || typeof entry !== "object") {
-            return null;
-        }
-        
+        if (!entry || typeof entry !== "object") return null;
+
         const tokenResolved = await resolveTokenizedStream(entry);
         if (tokenResolved && tokenResolved.url) {
             const parsedToken = splitUrlAndHeaders(tokenResolved.url);
@@ -1644,216 +1246,62 @@ function buildVariantPlaybackUrl(variant) {
         return parsed;
     }
 
-    function parseMpdMasterPlaylist(manifestText, manifestUrl) {
-        const info = {
-            variants: [],
-            version: "",
-            independentSegments: false,
-            mediaGroups: {
-                AUDIO: {},
-                SUBTITLES: {},
-                "CLOSED-CAPTIONS": {}
-            }
-        };
-        const lines = String(manifestText || "").split(/\r?\n/);
-        let currentAdaptationSet = null;
-        let currentRepresentation = null;
-
-        lines.forEach((rawLine) => {
-            const line = trimToString(rawLine);
-            if (!line) return;
-
-            if (line.includes("<AdaptationSet")) {
-                const adaptationSetMatch = line.match(/id="?(\d+)?"?/);
-                currentAdaptationSet = {
-                    id: adaptationSetMatch ? adaptationSetMatch[1] : null,
-                    mimeType: null,
-                    codecs: null,
-                    bandwidth: null,
-                    width: null,
-                    height: null,
-                    frameRate: null,
-                    audioSamplingRate: null,
-                    startWithSAP: null
-                };
-
-                const mimeTypeMatch = line.match(/mimeType="([^"]*)"/);
-                if (mimeTypeMatch) currentAdaptationSet.mimeType = mimeTypeMatch[1];
-
-                const codecsMatch = line.match(/codecs="([^"]*)"/);
-                if (codecsMatch) currentAdaptationSet.codecs = codecsMatch[1];
-
-                const bandwidthMatch = line.match(/bandwidth="?(\d+)?"?/);
-                if (bandwidthMatch) currentAdaptationSet.bandwidth = bandwidthMatch[1] ? parseInt(bandwidthMatch[1]) : null;
-
-                const widthMatch = line.match(/width="?(\d+)?"?/);
-                if (widthMatch) currentAdaptationSet.width = widthMatch[1] ? parseInt(widthMatch[1]) : null;
-
-                const heightMatch = line.match(/height="?(\d+)?"?/);
-                if (heightMatch) currentAdaptationSet.height = heightMatch[1] ? parseInt(heightMatch[1]) : null;
-
-                const frameRateMatch = line.match(/frameRate="([^"]*)"/);
-                if (frameRateMatch) currentAdaptationSet.frameRate = frameRateMatch[1];
-
-                const audioSamplingRateMatch = line.match(/audioSamplingRate="([^"]*)"/);
-                if (audioSamplingRateMatch) currentAdaptationSet.audioSamplingRate = audioSamplingRateMatch[1];
-
-                const startWithSAPMatch = line.match(/startWithSAP="?(\d+)?"?/);
-                if (startWithSAPMatch) currentAdaptationSet.startWithSAP = startWithSAPMatch[1] ? parseInt(startWithSAPMatch[1]) : null;
-            } else if (line.includes("<Representation")) {
-                currentRepresentation = {
-                    id: null,
-                    bandwidth: null,
-                    width: null,
-                    height: null,
-                    frameRate: null,
-                    audioSamplingRate: null,
-                    codecs: null,
-                    mimeType: null
-                };
-
-                const idMatch = line.match(/id="?(\d+)?"?/);
-                if (idMatch) currentRepresentation.id = idMatch[1] ? parseInt(idMatch[1]) : null;
-
-                const bandwidthMatch = line.match(/bandwidth="?(\d+)?"?/);
-                if (bandwidthMatch) currentRepresentation.bandwidth = bandwidthMatch[1] ? parseInt(bandwidthMatch[1]) : null;
-
-                const widthMatch = line.match(/width="?(\d+)?"?/);
-                if (widthMatch) currentRepresentation.width = widthMatch[1] ? parseInt(widthMatch[1]) : null;
-
-                const heightMatch = line.match(/height="?(\d+)?"?/);
-                if (heightMatch) currentRepresentation.height = heightMatch[1] ? parseInt(heightMatch[1]) : null;
-
-                const frameRateMatch = line.match(/frameRate="([^"]*)"/);
-                if (frameRateMatch) currentRepresentation.frameRate = frameRateMatch[1];
-
-                const audioSamplingRateMatch = line.match(/audioSamplingRate="([^"]*)"/);
-                if (audioSamplingRateMatch) currentRepresentation.audioSamplingRate = audioSamplingRateMatch[1];
-
-                const codecsMatch = line.match(/codecs="([^"]*)"/);
-                if (codecsMatch) currentRepresentation.codecs = codecsMatch[1];
-
-                const mimeTypeMatch = line.match(/mimeType="([^"]*)"/);
-                if (mimeTypeMatch) currentRepresentation.mimeType = mimeTypeMatch[1];
-
-                if (currentAdaptationSet) {
-                    currentAdaptationSet.representations = currentAdaptationSet.representations || [];
-                    currentAdaptationSet.representations.push(currentRepresentation);
-                }
-            } else if (line.includes("</Representation>")) {
-                currentRepresentation = null;
-            } else if (line.includes("</AdaptationSet>")) {
-                if (currentAdaptationSet && currentAdaptationSet.representations && currentAdaptationSet.representations.length > 0) {
-                    const baseUrl = manifestUrl;
-                    currentAdaptationSet.representations.forEach((representation, repIndex) => {
-                        const quality = parseMpdRepresentationQuality(representation);
-                        const source = buildMpdVariantSource("Stream", representation, currentAdaptationSet, repIndex);
-                        const playbackUrl = buildMpdVariantPlaybackUrl(representation, baseUrl);
-
-                        if (playbackUrl) {
-                            info.variants.push({
-                                url: playbackUrl,
-                                attributes: {
-                                    BANDWIDTH: representation.bandwidth,
-                                    RESOLUTION: representation.width && representation.height ? `${representation.width}x${representation.height}` : null,
-                                    FRAME_RATE: representation.frameRate,
-                                    AUDIO_SAMPLING_RATE: representation.audioSamplingRate,
-                                    CODECS: representation.codecs,
-                                    MIME_TYPE: representation.mimeType
-                                }
-                            });
-                        }
-                    });
-                }
-                currentAdaptationSet = null;
-            }
-        });
-
-        return info;
-    }
-
-    function buildMpdVariantSource(baseSource, representation, adaptationSet, index) {
-        const quality = parseMpdRepresentationQuality(representation);
-        if (quality > 0) {
+    async function resolveStreamDrm(rawApi, parsed, streamUrl, baseHeaders) {
+        if (!parsed || typeof parsed !== "object") {
             return {
-                quality,
-                source: `${baseSource} ${quality}p`
+                headers: mergeHeaders({}, baseHeaders || {}),
+                drmType: "",
+                drmKey: "",
+                drmKid: "",
+                licenseUrl: ""
             };
         }
 
-        const bandwidth = representation.bandwidth;
-        if (bandwidth > 0) {
-            return {
-                quality: 0,
-                source: `${baseSource} ${Math.max(1, Math.round(bandwidth / 1000))}kbps`
-            };
+        const streamHeaders = mergeHeaders({}, baseHeaders || {}, parsed && parsed.headers ? parsed.headers : {});
+        let drmScheme = normalizeDrmScheme(parsed && parsed.drmScheme);
+        let drmKey = normalizeDrmToken(parsed && parsed.key);
+        let drmKid = normalizeDrmToken(parsed && parsed.keyid);
+        let licenseUrl = trimToString(parsed && parsed.licenseUrl);
+
+        const rawValue = trimToString(rawApi);
+        if (rawValue) {
+            if (rawValue.includes(":")) {
+                const parts = rawValue.split(":");
+                if (parts.length === 2) {
+                    drmKid = normalizeDrmToken(parts[0]);
+                    drmKey = normalizeDrmToken(parts[1]);
+                    drmScheme = "clearkey";
+                }
+            } else if (/^https?:\/\//i.test(rawValue)) {
+                licenseUrl = rawValue;
+                drmScheme = "widevine";
+            }
         }
 
         return {
-            quality: 0,
-            source: `${baseSource} Variant ${index + 1}`
+            headers: streamHeaders,
+            drmType: drmKey && drmKid ? "clearkey" : (drmScheme || (licenseUrl ? "widevine" : "")),
+            drmKey,
+            drmKid,
+            licenseUrl
         };
     }
 
-    function buildMpdVariantPlaybackUrl(representation, baseUrl) {
-        if (!representation || typeof representation !== "object") {
-            return "";
-        }
-
-        const segmentBase = representation.id ? `RepresentationID=${representation.id}` : "";
-        const baseURL = representation.baseURL || baseUrl;
-        const quality = representation.bandwidth ? `quality=${representation.bandwidth}` : "";
-
-        let playbackUrl = baseURL;
-        if (segmentBase) playbackUrl += `?${segmentBase}`;
-        if (quality) playbackUrl += (playbackUrl.includes("?") ? "&" : "?") + quality;
-
-        return playbackUrl;
-    }
-
-    function parseMpdRepresentationQuality(representation) {
-        if (!representation || typeof representation !== "object") {
-            return 0;
-        }
-
-        const resolution = representation.height;
-        if (resolution && resolution > 0) {
-            if (resolution >= 4320) return 8160;
-            if (resolution >= 2160) return 4320;
-            if (resolution >= 1080) return 1080;
-            if (resolution >= 720) return 720;
-            if (resolution >= 480) return 480;
-            if (resolution >= 360) return 360;
-            if (resolution >= 240) return 240;
-            if (resolution >= 144) return 144;
-        }
-
-        const bandwidth = representation.bandwidth;
-        if (bandwidth && bandwidth > 0) {
-            if (bandwidth >= 20000000) return 8160;
-            if (bandwidth >= 10000000) return 4320;
-            if (bandwidth >= 5000000) return 1080;
-            if (bandwidth >= 3000000) return 720;
-            if (bandwidth >= 1500000) return 480;
-            if (bandwidth >= 800000) return 360;
-            if (bandwidth >= 400000) return 240;
-            if (bandwidth >= 200000) return 144;
-        }
-
-        return 0;
-    }
-
     async function processStreamEntry(entry, index) {
-        if (!entry || typeof entry !== "object") {
-            console.error(`Invalid stream entry at index ${index}`);
-            return [];
-        }
-        
+        if (!entry || typeof entry !== "object") return [];
         const resolved = await buildResolvedStream(entry);
         if (!resolved || !resolved.url) return [];
 
         const rawApi = trimToString(entry && entry.api);
         const sourceLabel = trimToString(entry && entry.name) || `Server ${index + 1}`;
+
+        // Ensure default User-Agent for m3u/m3u8 if not present
+        if (/\.m3u(?:8)?(?:$|[?#])/i.test(resolved.url) && (!resolved.headers || !resolved.headers["User-Agent"])) {
+            resolved.headers = mergeHeaders(resolved.headers || {}, {
+                "User-Agent": "Mozilla/5.0 (Linux; Android 10; Pixel 3 XL) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+            });
+        }
+
         const drmInfo = await resolveStreamDrm(rawApi, resolved, resolved.url, resolved.headers || {});
         const rankedStreams = [
             createRankedStream(sourceLabel, resolved, drmInfo, 0, index * 100, false)
@@ -1874,43 +1322,16 @@ function buildVariantPlaybackUrl(variant) {
                     true
                 ));
             });
-        } catch (error) {
-            console.error(`Failed to expand HLS streams for entry at index ${index}: ${error && error.message ? error.message : String(error)}`);
-        }
-
-        try {
-            const variants = await expandMpdStreams(sourceLabel, resolved, drmInfo);
-            variants.forEach((variant, variantIndex) => {
-                rankedStreams.push(createRankedStream(
-                    trimToString(variant && variant.source) || sourceLabel,
-                    {
-                        url: trimToString(variant && variant.url),
-                        headers: variant && variant.headers ? variant.headers : (drmInfo.headers || resolved.headers || {})
-                    },
-                    drmInfo,
-                    typeof (variant && variant.quality) === "number" ? variant.quality : 0,
-                    (index * 100) + variantIndex + 1,
-                    true
-                ));
-            });
-        } catch (error) {
-            console.error(`Failed to expand MPD streams for entry at index ${index}: ${error && error.message ? error.message : String(error)}`);
-        }
+        } catch (_) {}
 
         return rankedStreams;
     }
 
     async function getHome(cb) {
-        if (typeof cb !== "function") {
-            throw new Error("Callback function is required");
-        }
-        
-        try {
-            const [events, categoryMeta] = await Promise.all([
-                fetchPlayzEvents(),
-                fetchPlayzCategories()
-            ]);
+        if (typeof cb !== "function") throw new Error("Callback function is required");
 
+        try {
+            const events = await fetchPlayzEvents();
             if (!events || !Array.isArray(events)) {
                 return cb({
                     success: false,
@@ -1927,26 +1348,35 @@ function buildVariantPlaybackUrl(variant) {
                 });
             }
 
-            const orderedLabels = [];
-            Object.keys(categoryMeta || {}).forEach((name) => {
-                const label = getCategoryLabel(name);
-                if (!orderedLabels.includes(label)) orderedLabels.push(label);
-            });
-
+            const categoryOrder = ["Cricket", "Football", "Basketball", "Motorsport", "Tennis", "Boxing"];
             const categories = {};
+
             events.forEach((event) => {
                 if (!event || typeof event !== "object") return;
-                
-                const label = getCategoryLabel(event.category);
-                if (!orderedLabels.includes(label)) orderedLabels.push(label);
-                if (!categories[label]) categories[label] = [];
-                categories[label].push(buildHomeItem(event));
+                const sectionTitle = getCategorySectionTitle(event.category);
+                if (!categories[sectionTitle]) {
+                    categories[sectionTitle] = [];
+                }
+                categories[sectionTitle].push(buildHomeItem(event));
             });
 
             const orderedCategories = {};
-            orderedLabels.forEach((label) => {
-                if (categories[label] && categories[label].length) {
-                    orderedCategories[label] = categories[label];
+            const sectionKeys = Object.keys(categories);
+
+            sectionKeys.sort((left, right) => {
+                const leftClean = left.replace(/^[^\w\s]+\s*/, "");
+                const rightClean = right.replace(/^[^\w\s]+\s*/, "");
+                let leftIdx = categoryOrder.findIndex(c => leftClean.toLowerCase().includes(c.toLowerCase()));
+                let rightIdx = categoryOrder.findIndex(c => rightClean.toLowerCase().includes(c.toLowerCase()));
+                if (leftIdx === -1) leftIdx = 99;
+                if (rightIdx === -1) rightIdx = 99;
+                if (leftIdx !== rightIdx) return leftIdx - rightIdx;
+                return left.localeCompare(right);
+            });
+
+            sectionKeys.forEach((key) => {
+                if (categories[key] && categories[key].length) {
+                    orderedCategories[key] = categories[key];
                 }
             });
 
@@ -1962,22 +1392,17 @@ function buildVariantPlaybackUrl(variant) {
     }
 
     async function search(query, cb) {
-        if (typeof cb !== "function") {
-            throw new Error("Callback function is required");
-        }
-        
+        if (typeof cb !== "function") throw new Error("Callback function is required");
+
         try {
             const events = await fetchPlayzEvents();
-            if (!events || !Array.isArray(events)) {
+            if (!events || !Array.isArray(events) || !events.length) {
                 return cb({ success: true, data: [] });
             }
-            
-            if (!events.length) return cb({ success: true, data: [] });
 
             const loweredQuery = trimToString(query).toLowerCase();
             const results = events.filter((event) => {
                 if (!event || typeof event !== "object") return false;
-                
                 const haystack = [
                     event.category,
                     event.eventName,
@@ -1998,23 +1423,25 @@ function buildVariantPlaybackUrl(variant) {
         if (!urlStr || typeof urlStr !== "string") {
             return cb({ success: false, errorCode: "INVALID_INPUT", message: "Invalid URL string" });
         }
-        
+
         try {
-            const data = JSON.parse(urlStr);
+            const data = typeof urlStr === "object" ? urlStr : JSON.parse(urlStr);
             if (!data || typeof data !== "object") {
                 throw new Error("Invalid event data format");
             }
-            
+
             const plotParts = [
-                trimToString(data.eventName) ? `Event: ${data.eventName}` : "",
-                trimToString(data.date) && trimToString(data.time) ? `Time: ${data.date} ${data.time} UTC` : ""
+                trimToString(data.category) ? `📌 Category: ${data.category}` : "",
+                trimToString(data.eventName) ? `🏆 Event: ${data.eventName}` : "",
+                trimToString(data.date) ? `🕐 Time: ${data.date} ${trimToString(data.time)} UTC` : "",
+                data.linkNames && data.linkNames.length ? `📡 Servers: ${data.linkNames.length} available` : ""
             ].filter(Boolean);
 
             Analytics.logEvent('playeztvliveevents_load', {});
             cb({
                 success: true,
                 data: new MultimediaItem({
-                    title: data.title,
+                    title: data.title || "Live Event",
                     url: urlStr,
                     posterUrl: data.poster,
                     description: plotParts.join("\n"),
@@ -2031,7 +1458,7 @@ function buildVariantPlaybackUrl(variant) {
                 })
             });
         } catch (error) {
-            cb({ success: false, errorCode: "PARSE_ERROR", message: "Invalid event data" });
+            cb({ success: false, errorCode: "PARSE_ERROR", message: "Invalid event data: " + (error && error.message ? error.message : String(error)) });
         }
     }
 
@@ -2039,19 +1466,22 @@ function buildVariantPlaybackUrl(variant) {
         if (!urlStr || typeof urlStr !== "string") {
             return cb({ success: false, errorCode: "INVALID_INPUT", message: "Invalid URL string" });
         }
-        
+
         try {
-            const data = JSON.parse(urlStr);
+            const data = typeof urlStr === "object" ? urlStr : JSON.parse(urlStr);
             if (!data || typeof data !== "object") {
                 throw new Error("Invalid event data format");
             }
-            
-            const linksPath = trimToString(data && data.linksPath);
-            if (!linksPath) {
+
+            const slug = trimToString(data.slug);
+            const linksPath = trimToString(data.linksPath);
+            const targetPath = slug ? `${slug}.txt` : linksPath;
+
+            if (!targetPath) {
                 return cb({ success: false, errorCode: "PARSE_ERROR", message: "Missing PlayZTV links path" });
             }
 
-            const response = await fetchPlayzJson(linksPath);
+            const response = await fetchPlayzJson(targetPath);
             if (!Array.isArray(response) || !response.length) {
                 return cb({ success: false, errorCode: "EMPTY_RESULT", message: "No streams found for this event" });
             }
