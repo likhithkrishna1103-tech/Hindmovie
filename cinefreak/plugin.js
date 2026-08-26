@@ -86,25 +86,13 @@
     var MAIN_PAGE_SECTIONS = [
         { path: "", title: "Home" },
         { path: "hindi-movies", title: "Hindi Movies" },
-        { path: "hindi-dubbed-movies", title: "Hindi Dubbed" },
+        { path: "hindi-dubbed-movies", title: "Hindi Dubbed Movies" },
         { path: "english-movies", title: "English Movies" },
         { path: "dual-audio", title: "Dual Audio" },
-        { path: "web-series", title: "Web Series" },
-        { path: "korean", title: "Korean" },
-        { path: "k-drama", title: "K-Drama" },
-        { path: "tamil", title: "Tamil" },
-        { path: "telugu", title: "Telugu" },
-        { path: "malayalam", title: "Malayalam" },
-        { path: "kannada", title: "Kannada" },
         { path: "bangla-movies", title: "Bangla Movies" },
         { path: "bangla-dubbed", title: "Bangla Dubbed" },
+        { path: "k-drama", title: "K-Drama" },
         { path: "animation", title: "Animation" },
-        { path: "chinese", title: "Chinese" },
-        { path: "japanese", title: "Japanese" },
-        { path: "indonesian", title: "Indonesian" },
-        { path: "spanish", title: "Spanish" },
-        { path: "horror", title: "Horror" },
-        { path: "mcu", title: "MCU" },
         { path: "others", title: "Others" }
     ];
 
@@ -319,6 +307,21 @@
         return "movie";
     }
 
+    function cleanTitle(raw) {
+        if (!raw) return "";
+        var beforeParen = String(raw).split("(")[0];
+        var cleaned = trim(beforeParen.replace(/\s+/g, " "));
+        var name = cleaned ? (cleaned.charAt(0).toUpperCase() + cleaned.slice(1)) : cleaned;
+        var seasonMatch = String(raw).match(/Season\s*(\d+)/i);
+        var season = seasonMatch ? ("Season " + seasonMatch[1]) : "";
+        var yearMatch = String(raw).match(/\b(19|20)\d{2}\b/);
+        var year = yearMatch ? yearMatch[0] : "";
+        var parts = [];
+        if (season) parts.push(season);
+        if (year) parts.push(year);
+        return parts.length ? (name + " (" + parts.join(") (") + ")") : name;
+    }
+
     function normalizeTitle(text) {
         return trim(String(text || "").toLowerCase()
             .replace(/&/g, " and ")
@@ -485,8 +488,8 @@
 
     function defaultHeaders(extra) {
         return Object.assign({
-            "Cookie": "xla=s4t; ext_name=ojplmecpdpgccookcobabopnaifgidhf; cf_clearance=t8e4FnYNVLq5mnSM3STcq978u7YyAaAb_WiqmVmXkcI-1773985249-1.2.1.1-Sg.2ExY1ScnsVHPQ0nj5jSQ7aKuFzBaPOPn8WRH5i0JYxUTrGXNrowzFsl36zUeK9irU7RqVsRTLF9DoM25Rz1tyFLiGaVK6WlxZLkOyr0_xyAduok9mNr3ilfnSXx1FT6.g9jo4m2cAKY.AFbvLZ8AB.8VgL0Wv4BTn5EBGcKQo4s.grQTQ.Bd58bFWF0CQRYgxD0O2PrfIoveenO8wCQMqQ_R9h22MKBQdBqqLCgk",
-            "User-Agent": "Mozilla/5.0"
+            "Cookie": "xla=s4t",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
         }, extra || {});
     }
 
@@ -687,36 +690,45 @@
     function parseHomeCards(html, base) {
         var source = String(html || "");
         var out = [];
-        var anchorRegex = /<a\b[^>]*class=["'][^"']*movie-card[^"']*["'][^>]*>/gi;
+
+        // Match card-grid a anchors (from Cinefreak .cs3)
+        var cardAnchorRegex = /<div\b[^>]*class=["'][^"']*card-grid[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi;
+        var gridMatch = cardAnchorRegex.exec(source);
+        var searchScope = gridMatch ? gridMatch[1] : source;
+
+        var anchorRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
         var match;
-        while ((match = anchorRegex.exec(source))) {
-            var openTag = match[0];
-            var hrefMatch = openTag.match(/href=["']([^"']+)["']/i);
-            if (!hrefMatch) continue;
-            var href = absoluteUrl(base, decodeHtmlEntities(hrefMatch[1]));
+        while ((match = anchorRegex.exec(searchScope))) {
+            var href = absoluteUrl(base, decodeHtmlEntities(match[1]));
             if (!/^https?:\/\//i.test(href)) continue;
+            var inner = match[2];
 
-            var ariaMatch = openTag.match(/aria-label=["']([^"']*)["']/i);
-            var title = trim(decodeHtmlEntities(ariaMatch ? ariaMatch[1] : "").replace(/ details$/, "").split(/\s*\(\d{4}\)/)[0]);
-            // Fallback to img alt if aria-label missing
-            if (!title) {
-                var altMatch = source.slice(match.index, match.index + 4000).match(/<img\b[^>]*alt=["']([^"']+)["']/i);
-                title = trim(decodeHtmlEntities(altMatch ? altMatch[1] : "").split(/\s*\(\d{4}\)/)[0]);
+            var h3Match = inner.match(/<h3\b[^>]*>([\s\S]*?)<\/h3>/i);
+            var titleRaw = h3Match ? stripTags(h3Match[1]) : "";
+            if (!titleRaw) {
+                var ariaMatch = match[0].match(/aria-label=["']([^"']*)["']/i);
+                titleRaw = ariaMatch ? ariaMatch[1] : "";
             }
-            if (!title) continue;
+            if (!titleRaw) {
+                var altMatch = inner.match(/<img\b[^>]*alt=["']([^"']+)["']/i);
+                titleRaw = altMatch ? altMatch[1] : "";
+            }
+            if (!titleRaw) continue;
+            var title = cleanTitle(titleRaw);
 
-            // Poster: nearest <img src> after this anchor
-            var after = source.slice(match.index, match.index + 6000);
-            var imgMatch = after.match(/<img\b[^>]*src=["']([^"']+)["']/i);
+            var imgMatch = inner.match(/<img\b[^>]*data-lazy-src=["']([^"']+)["']/i) || inner.match(/<img\b[^>]*src=["']([^"']+)["']/i);
             var poster = imgMatch ? absoluteUrl(base, decodeHtmlEntities(imgMatch[1])) : "";
             poster = poster.replace(/\/w185\//i, "/w500/");
 
-            // Quality: first quality-badges span text
-            var qBlock = after.match(/class=["'][^"']*quality-badges[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
-            var quality = qBlock ? trim(stripTags(qBlock[1]).replace(/\s+/g, " ")) : "";
-            if (!quality) quality = getSearchQuality(title) || "";
+            var ratingMatch = inner.match(/class=["'][^"']*rating[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+            var ratingText = ratingMatch ? trim(stripTags(ratingMatch[1])) : "";
+            var ratingNum = ratingText ? Number(ratingText.replace(/[^0-9.]/g, "")) : undefined;
 
-            var isSeries = /season|series|episode|full-series-download|web-series|animated-series/i.test(href + " " + title);
+            var qMatch = inner.match(/class=["'][^"']*quality-badges[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+            var qText = qMatch ? trim(stripTags(qMatch[1])) : "";
+            var quality = qText ? (getSearchQuality(qText) || qText) : (getSearchQuality(titleRaw) || "");
+
+            var isSeries = /season|series|episode|full-series-download|web-series|animated-series|s0\d/i.test(href + " " + titleRaw);
             var type = isSeries ? "series" : "movie";
 
             out.push(new MultimediaItem({
@@ -724,11 +736,53 @@
                 url: href,
                 posterUrl: poster,
                 type: type,
+                rating: ratingNum,
                 quality: quality || undefined,
                 headers: defaultHeaders({ "Referer": base + "/" })
             }));
         }
-        return out;
+
+        if (!out.length) {
+            // Fallback for standalone movie-card anchors
+            var mcRegex = /<a\b[^>]*class=["'][^"']*movie-card[^"']*["'][^>]*>/gi;
+            while ((match = mcRegex.exec(source))) {
+                var openTag = match[0];
+                var hrefMatch = openTag.match(/href=["']([^"']+)["']/i);
+                if (!hrefMatch) continue;
+                var href2 = absoluteUrl(base, decodeHtmlEntities(hrefMatch[1]));
+                if (!/^https?:\/\//i.test(href2)) continue;
+
+                var ariaMatch2 = openTag.match(/aria-label=["']([^"']*)["']/i);
+                var rawTitle = trim(decodeHtmlEntities(ariaMatch2 ? ariaMatch2[1] : "").replace(/ details$/, "").split(/\s*\(\d{4}\)/)[0]);
+                if (!rawTitle) {
+                    var altMatch2 = source.slice(match.index, match.index + 4000).match(/<img\b[^>]*alt=["']([^"']+)["']/i);
+                    rawTitle = trim(decodeHtmlEntities(altMatch2 ? altMatch2[1] : "").split(/\s*\(\d{4}\)/)[0]);
+                }
+                if (!rawTitle) continue;
+
+                var after = source.slice(match.index, match.index + 6000);
+                var imgMatch2 = after.match(/<img\b[^>]*src=["']([^"']+)["']/i);
+                var poster2 = imgMatch2 ? absoluteUrl(base, decodeHtmlEntities(imgMatch2[1])) : "";
+                poster2 = poster2.replace(/\/w185\//i, "/w500/");
+
+                var qBlock = after.match(/class=["'][^"']*quality-badges[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+                var qText2 = qBlock ? trim(stripTags(qBlock[1]).replace(/\s+/g, " ")) : "";
+                var quality2 = qText2 ? (getSearchQuality(qText2) || qText2) : (getSearchQuality(rawTitle) || "");
+
+                var isSeries2 = /season|series|episode|full-series-download|web-series|animated-series/i.test(href2 + " " + rawTitle);
+                var type2 = isSeries2 ? "series" : "movie";
+
+                out.push(new MultimediaItem({
+                    title: cleanTitle(rawTitle),
+                    url: href2,
+                    posterUrl: poster2,
+                    type: type2,
+                    quality: quality2 || undefined,
+                    headers: defaultHeaders({ "Referer": base + "/" })
+                }));
+            }
+        }
+        return uniqueBy(out, function (item) { return item.url; });
     }
 
     function parseSearchResultsKotlin(html, base) {
@@ -1894,55 +1948,156 @@
         });
     }
 
-    function resolveNeoDriveCinecloud(url, refererLabel) {
-        var ref = refererLabel || "Cinecloud";
-        // CloudStream's CineCloud extractor: GET the file page, parse ALL <a[href]>,
-        // match server links by their TEXT label, and for "Cloud [Resumable]" follow
-        // the sub-page and grab a.download-now[href].
-        var headers = defaultHeaders({ "Referer": "https://cinefreak.nl/" });
+    function resolveNeoDrive(url, refererLabel) {
+        var ref = refererLabel || "Neodrive";
+        var headers = defaultHeaders({ "Referer": baseOrigin(url) + "/" });
         return getText(url, headers).then(function (html) {
-            var anchors = parseAnchors(html, baseOrigin(url));
+            var quality = getQualityFromText(firstMatch(html, [/<div\b[^>]*class=["'][^"']*mb-8[^"']*["'][^>]*>\s*<h2\b[^>]*>([\s\S]*?)<\/h2>/i])) || getQualityFromText(url);
+            var sizeMatch = html.match(/class=["'][^"']*info-label[^"']*["'][^>]*>\s*File Size\s*<\/td>\s*<td\b[^>]*class=["'][^"']*info-value[^"']*["'][^>]*>([\s\S]*?)<\/td>/i)
+                || html.match(/File Size[\s\S]*?<td\b[^>]*>([\s\S]*?)<\/td>/i);
+            var fileSize = sizeMatch ? trim(stripTags(sizeMatch[1])) : "";
+            var sizeSuffix = fileSize ? (" " + fileSize) : "";
+
+            var gridMatch = html.match(/<div\b[^>]*class=["'][^"']*grid[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*<\/div>/i);
+            var scope = gridMatch ? gridMatch[1] : html;
+            var anchors = parseAnchors(scope, baseOrigin(url));
             var results = [];
             var pending = [];
+
             for (var i = 0; i < anchors.length; i++) {
                 var a = anchors[i];
-                var href = a.href;
                 var text = trim(a.text);
+                var href = a.href;
                 if (!href || !/^https?:\/\//i.test(href)) continue;
-                var lower = (text + " " + href).toLowerCase();
-                if (/fast cloud|\[fsl\]/i.test(text)) {
-                    // FSL server — direct link
-                    var fslQuality = getQualityFromText(text + " " + href) || getQualityFromText(url);
-                    results.push(buildStreamResult(href, buildSourceLabel(ref + " [FSL]", text + " " + href), headers, fslQuality));
-                } else if (/cloud \[resumable\]/i.test(text)) {
-                    // Resumable server — fetch /d/<id> sub-page, then grab the real file link:
-                    // it's the "Download Now!" anchor whose href is the R2/S3 pre-signed URL
-                    // (cloudflarestorage), or a "/w/<id>" instant-download link.
-                    pending.push(getText(href, headers).then(function (subHtml) {
-                        var dl = parseAnchors(subHtml, baseOrigin(href));
-                        var picks = dl.filter(function (x) {
-                            return /cloudflarestorage|\.r2\.|download-now|download now|\/w\//i.test(x.href + " " + x.text);
+
+                if (/fsl/i.test(text)) {
+                    results.push(buildStreamResult(href, ref + " [FSL]" + sizeSuffix, headers, quality));
+                } else if (/cloud download/i.test(text)) {
+                    pending.push(getText(href, defaultHeaders({ "Referer": baseOrigin(url) + "/" })).then(function (subHtml) {
+                        var dlMatch = subHtml.match(/const\s+downloadUrl\s*=\s*["']([^"']+)["']/i);
+                        if (dlMatch && dlMatch[1]) {
+                            return [buildStreamResult(dlMatch[1], ref + " [Cloud]" + sizeSuffix, headers, quality)];
+                        }
+                        var subAnchors = parseAnchors(subHtml, baseOrigin(href)).filter(function (x) {
+                            return /download|direct|\.mp4|\.mkv/i.test(x.href + " " + x.text);
                         });
-                        if (!picks.length) picks = dl;
-                        return picks.map(function (x) {
-                            var rq = getQualityFromText(x.text + " " + x.href) || getQualityFromText(url);
-                            return buildStreamResult(x.href, buildSourceLabel(ref + " [ResumeCloud]", x.text + " " + x.href), headers, rq);
+                        return subAnchors.map(function (x) {
+                            return buildStreamResult(x.href, ref + " [Cloud]" + sizeSuffix, headers, quality);
                         });
                     }).catch(function () { return []; }));
                 }
             }
+
             return Promise.all(pending).then(function (subs) {
                 for (var s = 0; s < subs.length; s++) {
                     for (var r = 0; r < subs[s].length; r++) results.push(subs[s][r]);
                 }
                 if (!results.length) {
-                    // No recognised server link (file may be expired/404) — return page as last resort
-                    return [buildStreamResult(url, buildSourceLabel(ref, url), headers, getQualityFromText(url))];
+                    return [buildStreamResult(url, ref, headers, quality)];
                 }
-                return uniqueBy(results, function (item) { return item.url + "|" + (item.source || ""); });
+                return uniqueBy(results, function (item) { return item.url; });
             });
         }).catch(function () {
-            return [buildStreamResult(url, buildSourceLabel(ref, url), headers, getQualityFromText(url))];
+            return [buildStreamResult(url, ref, headers, getQualityFromText(url))];
+        });
+    }
+
+    function resolveCinecloud(url, refererLabel) {
+        var ref = refererLabel || "CineCloud";
+        var headers = defaultHeaders({ "Referer": baseOrigin(url) + "/" });
+        return getText(url, headers).then(function (html) {
+            var sizeMatch = html.match(/<tr\b[^>]*>[\s\S]*?File Size[\s\S]*?<td\b[^>]*class=["'][^"']*text-right[^"']*["'][^>]*>([\s\S]*?)<\/td>/i);
+            var fileSize = sizeMatch ? trim(stripTags(sizeMatch[1])) : "";
+            var sizeSuffix = fileSize ? (" " + fileSize) : "";
+
+            var anchors = parseAnchors(html, baseOrigin(url));
+            var results = [];
+            var pending = [];
+
+            for (var i = 0; i < anchors.length; i++) {
+                var a = anchors[i];
+                var href = a.href;
+                var text = trim(a.text);
+                if (!href || !/^https?:\/\//i.test(href)) continue;
+
+                if (/fast cloud|\[fsl\]/i.test(text)) {
+                    var fslQuality = getQualityFromText(text + " " + href) || getQualityFromText(url);
+                    results.push(buildStreamResult(href, ref + " [FSL]" + sizeSuffix, headers, fslQuality));
+                } else if (/cloud \[resumable\]/i.test(text)) {
+                    pending.push(getText(href, headers).then(function (subHtml) {
+                        var dlAnchors = parseAnchors(subHtml, baseOrigin(href)).filter(function (x) {
+                            return /download-now|download now|\/w\/|cloudflarestorage|\.r2\./i.test(x.href + " " + x.text);
+                        });
+                        if (!dlAnchors.length) dlAnchors = parseAnchors(subHtml, baseOrigin(href));
+                        return dlAnchors.map(function (x) {
+                            var rq = getQualityFromText(x.text + " " + x.href) || getQualityFromText(url);
+                            return buildStreamResult(x.href, ref + " [ResumeCloud]" + sizeSuffix, headers, rq);
+                        });
+                    }).catch(function () { return []; }));
+                } else if (/pixeldrain/i.test(text)) {
+                    pending.push(resolvePixeldrain(href, ref + " Pixeldrain"));
+                }
+            }
+
+            return Promise.all(pending).then(function (subs) {
+                for (var s = 0; s < subs.length; s++) {
+                    for (var r = 0; r < subs[s].length; r++) results.push(subs[s][r]);
+                }
+                if (!results.length) {
+                    return [buildStreamResult(url, ref, headers, getQualityFromText(url))];
+                }
+                return uniqueBy(results, function (item) { return item.url; });
+            });
+        }).catch(function () {
+            return [buildStreamResult(url, ref, headers, getQualityFromText(url))];
+        });
+    }
+
+    function resolveHubCdn(url, refererLabel) {
+        var ref = refererLabel || "HUBCDN";
+        var headers = defaultHeaders({ "Referer": baseOrigin(url) + "/" });
+        return getText(url, headers).then(function (html) {
+            var scriptMatch = html.match(/reurl\s*=\s*["']([^"']+)["']/i);
+            if (scriptMatch && scriptMatch[1]) {
+                var reurl = scriptMatch[1];
+                var rParamMatch = reurl.match(/[?&]r=([^&]+)/i);
+                if (rParamMatch && rParamMatch[1]) {
+                    var decoded = decodeBase64Safe(rParamMatch[1]);
+                    var linkMatch = decoded.match(/link=([^&]+)/i);
+                    var finalUrl = linkMatch ? linkMatch[1] : (decoded.indexOf("http") !== -1 ? decoded.slice(decoded.indexOf("http")) : "");
+                    if (finalUrl && /^https?:\/\//i.test(finalUrl)) {
+                        return [buildStreamResult(finalUrl, ref, headers, getQualityFromText(finalUrl))];
+                    }
+                }
+            }
+            return [buildStreamResult(url, ref, headers, getQualityFromText(url))];
+        }).catch(function () {
+            return [buildStreamResult(url, ref, headers, getQualityFromText(url))];
+        });
+    }
+
+    function resolveGdflix(url, refererLabel) {
+        var ref = refererLabel || "GDFlix";
+        var headers = defaultHeaders({ "Referer": baseOrigin(url) + "/" });
+        return getText(url, headers, true).then(function (html) {
+            var anchors = parseAnchors(html, baseOrigin(url));
+            var candidates = [];
+            for (var i = 0; i < anchors.length; i++) {
+                var a = anchors[i];
+                var text = String(a.text || "");
+                if (/download|instant|gofile|pixeldrain|drivebot|index|view|direct/i.test(text + " " + a.href)) {
+                    candidates.push(a.href);
+                }
+            }
+            if (!candidates.length) candidates = extractInterestingExtractorUrls(html, baseOrigin(url));
+            return Promise.all(candidates.map(function (candidate) {
+                if (/gofile/i.test(candidate)) return resolveGofile(candidate);
+                if (/pixeldrain/i.test(candidate)) return resolvePixeldrain(candidate, ref);
+                if (/drivebot/i.test(candidate)) return resolveDrivebot(candidate, "", "", getQualityFromText(candidate));
+                return resolveExtractorUrl(candidate, ref);
+            })).then(flattenResults);
+        }).catch(function () {
+            return [];
         });
     }
 
@@ -1964,13 +2119,10 @@
 
     function resolveExtractorUrl(url, refererLabel) {
         if (!url) return Promise.resolve([]);
-        // Cinefreak wraps extractor links via generate.php?id=<base64 of real URL>.
-        // IMPORTANT: the decoded URL has a junk "newgo32" suffix appended (a decoy trap
-        // that 404s). CloudStream strips everything from "newgo32" onward, e.g.
-        // ".../f/ad20fde7newgo32" -> ".../f/ad20fde7". Must do the same or the file 404s.
-        var genMatch = String(url || "").match(/generate\.php\?id=([^&\s"']+)/i);
-        if (genMatch) {
-            var decoded = decodeBase64Safe(genMatch[1]);
+        // Handle id= query param base64 decode and newgo32 strip (as done in Cinefreak .cs3)
+        var idMatch = String(url || "").match(/[?&]id=([^&\s"']+)/i);
+        if (idMatch) {
+            var decoded = decodeBase64Safe(idMatch[1]);
             if (decoded && /^https?:\/\//i.test(decoded)) {
                 var cut = decoded.indexOf("newgo32");
                 if (cut !== -1) decoded = trim(decoded.substring(0, cut));
@@ -1979,18 +2131,20 @@
         }
         if (isDirectMediaUrl(url)) return Promise.resolve([buildStreamResult(url, refererLabel || "Direct", {}, getQualityFromText(url))]);
         if (looksLikeGoogleDriveUrl(url)) return resolveGoogleDrive(url);
-        if (/m4ulinks/i.test(url)) return withTimeout(resolveM4ulinks(url), 20000, "M4ULinks");
-        if (/filesdl\./i.test(url)) return withTimeout(resolveFilesdl(url), 20000, "FilesDL");
+        if (/neodrive/i.test(url)) return withTimeout(resolveNeoDrive(url, refererLabel || "Neodrive"), 25000, "Neodrive");
+        if (/cinecloud/i.test(url)) return withTimeout(resolveCinecloud(url, refererLabel || "CineCloud"), 25000, "CineCloud");
+        if (/hubcdn/i.test(url)) return withTimeout(resolveHubCdn(url, refererLabel || "HUBCDN"), 20000, "HUBCDN");
+        if (/gdflix|gdlink/i.test(url)) return withTimeout(resolveGdflix(url, refererLabel || "GDFlix"), 25000, "GDFlix");
         if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php|shikshakdaak/i.test(url)) return withTimeout(resolveHubCloudWithFallback(url, refererLabel || "HubCloud"), 25000, "HubCloud");
         if (/hubdrive\./i.test(url)) return withTimeout(resolveHubDrive(url), 20000, "HubDrive");
-        if (/filepress\.|filebee/i.test(url)) return withTimeout(resolveFilepress(url), 25000, "Filepress");
         if (/pixeldrain\.(dev|com)/i.test(url)) return withTimeout(resolvePixeldrain(url, refererLabel || "Pixeldrain"), 25000, "Pixeldrain");
         if (/buzzserver/i.test(url)) return withTimeout(resolveBuzzserver(url, refererLabel || "BuzzServer"), 25000, "BuzzServer");
-        if (/streamtape/i.test(url)) return withTimeout(resolveStreamtape(url, refererLabel || "StreamTape"), 25000, "StreamTape");
-        if (/neodrive|cinecloud/i.test(url)) return withTimeout(resolveNeoDriveCinecloud(url, refererLabel || "NeoDrive"), 30000, "NeoDrive");
-        // GDFlix route removed
-        if (/validate\.multiup2\.workers\.dev|multiup/i.test(url)) return withTimeout(resolveMultiupMirror(url, "", "", getQualityFromText(url)), 25000, "MultiUp");
+        if (/filepress\.|filebee/i.test(url)) return withTimeout(resolveFilepress(url), 25000, "Filepress");
         if (/gofile\.io/i.test(url)) return withTimeout(resolveGofile(url), 20000, "Gofile");
+        if (/streamtape/i.test(url)) return withTimeout(resolveStreamtape(url, refererLabel || "StreamTape"), 25000, "StreamTape");
+        if (/m4ulinks/i.test(url)) return withTimeout(resolveM4ulinks(url), 20000, "M4ULinks");
+        if (/filesdl\./i.test(url)) return withTimeout(resolveFilesdl(url), 20000, "FilesDL");
+        if (/validate\.multiup2\.workers\.dev|multiup/i.test(url)) return withTimeout(resolveMultiupMirror(url, "", "", getQualityFromText(url)), 25000, "MultiUp");
         if (/mdrive\.ink\//i.test(url)) return withTimeout(resolveMdrive(url), 30000, "MDrive");
         if (/vcloud\.zip/i.test(url)) return withTimeout(resolveVcloud(url), 20000, "VCloud");
         if (/fastdl\.zip/i.test(url)) return withTimeout(resolveFastdl(url), 20000, "FastDL");
@@ -2071,9 +2225,10 @@
             var trendingItems = (trendingEntry && trendingEntry.items) || [];
             var trendingMeta = {};
 
-            if (trendingItems.length) {
+            var spotlightLimit = Math.min(trendingItems.length, 5);
+            if (spotlightLimit > 0) {
                 var searchReqs = [];
-                for (var t = 0; t < trendingItems.length; t++) {
+                for (var t = 0; t < spotlightLimit; t++) {
                     var item = trendingItems[t];
                     var rawTitle = trim(String(item.title || "").split("(")[0]);
                     var yearMatch = String(item.title || "").match(/\((\d{4})\)/);
@@ -2181,12 +2336,25 @@
                 var yearMatch = String(rawTitle || "").match(/\((\d{4})\)/);
                 var year = yearMatch ? Number(yearMatch[1]) : 0;
                 var type = /season|series|episode|s0|full-series-download/i.test(rawTitle) ? "series" : "movie";
+                
+                // Poster from item.i as in Cinefreak .cs3
+                var rawImage = String(item.i || item.image || item.poster || "");
+                var poster = "";
+                if (rawImage) {
+                    if (/cinefreak/i.test(rawImage)) {
+                        poster = mainUrl + "/" + rawImage.replace(/^https?:\/\/[^\/]+\/?/, "");
+                    } else {
+                        poster = absoluteUrl(mainUrl, rawImage);
+                    }
+                }
+
                 return {
                     rawTitle: rawTitle,
-                    title: trim(rawTitle.split(" (")[0]),
+                    title: cleanTitle(rawTitle) || trim(rawTitle.split(" (")[0]),
                     url: itemUrl,
                     type: type,
                     year: year,
+                    poster: poster,
                     mediaType: type === "series" ? "tv" : "movie",
                     quality: getSearchQuality(rawTitle)
                 };
@@ -2197,18 +2365,11 @@
                 return;
             }
 
-            // Enrich each result with a real TMDB poster (search API has no poster field).
-            var posterPromises = baseResults.map(function (item) {
-                return fetchTmdbPosterUrl(item.mediaType, item.title, item.year);
-            });
-            var posters = await Promise.all(posterPromises);
-
-            var results = baseResults.map(function (item, idx) {
-                var poster = posters[idx] || "";
+            var results = baseResults.map(function (item) {
                 return new MultimediaItem({
                     title: item.title,
                     url: item.url,
-                    posterUrl: poster,
+                    posterUrl: item.poster || undefined,
                     type: item.type,
                     year: item.year || undefined,
                     quality: item.quality,
@@ -2304,7 +2465,8 @@
             var html = await getText(sourceUrl, defaultHeaders());
 
             var titleRaw = firstMatch(html, [/class=["'][^"']*page-title[^"']*["'][^>]*>([\s\S]*?)<\/h1>/i]);
-            var title = trim(stripTags(titleRaw).split("(")[0]) || "Unknown Title";
+            var cleanedRaw = stripTags(titleRaw).replace(/\s*Download\b/gi, "").replace(/\s*\[[\s\S]*$/, "");
+            var title = cleanTitle(cleanedRaw) || trim(cleanedRaw.split("(")[0]) || "Unknown Title";
             var yearMatch = String(titleRaw || "").match(/\((\d{4})\)/);
             var year = yearMatch ? Number(yearMatch[1]) : 0;
 
