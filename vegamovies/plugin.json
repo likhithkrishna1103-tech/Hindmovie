@@ -5,8 +5,16 @@
   "baseUrl": "https://vegamovies.mq",
   "description": "VegaMovies and RogMovies providers",
   "providers": [
-    { "id": "vegamovies", "name": "VegaMovies", "baseUrl": "https://vegamovies.mq" },
-    { "id": "rogmovies", "name": "RogMovies", "baseUrl": "https://rogmovies.vip" }
+    {
+      "id": "vegamovies",
+      "name": "VegaMovies",
+      "baseUrl": "https://vegamovies.mq"
+    },
+    {
+      "id": "rogmovies",
+      "name": "RogMovies",
+      "baseUrl": "https://rogmovies.vip"
+    }
   ],
   "authors": ["Igris"],
   "languages": ["hi", "en", "te", "ta", "ma"],
