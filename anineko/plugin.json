@@ -10,14 +10,7 @@
     }
   ],
   "description": "Rich anime provider with HardSub, SoftSub and Dub streams",
-  "authors": [
-    "Igris"
-  ],
-  "languages": [
-    "en",
-    "ja"
-  ],
-  "categories": [
-    "Anime"
-  ]
+  "authors": ["Igris"],
+  "languages": ["en", "ja"],
+  "categories": ["Anime"]
 }

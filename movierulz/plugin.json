@@ -1,21 +1,10 @@
 {
-    "packageName":  "com.igris.repo.movierulz",
-    "name":  "Movierulz",
-    "version":  7,
-    "baseUrl":  "https://example.com",
-    "description":  "Fresh movie drops with fast links.",
-    "authors":  [
-                    "IGRIS"
-                ],
-    "languages":  [
-                      "hi",
-                      "en",
-                      "ta",
-                      "te",
-                      "ml",
-                      "kn"
-                  ],
-    "categories":  [
-                       "Movies"
-                   ]
+  "packageName": "com.igris.repo.movierulz",
+  "name": "Movierulz",
+  "version": 7,
+  "baseUrl": "https://example.com",
+  "description": "Fresh movie drops with fast links.",
+  "authors": ["IGRIS"],
+  "languages": ["hi", "en", "ta", "te", "ml", "kn"],
+  "categories": ["Movies"]
 }

@@ -1,22 +1,10 @@
 {
-    "packageName":  "com.igris.repo.hdmovie2",
-    "name":  "HDMovie2",
-    "version":  7,
-    "baseUrl":  "https://hdmovie2a.icu",
-    "description":  "TMDB catalog with HDMovie2 stream resolution.",
-    "authors":  [
-                    "IGRIS"
-                ],
-    "languages":  [
-                      "en",
-                      "hi",
-                      "ta",
-                      "te",
-                      "ml",
-                      "kn"
-                  ],
-    "categories":  [
-                       "Movies",
-                       "Series"
-                   ]
+  "packageName": "com.igris.repo.hdmovie2",
+  "name": "HDMovie2",
+  "version": 7,
+  "baseUrl": "https://hdmovie2a.icu",
+  "description": "TMDB catalog with HDMovie2 stream resolution.",
+  "authors": ["IGRIS"],
+  "languages": ["en", "hi", "ta", "te", "ml", "kn"],
+  "categories": ["Movies", "Series"]
 }
