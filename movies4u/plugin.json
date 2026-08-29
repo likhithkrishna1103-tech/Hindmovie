@@ -1,24 +1,16 @@
 {
-    "packageName": "com.igris.repo.movies4u",
-    "name": "Movies4U",
-    "version": 33,
-    "baseUrl": "https://new4.movies4u.clinic",
-    "description": "Movie picks with straightforward stream links.",
-    "authors": [
-        "IGRIS"
-    ],
-    "languages": [
-        "hi",
-        "en",
-        "ta",
-        "te",
-        "ml",
-        "kn"
-    ],
-    "categories": [
-        "Movies"
-    ],
-    "domains": [
-        { "name": "movies4u.clinic (Primary)", "url": "https://new4.movies4u.clinic" }
-    ]
+  "packageName": "com.igris.repo.movies4u",
+  "name": "Movies4U",
+  "version": 33,
+  "baseUrl": "https://new4.movies4u.clinic",
+  "description": "Movie picks with straightforward stream links.",
+  "authors": ["IGRIS"],
+  "languages": ["hi", "en", "ta", "te", "ml", "kn"],
+  "categories": ["Movies"],
+  "domains": [
+    {
+      "name": "movies4u.clinic (Primary)",
+      "url": "https://new4.movies4u.clinic"
+    }
+  ]
 }
