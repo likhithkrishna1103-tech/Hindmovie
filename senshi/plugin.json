@@ -4,13 +4,7 @@
   "version": 8,
   "baseUrl": "https://senshi.live",
   "description": "Senshi plugin for ZORO",
-  "authors": [
-    "Igris"
-  ],
-  "languages": [
-    "en", "jp"
-  ],
-  "categories": [
-    "Anime"
-  ]
+  "authors": ["Igris"],
+  "languages": ["en", "jp"],
+  "categories": ["Anime"]
 }
