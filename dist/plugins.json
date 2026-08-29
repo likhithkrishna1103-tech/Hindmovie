@@ -4,11 +4,20 @@
     "name": "AniSuge",
     "version": 4,
     "baseUrl": "https://anisuge.tv",
-    "domains": ["https://anisuge.tv"],
+    "domains": [
+      "https://anisuge.tv"
+    ],
     "description": "A Varient for animewave",
-    "authors": ["IGRIS"],
-    "languages": ["en", "ja"],
-    "categories": ["Anime"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anisuge.sky"
   },
   {
@@ -17,9 +26,16 @@
     "version": 10,
     "baseUrl": "https://anikage.cc",
     "description": "Watch anime with sub/dub from Anikage",
-    "authors": ["IGRIS"],
-    "languages": ["en", "ja"],
-    "categories": ["Anime"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anikage.sky"
   },
   {
@@ -28,9 +44,15 @@
     "version": 1,
     "baseUrl": "https://anikyuu.to",
     "description": "AniKyuu plugin for SkyStream",
-    "authors": ["igris"],
-    "languages": ["pt"],
-    "categories": ["Anime"],
+    "authors": [
+      "igris"
+    ],
+    "languages": [
+      "pt"
+    ],
+    "categories": [
+      "Anime"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anikyuu.sky"
   },
   {
@@ -39,9 +61,22 @@
     "version": 3,
     "baseUrl": "https://www.animedubhindi.cc",
     "description": "Hindi and multi-audio anime movies and series from AnimeDubHindi.",
-    "authors": ["IGRIS"],
-    "languages": ["hi", "en", "ja", "ta", "te", "ml", "bn", "kn"],
-    "categories": ["Anime"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "hi",
+      "en",
+      "ja",
+      "ta",
+      "te",
+      "ml",
+      "bn",
+      "kn"
+    ],
+    "categories": [
+      "Anime"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animedubhindi.sky"
   },
   {
@@ -50,9 +85,15 @@
     "version": 1,
     "baseUrl": "https://animeq.net",
     "description": "AnimeQ plugin for watching Portuguese subbed and dubbed anime",
-    "authors": ["Igris"],
-    "languages": ["pt"],
-    "categories": ["Anime"],
+    "authors": [
+      "Igris"
+    ],
+    "languages": [
+      "pt"
+    ],
+    "categories": [
+      "Anime"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animeq.sky"
   },
   {
@@ -87,9 +128,16 @@
       }
     ],
     "description": "A clone for hianime",
-    "authors": ["IGRIS"],
-    "languages": ["en", "ja"],
-    "categories": ["Anime"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animewave.sky"
   },
   {
@@ -104,9 +152,16 @@
       }
     ],
     "description": "Rich anime provider with HardSub, SoftSub and Dub streams",
-    "authors": ["Igris"],
-    "languages": ["en", "ja"],
-    "categories": ["Anime"],
+    "authors": [
+      "Igris"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anineko.sky"
   },
   {
@@ -115,9 +170,17 @@
     "version": 9,
     "baseUrl": "https://example.com",
     "description": "Sharp movies and series in one place.",
-    "authors": ["IGRIS"],
-    "languages": ["en", "hi"],
-    "categories": ["Movies", "Series"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "hi"
+    ],
+    "categories": [
+      "Movies",
+      "Series"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.castletv.sky"
   },
   {
@@ -126,9 +189,21 @@
     "version": 9,
     "baseUrl": "https://cinefreak.nl",
     "description": "Cinefreak plugin for ZORO",
-    "authors": ["Igris"],
-    "languages": ["en", "hi", "ta", "te", "ml", "kn", "bn"],
-    "categories": ["Others"],
+    "authors": [
+      "Igris"
+    ],
+    "languages": [
+      "en",
+      "hi",
+      "ta",
+      "te",
+      "ml",
+      "kn",
+      "bn"
+    ],
+    "categories": [
+      "Others"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.cinefreak.sky"
   },
   {
@@ -137,9 +212,19 @@
     "version": 26,
     "baseUrl": "https://cinemeta-catalogs.strem.io",
     "description": "CineMeta-powered catalog with an expanded CineStream source stack, including Stremio, direct OTT mirrors, and embedded stream resolvers.",
-    "authors": ["IGRIS"],
-    "languages": ["en", "hi", "ja"],
-    "categories": ["Movies", "Series", "Anime"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "hi",
+      "ja"
+    ],
+    "categories": [
+      "Movies",
+      "Series",
+      "Anime"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.cinestream.sky"
   },
   {
@@ -148,9 +233,21 @@
     "version": 7,
     "baseUrl": "https://hdmovie2a.icu",
     "description": "TMDB catalog with HDMovie2 stream resolution.",
-    "authors": ["IGRIS"],
-    "languages": ["en", "hi", "ta", "te", "ml", "kn"],
-    "categories": ["Movies", "Series"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "hi",
+      "ta",
+      "te",
+      "ml",
+      "kn"
+    ],
+    "categories": [
+      "Movies",
+      "Series"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.hdmovie2.sky"
   },
   {
@@ -159,9 +256,16 @@
     "version": 5,
     "baseUrl": "https://heartivetv.pages.dev",
     "description": "Heartive movies and shows",
-    "authors": ["IGRIS"],
-    "languages": ["en"],
-    "categories": ["Movies", "Series"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en"
+    ],
+    "categories": [
+      "Movies",
+      "Series"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.heartivetv.sky"
   },
   {
@@ -170,9 +274,21 @@
     "version": 17,
     "baseUrl": "https://hindmovie.icu",
     "description": "Trending movies and series, quickly.",
-    "authors": ["IGRIS"],
-    "languages": ["hi", "en", "ta", "te", "ml", "kn"],
-    "categories": ["Movies", "Series"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "hi",
+      "en",
+      "ta",
+      "te",
+      "ml",
+      "kn"
+    ],
+    "categories": [
+      "Movies",
+      "Series"
+    ],
     "domains": [
       {
         "name": "hindmovie.icu",
@@ -187,9 +303,20 @@
     "version": 7,
     "baseUrl": "https://example.com",
     "description": "Fresh movie drops with fast links.",
-    "authors": ["IGRIS"],
-    "languages": ["hi", "en", "ta", "te", "ml", "kn"],
-    "categories": ["Movies"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "hi",
+      "en",
+      "ta",
+      "te",
+      "ml",
+      "kn"
+    ],
+    "categories": [
+      "Movies"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.movierulz.sky"
   },
   {
@@ -198,9 +325,20 @@
     "version": 33,
     "baseUrl": "https://new4.movies4u.clinic",
     "description": "Movie picks with straightforward stream links.",
-    "authors": ["IGRIS"],
-    "languages": ["hi", "en", "ta", "te", "ml", "kn"],
-    "categories": ["Movies"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "hi",
+      "en",
+      "ta",
+      "te",
+      "ml",
+      "kn"
+    ],
+    "categories": [
+      "Movies"
+    ],
     "domains": [
       {
         "name": "movies4u.clinic (Primary)",
@@ -245,9 +383,26 @@
       }
     ],
     "description": "NetMirror providers ported from the CNCVerse Cloudstream extension with fast NewTV HLS stream resolution.",
-    "authors": ["IGRIS"],
-    "languages": ["en", "hi", "ta", "te", "ml", "kn", "bn", "mr", "pa", "gu"],
-    "categories": ["Movies", "Series", "Anime"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "hi",
+      "ta",
+      "te",
+      "ml",
+      "kn",
+      "bn",
+      "mr",
+      "pa",
+      "gu"
+    ],
+    "categories": [
+      "Movies",
+      "Series",
+      "Anime"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.netmirror.sky"
   },
   {
@@ -256,9 +411,17 @@
     "version": 5,
     "baseUrl": "https://piratexplay.cc",
     "description": "Movies, series, anime, and cartoons with faster multi-provider stream extraction.",
-    "authors": ["IGRIS"],
-    "languages": ["en", "hi"],
-    "categories": ["Movies", "Series"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "hi"
+    ],
+    "categories": [
+      "Movies",
+      "Series"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.piratexplay.sky"
   },
   {
@@ -267,9 +430,16 @@
     "version": 11,
     "baseUrl": "https://adsflw.xyz",
     "description": "Live sports from the PlayEZTV feed.",
-    "authors": ["IGRIS"],
-    "languages": ["en", "hi"],
-    "categories": ["LiveTv"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "hi"
+    ],
+    "categories": [
+      "LiveTv"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playeztvliveevents.sky"
   },
   {
@@ -320,9 +490,23 @@
       }
     ],
     "description": "Bundled live TV plugin with PlayZTV providers, Dark TV, and Free TV. Live events remain in the separate PlayEZTV Live Events plugin.",
-    "authors": ["IGRIS"],
-    "languages": ["en", "hi", "ta", "te", "ml", "kn", "bn", "mr", "pa"],
-    "categories": ["Livestream"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "hi",
+      "ta",
+      "te",
+      "ml",
+      "kn",
+      "bn",
+      "mr",
+      "pa"
+    ],
+    "categories": [
+      "Livestream"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztv.sky"
   },
   {
@@ -331,9 +515,16 @@
     "version": 8,
     "baseUrl": "https://senshi.live",
     "description": "Senshi plugin for ZORO",
-    "authors": ["Igris"],
-    "languages": ["en", "jp"],
-    "categories": ["Anime"],
+    "authors": [
+      "Igris"
+    ],
+    "languages": [
+      "en",
+      "jp"
+    ],
+    "categories": [
+      "Anime"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.senshi.sky"
   },
   {
@@ -342,9 +533,21 @@
     "version": 3,
     "baseUrl": "https://www.1tamilblasters.pro",
     "description": "TamilBlasters - Tamil/Telugu/Hindi/Malayalam/Kannada movies & series with HLS streams (StreamHG/Lulu) and direct MKV downloads",
-    "authors": ["Igris"],
-    "languages": ["en", "ta", "te", "hi", "ml", "kn"],
-    "categories": ["Movies", "Series"],
+    "authors": [
+      "Igris"
+    ],
+    "languages": [
+      "en",
+      "ta",
+      "te",
+      "hi",
+      "ml",
+      "kn"
+    ],
+    "categories": [
+      "Movies",
+      "Series"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.tamilblasters.sky"
   },
   {
@@ -365,9 +568,20 @@
         "baseUrl": "https://rogmovies.vip"
       }
     ],
-    "authors": ["Igris"],
-    "languages": ["hi", "en", "te", "ta", "ma"],
-    "categories": ["Movies", "series"],
+    "authors": [
+      "Igris"
+    ],
+    "languages": [
+      "hi",
+      "en",
+      "te",
+      "ta",
+      "ma"
+    ],
+    "categories": [
+      "Movies",
+      "series"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.vegamovies.sky"
   },
   {
@@ -398,9 +612,20 @@
       }
     ],
     "description": "😉 No description needed",
-    "authors": ["IGRIS"],
-    "languages": ["te", "ta", "hi", "ml", "kn", "en"],
-    "categories": ["Others"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "te",
+      "ta",
+      "hi",
+      "ml",
+      "kn",
+      "en"
+    ],
+    "categories": [
+      "Others"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.youtube.sky"
   },
   {
@@ -409,9 +634,24 @@
     "version": 6,
     "baseUrl": "https://new7.zinkmovies.biz",
     "description": "Zinkmovies movies, series, anime, and KDrama with HubCloud mirror resolution.",
-    "authors": ["IGRIS"],
-    "languages": ["hi", "en", "ta", "te", "ml", "kn", "ko", "ja"],
-    "categories": ["Movies", "Series", "Anime"],
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "hi",
+      "en",
+      "ta",
+      "te",
+      "ml",
+      "kn",
+      "ko",
+      "ja"
+    ],
+    "categories": [
+      "Movies",
+      "Series",
+      "Anime"
+    ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.zinkmovies.sky"
   }
 ]
