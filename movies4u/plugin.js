@@ -655,13 +655,18 @@
         ? manifest.baseUrl
         : runtimeManifest && runtimeManifest.baseUrl;
 
+    if (manifestBase) {
+      domainCache = normalizeBaseUrl(manifestBase);
+      return Promise.resolve(domainCache);
+    }
+
     return getJson(DOMAINS_URL, defaultHeaders())
       .catch(function () {
         return {};
       })
       .then(function (json) {
         var domain =
-          (json && json.movies4u) || manifestBase || DEFAULT_BASE_URL;
+          (json && json.movies4u) || DEFAULT_BASE_URL;
         domainCache = normalizeBaseUrl(domain);
         return domainCache;
       });
