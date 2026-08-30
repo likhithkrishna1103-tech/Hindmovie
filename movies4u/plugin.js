@@ -89,7 +89,7 @@
 
   var DEFAULT_BASE_URL = "https://new5.movies4u.clinic";
   var DOMAINS_URL =
-    "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
+    "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/refs/heads/main/domians.json";
   var TMDB_WORKER_API = "https://api.themoviedb.org/3";
   var TMDB_FALLBACK_API = "https://wild-surf-4a0d.phisher1.workers.dev";
   var TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original";
@@ -665,8 +665,7 @@
         return {};
       })
       .then(function (json) {
-        var domain =
-          (json && json.movies4u) || DEFAULT_BASE_URL;
+        var domain = (json && json.movies4u) || DEFAULT_BASE_URL;
         domainCache = normalizeBaseUrl(domain);
         return domainCache;
       });
