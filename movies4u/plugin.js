@@ -329,7 +329,7 @@
   function inferTypeFromTitle(text) {
     var value = String(text || "");
     if (/anime/i.test(value)) return "anime";
-    if (/season|series/i.test(value)) return "series";
+    if (/season|series|show|drama|serial|s\d+|ep\d+/i.test(value)) return "series";
     return "movie";
   }
 
@@ -2912,7 +2912,7 @@
 
   async function load(url, cb) {
     try {
-      var sourceUrl = String(url || "").trim();
+      var sourceUrl = String(url || "").trim().replace(/^["']+|["']+$/g, "");
       var html = await getText(sourceUrl, defaultHeaders());
 
       var rawOgTitle = extractMetaContent(html, "og:title") || "Unknown Title";
@@ -2928,13 +2928,16 @@
           ]),
           sourceUrl,
         );
+      var seasonSections = getSeasonSections(html, baseOrigin(sourceUrl));
       var typeRaw = extractPrimaryHeading(html);
-      var type = /Series/i.test(typeRaw) ? "series" : "movie";
-      if (/Anime/i.test(typeRaw)) type = "anime";
-      var isMovie = type === "movie";
+      var type = inferTypeFromTitle(
+        typeRaw + " " + rawOgTitle + " " + sourceUrl,
+      );
+      if (/Anime/i.test(typeRaw) || /Anime/i.test(sourceUrl)) type = "anime";
+      var isMovie = seasonSections.length === 0 && type === "movie";
       var imdbId = extractImdbId(html);
       var downloadLinks = extractDownloadLinks(html, baseOrigin(sourceUrl));
-      if (title === "Unknown Title" && !downloadLinks.length) {
+      if (title === "Unknown Title" && !downloadLinks.length && !seasonSections.length) {
         cb({
           success: false,
           errorCode: "LOAD_EMPTY",
@@ -2958,7 +2961,6 @@
       var episodeLinksMap = {};
 
       if (!isMovie) {
-        var seasonSections = getSeasonSections(html, baseOrigin(sourceUrl));
         var seasonResults = await Promise.all(
           seasonSections.map(async function (section) {
             var seasonMetadata = tmdbId
