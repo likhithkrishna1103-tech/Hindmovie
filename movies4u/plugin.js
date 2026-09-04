@@ -328,8 +328,14 @@
 
   function inferTypeFromTitle(text) {
     var value = String(text || "");
-    if (/anime/i.test(value)) return "anime";
-    if (/season|series|show|drama|serial|s\d+|ep\d+/i.test(value)) return "series";
+    if (/\bfull movie\b/i.test(value)) return "movie";
+    if (/\banime\b/i.test(value)) return "anime";
+    if (
+      /\b(?:season|series|shows?|dramas?|serials?|s\d+|ep\d+|episodes?)\b/i.test(
+        value,
+      )
+    )
+      return "series";
     return "movie";
   }
 
@@ -537,12 +543,27 @@
     });
   }
 
+  var CHROME_USER_AGENT =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+
   function defaultHeaders(extra) {
     return Object.assign(
       {
+        "User-Agent": CHROME_USER_AGENT,
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Language": "en-US,en;q=0.9",
+        "sec-ch-ua":
+          '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
         Cookie:
           "xla=s4t; ext_name=ojplmecpdpgccookcobabopnaifgidhf; cf_clearance=t8e4FnYNVLq5mnSM3STcq978u7YyAaAb_WiqmVmXkcI-1773985249-1.2.1.1-Sg.2ExY1ScnsVHPQ0nj5jSQ7aKuFzBaPOPn8WRH5i0JYxUTrGXNrowzFsl36zUeK9irU7RqVsRTLF9DoM25Rz1tyFLiGaVK6WlxZLkOyr0_xyAduok9mNr3ilfnSXx1FT6.g9jo4m2cAKY.AFbvLZ8AB.8VgL0Wv4BTn5EBGcKQo4s.grQTQ.Bd58bFWF0CQRYgxD0O2PrfIoveenO8wCQMqQ_R9h22MKBQdBqqLCgk",
-        "User-Agent": "Mozilla/5.0",
       },
       extra || {},
     );
@@ -1958,7 +1979,9 @@
           {
             headers: {
               Authorization: "Bearer " + token,
-              "User-Agent": "Mozilla/5.0",
+              "User-Agent": CHROME_USER_AGENT,
+              Accept: "*/*",
+              "Accept-Language": "en-US,en;q=0.9",
             },
             timeout: 15000,
           },
@@ -2914,7 +2937,6 @@
     try {
       var sourceUrl = String(url || "").trim().replace(/^["']+|["']+$/g, "");
       var html = await getText(sourceUrl, defaultHeaders());
-
       var rawOgTitle = extractMetaContent(html, "og:title") || "Unknown Title";
       var title = trim(rawOgTitle.split("(")[0]) || "Unknown Title";
       var titleYearMatch = rawOgTitle.match(/\((\d{4})\)/);
@@ -2929,6 +2951,7 @@
           sourceUrl,
         );
       var seasonSections = getSeasonSections(html, baseOrigin(sourceUrl));
+      var downloadLinks = extractDownloadLinks(html, baseOrigin(sourceUrl));
       var typeRaw = extractPrimaryHeading(html);
       var type = inferTypeFromTitle(
         typeRaw + " " + rawOgTitle + " " + sourceUrl,
@@ -2936,7 +2959,6 @@
       if (/Anime/i.test(typeRaw) || /Anime/i.test(sourceUrl)) type = "anime";
       var isMovie = seasonSections.length === 0 && type === "movie";
       var imdbId = extractImdbId(html);
-      var downloadLinks = extractDownloadLinks(html, baseOrigin(sourceUrl));
       if (title === "Unknown Title" && !downloadLinks.length && !seasonSections.length) {
         cb({
           success: false,
