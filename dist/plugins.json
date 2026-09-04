@@ -56,6 +56,24 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anikyuu.sky"
   },
   {
+    "packageName": "com.igris.repo.anilight",
+    "name": "Anilight",
+    "version": 1,
+    "baseUrl": "https://anilight.live",
+    "description": "Watch anime with sub/dub from Anilight",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anilight.sky"
+  },
+  {
     "packageName": "com.igris.repo.animedubhindi",
     "name": "AnimeDubHindi",
     "version": 3,
