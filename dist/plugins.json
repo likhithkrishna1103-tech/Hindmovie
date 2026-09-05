@@ -287,6 +287,24 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.heartivetv.sky"
   },
   {
+    "packageName": "com.igris.repo.hianime",
+    "name": "HiAnime",
+    "version": 1,
+    "baseUrl": "https://hianime.at",
+    "description": "Watch anime with sub/dub from HiAnime",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.hianime.sky"
+  },
+  {
     "packageName": "com.igris.repo.hindmoviez",
     "name": "HindMoviez",
     "version": 17,
