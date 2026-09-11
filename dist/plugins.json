@@ -548,11 +548,11 @@
   {
     "packageName": "com.igris.repo.reanime",
     "name": "Re:ANIME",
-    "version": 1,
+    "version": 2,
     "baseUrl": "https://reanime.to",
     "description": "Watch anime with sub/dub from Re:ANIME",
     "authors": [
-      "Developer"
+      "Igris"
     ],
     "languages": [
       "en",
