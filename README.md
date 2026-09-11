@@ -1,4 +1,4 @@
-# 🏴‍☠️ ZORO plugin repository for SkyStream
+# 🏴‍☠️ ZORO Plugin Repository for SkyStream
 
 ZORO is an extension repo for [SkyStream](https://github.com/akashdh11/skystream).
 
