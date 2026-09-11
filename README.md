@@ -1,6 +1,6 @@
-# 🌌 hindmovie
+# ZORO
 
-hindmovie is an extension repo for [SkyStream](https://github.com/akashdh11/skystream).
+ZORO is an extension repo for [SkyStream](https://github.com/akashdh11/skystream).
 
 ### ❤️ Support
 
