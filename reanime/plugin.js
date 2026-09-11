@@ -49,6 +49,76 @@
     }
   }
 
+  function base64Encode(str) {
+    if (!str) return "";
+    try {
+      if (typeof btoa === "function") return btoa(unescape(encodeURIComponent(String(str))));
+    } catch (_) {}
+    try {
+      if (typeof Buffer !== "undefined") return Buffer.from(String(str), "utf8").toString("base64");
+    } catch (_) {}
+    return String(str);
+  }
+
+  function proxifyUrl(url, headers, referer, mirrorHosts) {
+    var payload = {
+      url: url,
+      headers: headers || {},
+      options: {
+        referer: referer || "",
+        mirrorHosts: mirrorHosts || [],
+      },
+    };
+    return "MAGIC_PROXY_v2" + base64Encode(JSON.stringify(payload));
+  }
+
+  function extractFlixKeyUrl(variantUrl) {
+    try {
+      var u = new URL(variantUrl);
+      var targetUrl = u.searchParams.get("url") || variantUrl;
+      var lastSlash = targetUrl.lastIndexOf("/");
+      if (lastSlash !== -1) {
+        return targetUrl.slice(0, lastSlash + 1) + "key.bin";
+      }
+    } catch (_) {}
+    return "";
+  }
+
+  function buildMagicM3u8(m3u8Body, keyUrl, referer, userAgent) {
+    var lines = String(m3u8Body || "").split(/\r?\n/);
+    var rewritten = [];
+    var proxiedKey = keyUrl ? proxifyUrl(keyUrl, { "User-Agent": userAgent }, referer, ["flixcloud.cc"]) : "";
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var trimmed = line.trim();
+      if (!trimmed) {
+        rewritten.push(line);
+        continue;
+      }
+      if (trimmed.charAt(0) === "#") {
+        if (/^#EXT-X-KEY:/i.test(trimmed) && /URI="key\.bin"/i.test(trimmed)) {
+          if (proxiedKey) {
+            rewritten.push(line.replace(/URI="key\.bin"/i, 'URI="' + proxiedKey + '"'));
+          } else {
+            rewritten.push(line);
+          }
+        } else {
+          rewritten.push(line);
+        }
+        continue;
+      }
+      // Segment line
+      if (trimmed.indexOf("http") !== 0) {
+        rewritten.push(line);
+        continue;
+      }
+      var proxiedSeg = proxifyUrl(trimmed, { "User-Agent": userAgent }, referer, ["rundowncdn.top", "atomic4cdn.top"]);
+      rewritten.push(proxiedSeg);
+    }
+    return "magic_m3u8:" + base64Encode(rewritten.join("\n"));
+  }
+
   async function safeGet(url, headers) {
     try {
       var res = await http_get(url, headers || HEADERS);
@@ -514,7 +584,7 @@
 
   /**
    * FlixCloud Stream Extractor
-   * Resolves FlixCloud embeds into direct M3U8 streams and subtitles using enc-dec.app
+   * Resolves FlixCloud embeds into direct and proxied M3U8 streams with subtitles
    */
   async function resolveFlixCloudEmbed(embedUrl, serverName, dubType, watchReferer) {
     var streams = [];
@@ -642,34 +712,53 @@
       var dubTag = dubType ? " (" + dubType.toUpperCase() + ")" : "";
       var baseLabel = (serverName || "FlixCloud") + dubTag;
 
-      // Try parsing HLS variants for multiple qualities (1080p, 720p, etc.)
-      var addedVariants = false;
-      try {
-        var playlistRes = await safeGet(finalManifestUrl, streamHeaders);
-        var playlistBody = getResponseBody(playlistRes);
-        var variants = parseHlsVariants(playlistBody, finalManifestUrl);
+      // Try parsing HLS variants
+      var playlistRes = await safeGet(finalManifestUrl, streamHeaders);
+      var playlistBody = getResponseBody(playlistRes);
+      var variants = parseHlsVariants(playlistBody, finalManifestUrl);
 
-        if (variants && variants.length > 0) {
-          variants.forEach(function (v) {
-            var stream = new StreamResult({
-              url: v.url,
-              source: baseLabel + " [" + v.label + "]",
-              quality: getQualityFromName(v.label) || 1080,
-              type: "hls",
-              headers: streamHeaders,
-              referer: flixOrigin + "/",
-            });
-            if (subtitleTracks.length > 0) stream.subtitles = subtitleTracks;
-            streams.push(stream);
+      if (variants && variants.length > 0) {
+        for (var vIdx = 0; vIdx < variants.length; vIdx++) {
+          var v = variants[vIdx];
+          var qNum = getQualityFromName(v.label) || 1080;
+
+          // 1. Direct Stream Result
+          var directStream = new StreamResult({
+            url: v.url,
+            source: baseLabel + " [" + v.label + " Direct]",
+            quality: qNum,
+            type: "hls",
+            headers: streamHeaders,
+            referer: flixOrigin + "/",
           });
-          addedVariants = true;
-        }
-      } catch (_) {}
+          if (subtitleTracks.length > 0) directStream.subtitles = subtitleTracks;
+          streams.push(directStream);
 
-      // Always include master playlist as Auto/Multi-Audio option
+          // 2. Built-in SkyStream MAGIC_PROXY_v2 Stream (Rewritten with resolved key & proxified segments)
+          try {
+            var keyUrl = extractFlixKeyUrl(v.url);
+            var varPlaylistRes = await safeGet(v.url, streamHeaders);
+            var varBody = getResponseBody(varPlaylistRes);
+            if (varBody && varBody.indexOf("#EXTM3U") !== -1) {
+              var magicUrl = buildMagicM3u8(varBody, keyUrl, flixOrigin + "/", USER_AGENT);
+              var proxiedStream = new StreamResult({
+                url: magicUrl,
+                source: baseLabel + " [" + v.label + " Proxy]",
+                quality: qNum,
+                type: "hls",
+                headers: {},
+              });
+              if (subtitleTracks.length > 0) proxiedStream.subtitles = subtitleTracks;
+              streams.push(proxiedStream);
+            }
+          } catch (_) {}
+        }
+      }
+
+      // Master Playlist Stream (Auto multi-audio option)
       var masterStream = new StreamResult({
         url: finalManifestUrl,
-        source: baseLabel + (addedVariants ? " [Auto]" : " [1080p]"),
+        source: baseLabel + " [Auto/Multi-Audio]",
         quality: 1080,
         type: "hls",
         headers: streamHeaders,
@@ -725,7 +814,6 @@
         var flixJson = parseJsonSafe(getResponseBody(flixRes), {});
 
         if (flixJson && Array.isArray(flixJson.servers)) {
-          // Filter servers matching requested dubType first
           var matchingServers = flixJson.servers.filter(function (s) {
             return String(s.dataType || "").toLowerCase() === dubType;
           });
@@ -733,7 +821,6 @@
             matchingServers = flixJson.servers;
           }
 
-          // Resolve each server concurrently
           var resolveTasks = matchingServers.map(function (server) {
             var dataLink = server.dataLink || server.link || "";
             var sName = server.serverName || server.name || "Server";

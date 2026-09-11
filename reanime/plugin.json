@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.reanime",
   "name": "Re:ANIME",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://reanime.to",
   "description": "Watch anime with sub/dub from Re:ANIME",
   "authors": ["Igris"],
