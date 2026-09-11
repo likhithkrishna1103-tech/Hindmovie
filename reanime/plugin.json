@@ -1,17 +1,10 @@
 {
   "packageName": "com.igris.repo.reanime",
   "name": "Re:ANIME",
-  "version": 1,
+  "version": 2,
   "baseUrl": "https://reanime.to",
   "description": "Watch anime with sub/dub from Re:ANIME",
-  "authors": [
-    "Developer"
-  ],
-  "languages": [
-    "en",
-    "ja"
-  ],
-  "categories": [
-    "Anime"
-  ]
+  "authors": ["Igris"],
+  "languages": ["en", "ja"],
+  "categories": ["Anime"]
 }
