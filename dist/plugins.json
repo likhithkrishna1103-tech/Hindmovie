@@ -546,6 +546,24 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztv.sky"
   },
   {
+    "packageName": "com.igris.repo.reanime",
+    "name": "Re:ANIME",
+    "version": 1,
+    "baseUrl": "https://reanime.to",
+    "description": "Watch anime with sub/dub from Re:ANIME",
+    "authors": [
+      "Developer"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.reanime.sky"
+  },
+  {
     "packageName": "com.igris.repo.senshi",
     "name": "Senshi",
     "version": 8,
