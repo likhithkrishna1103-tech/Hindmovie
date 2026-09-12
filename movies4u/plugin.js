@@ -87,7 +87,7 @@
 
   ("use strict");
 
-  var DEFAULT_BASE_URL = "https://new5.movies4u.clinic";
+  var DEFAULT_BASE_URL = "https://new6.movies4u.clinic";
   var DOMAINS_URL =
     "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/refs/heads/main/domians.json";
   var TMDB_WORKER_API = "https://api.themoviedb.org/3";
