@@ -244,11 +244,18 @@
     var cleanBase = String(base || "").trim();
     var cleanPath = String(path || "").trim();
     if (!cleanPath) return cleanBase;
+    if (/^https?:\/\//i.test(cleanPath)) return cleanPath;
     try {
-      return new URL(cleanPath, cleanBase).toString();
-    } catch (_) {
-      return cleanPath;
+      if (typeof URL !== "undefined") {
+        return new URL(cleanPath, cleanBase).toString();
+      }
+    } catch (_) {}
+    if (cleanPath.charAt(0) === "/") {
+      var originMatch = cleanBase.match(/^(https?:\/\/[^\/]+)/i);
+      var origin = originMatch ? originMatch[1] : cleanBase.replace(/\/+$/, "");
+      return origin + cleanPath;
     }
+    return cleanBase.replace(/\/+$/, "") + "/" + cleanPath.replace(/^\/+/, "");
   }
 
   function normalizeBaseUrl(url) {
@@ -671,22 +678,15 @@
   function getMainUrl() {
     if (domainCache) return Promise.resolve(domainCache);
 
-    var manifestBase =
-      typeof manifest !== "undefined" && manifest && manifest.baseUrl
-        ? manifest.baseUrl
-        : runtimeManifest && runtimeManifest.baseUrl;
-
-    if (manifestBase) {
-      domainCache = normalizeBaseUrl(manifestBase);
-      return Promise.resolve(domainCache);
-    }
-
     return getJson(DOMAINS_URL, defaultHeaders())
       .catch(function () {
         return {};
       })
       .then(function (json) {
-        var domain = (json && json.movies4u) || DEFAULT_BASE_URL;
+        var domain =
+          (json && json.movies4u) ||
+          (typeof manifest !== "undefined" && manifest && manifest.baseUrl) ||
+          DEFAULT_BASE_URL;
         domainCache = normalizeBaseUrl(domain);
         return domainCache;
       });
@@ -795,8 +795,69 @@
       .filter(Boolean);
   }
 
-  function parseSearchResultsKotlin(html, base) {
-    return parseSearchResults(html, base);
+  function parseSearchApiItem(hit, base, defaultType) {
+    if (!hit) return null;
+    var href = hit.permalink || hit.url || "";
+    if (!href) return null;
+
+    var rawTitle = stripTags(hit.post_title || hit.title || "");
+    if (!rawTitle) return null;
+
+    var cleanTitle = trim(rawTitle.split(" (")[0]);
+    if (!cleanTitle) cleanTitle = rawTitle;
+    var yearMatch = rawTitle.match(/\((\d{4})\)/);
+    var langMatch = rawTitle.match(/\[([^\]]+)\]/);
+    var fullTitle = cleanTitle;
+    if (yearMatch) fullTitle += " (" + yearMatch[1] + ")";
+    if (langMatch && trim(langMatch[1]))
+      fullTitle += " [" + trim(langMatch[1]) + "]";
+
+    var poster = hit.post_thumbnail || hit.poster || "";
+    if (poster) {
+      poster = absoluteUrl(base, poster).replace(/\/w\d+\//i, "/w500/");
+    }
+
+    var quality =
+      (hit.movie_quality && trim(hit.movie_quality)) ||
+      getSearchQuality(rawTitle);
+
+    return new MultimediaItem({
+      title: fullTitle,
+      url: absoluteUrl(base, href),
+      posterUrl: poster,
+      type: defaultType || inferTypeFromTitle(rawTitle),
+      quality: quality,
+      headers: defaultHeaders({ Referer: base + "/" }),
+    });
+  }
+
+  function parseSearchApiResponse(json, base, defaultType) {
+    var hits = (json && Array.isArray(json.hits) && json.hits) || [];
+    return hits
+      .map(function (hit) {
+        return parseSearchApiItem(hit, base, defaultType);
+      })
+      .filter(Boolean);
+  }
+
+  function parseSearchResultsKotlin(data, base) {
+    if (data && typeof data === "object") {
+      return parseSearchApiResponse(data, base);
+    }
+    if (typeof data === "string") {
+      var trimmed = data.trim();
+      if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+        var parsed = parseJsonSafe(trimmed, null);
+        if (parsed && (Array.isArray(parsed.hits) || Array.isArray(parsed))) {
+          return parseSearchApiResponse(
+            Array.isArray(parsed) ? { hits: parsed } : parsed,
+            base,
+          );
+        }
+      }
+      return parseSearchResults(data, base);
+    }
+    return [];
   }
 
   function extractMetaContent(html, propertyName) {
@@ -2908,17 +2969,56 @@
   async function search(query, cb) {
     try {
       var mainUrl = await getMainUrl();
-      var url = mainUrl + "/?s=" + encodeURIComponent(trim(query));
-      var html = await getText(url, defaultHeaders());
-      var results = parseSearchResultsKotlin(html, mainUrl);
+      var cleanQuery = trim(query);
+      if (!cleanQuery) {
+        cb({ success: true, data: [] });
+        return;
+      }
+
+      var results = [];
+      var lastHtmlSnippet = "";
+
+      // 1. Try movies4u lookup API (/lookup.php)
+      try {
+        var apiUrl =
+          mainUrl +
+          "/lookup.php?q=" +
+          encodeURIComponent(cleanQuery) +
+          "&page=1&per_page=30";
+        var apiRes = await request(apiUrl, {
+          headers: defaultHeaders({
+            Referer: mainUrl + "/",
+            Accept: "application/json, text/javascript, */*; q=0.01",
+          }),
+        });
+        var apiJson = parseJsonSafe(apiRes && apiRes.body, null);
+        if (apiJson && Array.isArray(apiJson.hits)) {
+          results = parseSearchApiResponse(apiJson, mainUrl);
+        }
+      } catch (_) {}
+
+      // 2. Fallback to HTML search (/?s=...) if lookup API returned no items
+      if (!results.length) {
+        try {
+          var fallbackUrl = mainUrl + "/?s=" + encodeURIComponent(cleanQuery);
+          var html = await getText(fallbackUrl, defaultHeaders());
+          lastHtmlSnippet = snippet(html, 320);
+          results = parseSearchResultsKotlin(html, mainUrl);
+        } catch (_) {}
+      }
+
       if (!results.length) {
         cb({
           success: false,
           errorCode: "SEARCH_EMPTY",
-          message: "No search items parsed. Snippet: " + snippet(html, 320),
+          message:
+            "No search items found for: " +
+            cleanQuery +
+            (lastHtmlSnippet ? ". Snippet: " + lastHtmlSnippet : ""),
         });
         return;
       }
+
       Analytics.logEvent("movies4u_search", {});
       cb({
         success: true,
