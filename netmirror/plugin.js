@@ -1010,9 +1010,18 @@
     }
 
     function parsePayload(url) {
+        if (url && typeof url === "object") return url;
         var parsed = parseJsonSafe(url, null);
-        if (parsed) return parsed;
-        return { id: String(url || "") };
+        if (parsed && typeof parsed === "object") return parsed;
+        var str = String(url || "").trim();
+        var idMatch = str.match(/[?&]id=([^&#]+)/i) || str.match(/\/(?:post|watch|title|play|movies|series|episodes)\/([^/?#]+)/i);
+        var providerId = "netflix";
+        if (str.indexOf("/pv") !== -1 || str.indexOf("prime") !== -1) providerId = "prime";
+        else if (str.indexOf("/hs") !== -1 || str.indexOf("hotstar") !== -1) providerId = "hotstar";
+        if (idMatch) {
+            return { id: idMatch[1], providerId: providerId };
+        }
+        return { id: str, providerId: providerId };
     }
 
     function decodeHtml(value) {
@@ -1453,18 +1462,16 @@
             var token = await bypass();
             console.log("[netmirror][loadStreams] bypass ok (t_hash_t len=" + (token ? token.length : 0) + ")");
 
-            // Verified flow — mirrors NetflixMirrorProvider.loadLinks in the working
-            // CNCVerse .cs3: GET {MAIN_URL}/mobile/playlist.php?id=<id>&t=<title>&tm=<unix>
-            // with the premium t_hash_t cookie. The server returns a PlayList JSON
-            // whose `sources` carry the real .m3u8 and `tracks` carry captions.
-            // (No /newtv/player.php, no Cloudflare clearance — the t_hash_t tier is
-            // the actual gate, confirmed by decompiling the working build.)
+            // Verified flow — 1:1 with NetflixMirrorProvider.loadLinks in CNC Verse Mobile.cs3:
+            // GET {MAIN_URL}/mobile{prefix}/playlist.php?id=<id>&t=<title>&tm=<unix>
             var playlistUrl = MAIN_URL + "/mobile" + config.prefix + "/playlist.php?id=" + encodeURIComponent(id) +
                 "&t=" + encodeURIComponent(input.title || config.name) + "&tm=" + unixTime();
             console.log("[netmirror][loadStreams] GET " + playlistUrl);
 
             var cookieName = (bypassCookie && bypassCookie.name) || "t_hash_t";
-            var cookieHeaderValue = cookieName + "=" + token + "; ott=" + (config.playerOtt || config.ott) + "; hd=on";
+            var cookieHeaderValue = (cookieName === "t_hash_t" ? "" : (cookieName + "=" + token + "; ")) +
+                "t_hash_t=" + token + "; ott=" + (config.playerOtt || config.ott) + "; hd=on";
+
             var plHeaders = {
                 "Accept": "*/*",
                 "Accept-Language": "en-IN,en-US;q=0.9,en;q=0.8",
@@ -1483,49 +1490,81 @@
 
             var plRes = await requestGet(playlistUrl, plHeaders);
             var pl = parseJsonSafe(plRes.body, null);
-            // playlist.php returns a JSON ARRAY: [{ title, image2, sources, tracks }].
-            var data = (pl && Array.isArray(pl)) ? (pl[0] || {}) : (pl || {});
-            console.log("[netmirror][loadStreams] playlist BACK (keys=" + Object.keys(data).slice(0, 12).join(",") + ")");
-
-            var streams = [];
-            var sources = data.sources || [];
-            var tracks = data.tracks || [];
-
-            // Build per-source HLS streams (full master, not just audio).
-            for (var i = 0; i < sources.length; i++) {
-                var src = sources[i];
-                if (!src) continue;
-                var file = src.file || src.url || src.src || "";
-                var label = src.label || src.quality || src.type || ("Source " + (i + 1));
-                if (!file) continue;
-                file = absoluteUrl(MAIN_URL, file);
-                // Each source is a master .m3u8; expand its VIDEO+AUDIO+SUBTITLES groups.
-                var srcHeaders = {
-                    "User-Agent": PLAYER_USER_AGENT,
-                    "Accept": "*/*",
-                    "Referer": MAIN_URL + "/mobile/home?app=1",
-                    "Cookie": "hd=on"
-                };
-                var expanded = await expandNewTvHlsStreams(file, config.name + " " + label, srcHeaders, MAIN_URL + "/mobile/home?app=1");
-                if (expanded && expanded.length) {
-                    streams = streams.concat(expanded);
-                } else {
-                    streams.push(buildDirectHlsStream(file, config.name + " " + label, 0, srcHeaders));
-                }
+            var playlistItems = Array.isArray(pl) ? pl : (pl ? [pl] : []);
+            if (!playlistItems.length) {
+                console.log("[netmirror][loadStreams] empty playlist response");
+                return cb({ success: true, data: [] });
             }
 
-            // Attach caption tracks as standalone subtitle streams.
-            if (tracks && tracks.length) {
-                for (var t = 0; t < tracks.length; t++) {
-                    var tr = tracks[t];
-                    if (!tr || (tr.kind && tr.kind !== "captions" && tr.kind !== "subtitles")) continue;
-                    var tfile = absoluteUrl(MAIN_URL, tr.file || tr.url || "");
-                    if (!tfile) continue;
-                    var sub = new StreamResult({ url: tfile, source: config.name + " " + (tr.label || "CC"), headers: { "Referer": MAIN_URL + "/mobile/home?app=1" } });
-                    sub.type = "subtitle";
-                    sub.subtitleLang = String(tr.label || "en").slice(0, 3).toLowerCase();
-                    streams.push(sub);
+            var allSources = [];
+            var allTracks = [];
+            for (var pi = 0; pi < playlistItems.length; pi++) {
+                var pItem = playlistItems[pi];
+                if (!pItem) continue;
+                if (Array.isArray(pItem.sources)) allSources = allSources.concat(pItem.sources);
+                if (Array.isArray(pItem.tracks)) allTracks = allTracks.concat(pItem.tracks);
+            }
+
+            // 1. Process Subtitle Tracks (1:1 with CNCVerse Mobile loadLinks)
+            var formattedSubtitles = [];
+            var subtitleStreams = [];
+            for (var t = 0; t < allTracks.length; t++) {
+                var tr = allTracks[t];
+                if (!tr || (tr.kind && tr.kind !== "captions" && tr.kind !== "subtitles")) continue;
+                var rawTrFile = String(tr.file || tr.url || "").replace(/\\/g, "").trim();
+                if (!rawTrFile) continue;
+                if (rawTrFile.indexOf("//") === 0) rawTrFile = "https:" + rawTrFile;
+                var tfile = absoluteUrl(MAIN_URL, rawTrFile);
+                var subLabel = tr.label || "CC";
+                var subLang = normalizeLanguageCode(subLabel);
+                formattedSubtitles.push({
+                    url: tfile,
+                    label: subLabel,
+                    lang: subLang
+                });
+                var subResult = new StreamResult({
+                    url: tfile,
+                    source: config.name + " " + subLabel,
+                    headers: { "Referer": MAIN_URL + "/" }
+                });
+                subResult.type = "subtitle";
+                subResult.subtitleLang = subLang;
+                subtitleStreams.push(subResult);
+            }
+
+            // 2. Build Direct Master HLS Streams (1:1 with CNCVerse Mobile loadLinks)
+            // Passes the direct official .m3u8 from NetMirror with authenticated plHeaders.
+            // ExoPlayer natively parses quality variants, multi-language audio tracks, and subs.
+            var streams = [];
+            for (var i = 0; i < allSources.length; i++) {
+                var src = allSources[i];
+                if (!src) continue;
+                var rawFile = String(src.file || src.url || src.src || "").replace(/\\/g, "").trim();
+                if (!rawFile) continue;
+                if (rawFile.indexOf("//") === 0) rawFile = "https:" + rawFile;
+                var file = absoluteUrl(MAIN_URL, rawFile);
+                var label = src.label || src.quality || src.type || ("Source " + (i + 1));
+                var qMatch = rawFile.match(/[?&]q=(\d+)/i) || label.match(/(\d{3,4})p?/i) || rawFile.match(/(\d{3,4})p/i);
+                var quality = qMatch ? parseInt(qMatch[1], 10) : 0;
+
+                var directStream = new StreamResult({
+                    url: file,
+                    source: config.name + " " + label,
+                    headers: plHeaders,
+                    quality: quality,
+                    subtitles: formattedSubtitles.length ? formattedSubtitles : undefined
+                });
+                directStream.type = "hls";
+                directStream.quality = quality;
+                if (formattedSubtitles.length) {
+                    directStream.subtitles = formattedSubtitles;
                 }
+                streams.push(directStream);
+            }
+
+            // 3. Attach Standalone Subtitle Tracks
+            if (subtitleStreams.length) {
+                streams = streams.concat(subtitleStreams);
             }
 
             console.log("[netmirror][loadStreams] built streams=" + streams.length);
