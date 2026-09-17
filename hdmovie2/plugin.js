@@ -1401,4 +1401,8 @@
     root.load = load;
     root.loadStreams = loadStreams;
 
+    globalThis.getHome = getHome;
+    globalThis.search = search;
+    globalThis.load = load;
+    globalThis.loadStreams = loadStreams;
 })();
