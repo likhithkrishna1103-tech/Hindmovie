@@ -104,6 +104,133 @@
     "Referer": BASE_URL + "/",
   };
 
+  // ========== AniList & AniZip Metadata Configuration ==========
+  var ANIZIP_CACHE = {};
+  var ANILIST_CACHE = {};
+  var TMDB_LOGO_CACHE = {};
+  var TMDB_API = "https://api.themoviedb.org/3";
+  var TMDB_LOGO_API_KEY = "98ae14df2b8d8f8f8136499daf79f0e0";
+
+  async function postJson(url, payload, headers) {
+    var body = JSON.stringify(payload || {});
+    var merged = Object.assign(
+      { "Content-Type": "application/json", "Accept": "application/json" },
+      headers || {}
+    );
+    try {
+      var res = await http_post(url, merged, body);
+      if (!res || !res.body) throw new Error("Empty response");
+      return JSON.parse(res.body);
+    } catch (_) {
+      var res2 = await http_post(url, body, merged);
+      if (!res2 || !res2.body) throw new Error("Empty response");
+      return JSON.parse(res2.body);
+    }
+  }
+
+  async function searchAniListByTitle(title) {
+    if (!title) return null;
+    var cacheKey = String(title).toLowerCase().trim();
+    if (Object.prototype.hasOwnProperty.call(ANILIST_CACHE, cacheKey)) {
+      return ANILIST_CACHE[cacheKey];
+    }
+    try {
+      var json = await postJson(
+        "https://graphql.anilist.co",
+        {
+          query:
+            "query($search:String){Media(search:$search,type:ANIME){id idMal bannerImage coverImage{extraLarge large}}}",
+          variables: { search: title },
+        },
+        { "User-Agent": USER_AGENT }
+      );
+      var media = json && json.data && json.data.Media;
+      ANILIST_CACHE[cacheKey] = media || null;
+      return media || null;
+    } catch (_) {
+      ANILIST_CACHE[cacheKey] = null;
+      return null;
+    }
+  }
+
+  async function fetchAniZipMeta(malId) {
+    if (!malId) return null;
+    var cacheKey = String(malId);
+    if (Object.prototype.hasOwnProperty.call(ANIZIP_CACHE, cacheKey)) {
+      return ANIZIP_CACHE[cacheKey];
+    }
+    try {
+      var res = await http_get(
+        "https://api.ani.zip/mappings?mal_id=" + encodeURIComponent(String(malId)),
+        { "Accept": "application/json", "User-Agent": USER_AGENT }
+      );
+      var text = String((res && (res.body || res.text)) || "");
+      var meta = JSON.parse(text);
+      ANIZIP_CACHE[cacheKey] = meta || null;
+      return meta || null;
+    } catch (_) {
+      ANIZIP_CACHE[cacheKey] = null;
+      return null;
+    }
+  }
+
+  async function fetchTmdbLogoUrl(type, tmdbId) {
+    if (!tmdbId) return "";
+    var cacheKey = String(type) + ":" + String(tmdbId);
+    if (Object.prototype.hasOwnProperty.call(TMDB_LOGO_CACHE, cacheKey)) {
+      return TMDB_LOGO_CACHE[cacheKey];
+    }
+    try {
+      var route = type === "movie" ? "movie" : "tv";
+      var res = await http_get(
+        TMDB_API +
+          "/" +
+          route +
+          "/" +
+          encodeURIComponent(String(tmdbId)) +
+          "/images?api_key=" +
+          TMDB_LOGO_API_KEY,
+        { "Accept": "application/json", "User-Agent": USER_AGENT }
+      );
+      var text = String((res && (res.body || res.text)) || "");
+      var json = JSON.parse(text);
+      var logos = (json && json.logos) || [];
+      var best = null;
+      var bestSvg = null;
+      for (var i = 0; i < logos.length; i++) {
+        var logo = logos[i];
+        if (!logo || !logo.file_path) continue;
+        var isSvg = /\.svg$/i.test(logo.file_path);
+        var lang = (logo.iso_639_1 || "").toLowerCase();
+        if (lang === "en" && !isSvg) {
+          var logoUrl = "https://image.tmdb.org/t/p/w500" + logo.file_path;
+          TMDB_LOGO_CACHE[cacheKey] = logoUrl;
+          return logoUrl;
+        }
+        if (lang === "en" && isSvg && !bestSvg) bestSvg = logo;
+        if (
+          !best ||
+          Number(logo.vote_average || 0) > Number(best.vote_average || 0)
+        ) {
+          if (isSvg) bestSvg = logo;
+          else best = logo;
+        }
+      }
+      if (best) {
+        var logoUrl2 = "https://image.tmdb.org/t/p/w500" + best.file_path;
+        TMDB_LOGO_CACHE[cacheKey] = logoUrl2;
+        return logoUrl2;
+      }
+      if (bestSvg) {
+        var logoUrlSvg = "https://image.tmdb.org/t/p/w500" + bestSvg.file_path;
+        TMDB_LOGO_CACHE[cacheKey] = logoUrlSvg;
+        return logoUrlSvg;
+      }
+    } catch (_) {}
+    TMDB_LOGO_CACHE[cacheKey] = "";
+    return "";
+  }
+
   // ========== Utilities ==========
   function trim(value) {
     return String(value == null ? "" : value).trim();
@@ -299,15 +426,16 @@
       if (titleMatch && linkMatch) {
         var title = cleanText(titleMatch[1]);
         var url = absoluteUrl(linkMatch[1]);
-        var poster = imgMatch ? absoluteUrl(imgMatch[1]) : "";
+        var banner = imgMatch ? absoluteUrl(imgMatch[1]) : "";
+        var poster = banner ? banner.replace(/-banner(\.[a-z0-9]+)$/i, "$1") : "";
         var desc = descMatch ? cleanText(descMatch[1]) : "";
 
         items.push(
           new MultimediaItem({
             title: title,
             url: url,
-            posterUrl: poster,
-            bannerUrl: poster,
+            posterUrl: poster || banner,
+            bannerUrl: banner || poster,
             type: isMovie ? "movie" : "anime",
             description: desc,
             headers: HEADERS,
@@ -555,7 +683,7 @@
         }
       }
 
-      // 1. Metadata Extraction
+      // 1. Metadata Extraction from HTML
       var titleMatch =
         detailHtml.match(/<h2\s+class=["']film-name[^>]*>([\s\S]*?)<\/h2>/i) ||
         detailHtml.match(/<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i);
@@ -641,12 +769,92 @@
       var hasDub = /class=["']tick-item tick-dub["']/i.test(detailHtml) ||
         /class=["'][^"']*servers-dub/i.test(detailHtml);
 
-      // 2. Parse Episodes
-      var allEpisodes = [];
+      // 2. Discover MAL ID & AniZip / AniList Metadata (Reversed from HiAnime.cs3 & animewave)
       var epJsonRaw = responses[1] ? responses[1].body : "";
       var epJson = parseJsonSafe(epJsonRaw, {});
       var epListHtml = epJson.html || epJsonRaw || "";
 
+      var firstEpMatch = epListHtml.match(/<a\s+[^>]*class=["'][^"']*ep-item[^"']*["'][^>]*data-id=["'](\d+)["']/i) ||
+        epListHtml.match(/data-id=["'](\d+)["']/i);
+      var firstEpId = firstEpMatch ? firstEpMatch[1] : null;
+
+      var malId = null;
+      var aniListMedia = null;
+
+      // Method A (from HiAnime.cs3): Extract malId from episode server hashes
+      if (firstEpId) {
+        try {
+          var serversRes = await http_get(
+            BASE_URL + "/api/theme/episode/servers?episodeId=" + firstEpId,
+            AJAX_HEADERS
+          );
+          var serversJson = parseJsonSafe(serversRes && (serversRes.body || serversRes.text), {});
+          var serversHtml = serversJson.html || "";
+          var hashRegex = /data-hash=["']([^"']+)["']/gi;
+          var hm;
+          while ((hm = hashRegex.exec(serversHtml)) !== null) {
+            try {
+              var decoded = base64Decode(hm[1]);
+              var malMatch = decoded.match(/\/mal\/(\d+)\//);
+              if (malMatch) {
+                malId = malMatch[1];
+                break;
+              }
+            } catch (_) {}
+          }
+        } catch (_) {}
+      }
+
+      // Method B (AniList fallback, like animewave): Search AniList by title
+      if (!malId && title) {
+        aniListMedia = await searchAniListByTitle(title);
+        if (aniListMedia && aniListMedia.idMal) {
+          malId = String(aniListMedia.idMal);
+        }
+      }
+
+      // Fetch AniZip metadata using malId
+      var aniZipMeta = null;
+      if (malId) {
+        aniZipMeta = await fetchAniZipMeta(malId);
+      }
+
+      // If AniList media was not searched yet, fetch it if title available
+      if (!aniListMedia && title) {
+        aniListMedia = await searchAniListByTitle(title);
+      }
+
+      // Extract rich images from AniZip & AniList
+      var aniZipImages = (aniZipMeta && Array.isArray(aniZipMeta.images)) ? aniZipMeta.images : [];
+      var clearLogoUrl = "";
+      var fanartUrl = "";
+      var highResPoster = "";
+      for (var ii = 0; ii < aniZipImages.length; ii++) {
+        var imgItem = aniZipImages[ii];
+        if (!imgItem) continue;
+        if (imgItem.coverType === "Clearlogo" && !clearLogoUrl) clearLogoUrl = imgItem.url || "";
+        if (imgItem.coverType === "Fanart" && !fanartUrl) fanartUrl = imgItem.url || "";
+        if (imgItem.coverType === "Poster" && !highResPoster) highResPoster = imgItem.url || "";
+      }
+
+      // TMDB Logo fallback (from HiAnime.cs3) if Clearlogo wasn't provided
+      var tmdbId = (aniZipMeta && aniZipMeta.mappings && aniZipMeta.mappings.themoviedb_id) || null;
+      var tmdbLogoUrl = "";
+      if (tmdbId) {
+        tmdbLogoUrl = await fetchTmdbLogoUrl(isMovie ? "movie" : "tv", tmdbId);
+      }
+
+      var finalLogoUrl = tmdbLogoUrl || clearLogoUrl || undefined;
+      var finalBannerUrl = fanartUrl || (aniListMedia && aniListMedia.bannerImage) || bannerUrl;
+      var finalPosterUrl = (aniListMedia && aniListMedia.coverImage && aniListMedia.coverImage.extraLarge) ||
+        highResPoster || posterUrl;
+
+      var anilistId = (aniZipMeta && aniZipMeta.mappings && aniZipMeta.mappings.anilist_id) ||
+        (aniListMedia && aniListMedia.id) || undefined;
+      var kitsuId = (aniZipMeta && aniZipMeta.mappings && aniZipMeta.mappings.kitsu_id) || undefined;
+
+      // 3. Parse Episodes with rich AniZip thumbnails and titles
+      var allEpisodes = [];
       var epItemRegex = /<a\s+[^>]*class=["'][^"']*ep-item[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
       var em;
       while ((em = epItemRegex.exec(epListHtml)) !== null) {
@@ -663,7 +871,16 @@
         if (epIdMatch) {
           var epNum = epNumMatch ? parseInt(epNumMatch[1], 10) : 1;
           var epId = epIdMatch[1];
-          var epName = epTitleMatch ? cleanText(epTitleMatch[1]) : "Episode " + epNum;
+          var epPageName = epTitleMatch ? cleanText(epTitleMatch[1]) : "Episode " + epNum;
+
+          var metaEp = (aniZipMeta && aniZipMeta.episodes && aniZipMeta.episodes[String(epNum)]) || null;
+          var epName = (metaEp && metaEp.title && (metaEp.title.en || metaEp.title.ja || metaEp.title["x-jat"])) ||
+            epPageName;
+          var epThumb = (metaEp && metaEp.image) || (aniZipImages[0] && aniZipImages[0].url) || finalPosterUrl;
+          var epDesc = (metaEp && (metaEp.overview || metaEp.summary)) || "";
+          var epScore = metaEp && metaEp.rating ? parseFloat(metaEp.rating) : undefined;
+          var epDate = metaEp && (metaEp.airDateUtc || metaEp.airdate) ? (metaEp.airDateUtc || metaEp.airdate) : undefined;
+          var epDuration = metaEp && (metaEp.runtime || metaEp.length) ? (metaEp.runtime || metaEp.length) : undefined;
 
           // Sub episode
           allEpisodes.push(
@@ -673,7 +890,11 @@
               season: 1,
               episode: epNum,
               dubStatus: "sub",
-              posterUrl: posterUrl,
+              posterUrl: epThumb,
+              description: epDesc,
+              score: epScore,
+              date: epDate,
+              runTime: epDuration,
               headers: HEADERS,
             })
           );
@@ -687,7 +908,11 @@
                 season: 1,
                 episode: epNum,
                 dubStatus: "dub",
-                posterUrl: posterUrl,
+                posterUrl: epThumb,
+                description: epDesc,
+                score: epScore,
+                date: epDate,
+                runTime: epDuration,
                 headers: HEADERS,
               })
             );
@@ -695,11 +920,27 @@
         }
       }
 
+      // 4. Parse Recommendations from detail page
+      var recCards = parseFlwCards(detailHtml);
+      var recommendations = recCards.filter(function (r) {
+        return r.url !== detailUrl;
+      });
+
+      // 5. Sync Data
+      var syncData = {
+        malId: malId ? parseInt(malId, 10) : undefined,
+        anilistId: anilistId ? parseInt(anilistId, 10) : undefined,
+        kitsuId: kitsuId ? String(kitsuId) : undefined,
+        tmdbId: tmdbId ? String(tmdbId) : undefined,
+      };
+
       var item = new MultimediaItem({
         title: title,
         url: detailUrl,
-        posterUrl: posterUrl,
-        bannerUrl: bannerUrl,
+        posterUrl: finalPosterUrl,
+        bannerUrl: finalBannerUrl,
+        backgroundPosterUrl: fanartUrl || finalBannerUrl || undefined,
+        logoUrl: finalLogoUrl,
         type: isMovie ? "movie" : "anime",
         description: description,
         score: score,
@@ -710,6 +951,8 @@
         contentRating: contentRating,
         cast: cast,
         episodes: allEpisodes,
+        recommendations: recommendations,
+        syncData: syncData,
         headers: HEADERS,
       });
 
