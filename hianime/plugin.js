@@ -892,9 +892,6 @@
               dubStatus: "sub",
               posterUrl: epThumb,
               description: epDesc,
-              score: epScore,
-              date: epDate,
-              runTime: epDuration,
               headers: HEADERS,
             })
           );
@@ -910,9 +907,6 @@
                 dubStatus: "dub",
                 posterUrl: epThumb,
                 description: epDesc,
-                score: epScore,
-                date: epDate,
-                runTime: epDuration,
                 headers: HEADERS,
               })
             );
@@ -926,33 +920,48 @@
         return r.url !== detailUrl;
       });
 
-      // 5. Sync Data
-      var syncData = {
-        malId: malId ? parseInt(malId, 10) : undefined,
-        anilistId: anilistId ? parseInt(anilistId, 10) : undefined,
-        kitsuId: kitsuId ? String(kitsuId) : undefined,
-        tmdbId: tmdbId ? String(tmdbId) : undefined,
-      };
+      // 5. Sync Data (strictly Map<String, String> for Dart/SkyStream schema)
+      var syncData = {};
+      if (malId) {
+        syncData.mal = String(malId);
+        syncData.mal_id = String(malId);
+        syncData.malId = String(malId);
+      }
+      if (anilistId) {
+        syncData.anilist = String(anilistId);
+        syncData.anilist_id = String(anilistId);
+        syncData.anilistId = String(anilistId);
+      }
+      if (kitsuId) {
+        syncData.kitsu = String(kitsuId);
+        syncData.kitsu_id = String(kitsuId);
+        syncData.kitsuId = String(kitsuId);
+      }
+      if (tmdbId) {
+        syncData.tmdb = String(tmdbId);
+        syncData.tmdb_id = String(tmdbId);
+        syncData.tmdbId = String(tmdbId);
+      }
 
       var item = new MultimediaItem({
         title: title,
         url: detailUrl,
         posterUrl: finalPosterUrl,
-        bannerUrl: finalBannerUrl,
+        bannerUrl: finalBannerUrl || undefined,
         backgroundPosterUrl: fanartUrl || finalBannerUrl || undefined,
-        logoUrl: finalLogoUrl,
+        logoUrl: finalLogoUrl || undefined,
         type: isMovie ? "movie" : "anime",
-        description: description,
-        score: score,
-        duration: duration,
-        status: status,
-        year: year,
+        description: description || "",
+        score: score || undefined,
+        duration: duration || undefined,
+        status: status || "ongoing",
+        year: year || undefined,
         tags: genres,
-        contentRating: contentRating,
+        contentRating: contentRating || undefined,
         cast: cast,
         episodes: allEpisodes,
         recommendations: recommendations,
-        syncData: syncData,
+        syncData: Object.keys(syncData).length > 0 ? syncData : undefined,
         headers: HEADERS,
       });
 

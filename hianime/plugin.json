@@ -1,17 +1,10 @@
 {
   "packageName": "com.igris.repo.hianime",
   "name": "HiAnime",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://hianime.at",
   "description": "Watch anime with sub/dub from HiAnime",
-  "authors": [
-    "IGRIS"
-  ],
-  "languages": [
-    "en",
-    "ja"
-  ],
-  "categories": [
-    "Anime"
-  ]
+  "authors": ["IGRIS"],
+  "languages": ["en", "ja"],
+  "categories": ["Anime"]
 }
