@@ -256,8 +256,8 @@
     var BYPASS_XREQ = "app.netmirror.netmirrornew";
     // The app's WebView performs the ad-click; headless we loop verify2.php until
     // the server reports "All Done" and issues the t_hash_t cookie.
-    var BYPASS_MAX_TRIES = 8;
-    var BYPASS_RETRY_DELAY_MS = 10000;
+    var BYPASS_MAX_TRIES = 12;
+    var BYPASS_RETRY_DELAY_MS = 2500;
     var LANGUAGE_NAMES = {
         ar: "Arabic", ara: "Arabic",
         bn: "Bengali", ben: "Bengali",
@@ -375,7 +375,10 @@
             "ott": config.ott,
             "hd": "on"
         };
-        if (token) cookies.t_hash_t = token;
+        if (token) {
+            var cookieName = (bypassCookie && bypassCookie.name) || "t_hash_t";
+            cookies[cookieName] = token;
+        }
         if (config.studio) cookies.studio = config.studio;
         return cookies;
     }
@@ -594,6 +597,8 @@
 
         // Step 1: home fetch with EXACTLY the two headers the working extension sends.
         var addHash = "";
+        var quryParam = "hee5";
+        var vsiteHost = "userver";
         try {
             var homeRes = await requestGet(homeUrl, {
                 "User-Agent": BYPASS_USER_AGENT,
@@ -616,6 +621,10 @@
                 var m2 = body.match(/\baddhash=["']?([0-9a-f]{32}::[0-9a-f]{32}::\d{9,10}::(?:ni|p))["']?/i);
                 if (m2 && isValidToken(m2[1])) addHash = m2[1];
             }
+            var qm = body.match(/var\s+Qury\s*=\s*["']([^"']+)["']/i);
+            if (qm && qm[1]) quryParam = qm[1];
+            var vm = body.match(/var\s+Vsite2\s*=\s*["']([^"']+)["']/i);
+            if (vm && vm[1]) vsiteHost = vm[1];
             if (!addHash) {
                 // Capture diagnostics so we can see EVERY token-shaped value in the page.
                 try {
@@ -640,21 +649,23 @@
 
         // Step 2: ad-impression beacon (the 301 to the ad network is expected).
         try {
-            await requestGet("https://userver.net52.cc/?jjoii=" + encodeURIComponent(addHash) + "&a=y&t=" + unixTime(), {
+            var beaconUrl = "https://" + vsiteHost + ".net52.cc/?" + encodeURIComponent(quryParam) + "=" + encodeURIComponent(addHash) + "&a=y&t=" + Math.random();
+            await requestGet(beaconUrl, {
                 "User-Agent": BYPASS_USER_AGENT,
                 "X-Requested-With": BYPASS_XREQ
             });
         } catch (_) { /* beacon best-effort */ }
 
-        // Step 3: 10s ad-view delay BEFORE the first verify2 POST (matches delay(10000)).
-        await sleep(10000);
+        // Step 3: ad-view delay BEFORE the first verify2 POST (server requires 20+ seconds).
+        await sleep(22000);
 
-        // Step 4: verify2 loop (up to 8 tries); capture t_hash_t when "All Done" appears.
+        // Step 4: verify2 loop; capture t_hash_t when "All Done" appears.
         var lastText = "";
-        for (var i = 0; i < 8; i++) {
+        for (var i = 0; i < BYPASS_MAX_TRIES; i++) {
             var vHeaders = {
                 "User-Agent": BYPASS_USER_AGENT,
-                "X-Requested-With": "XMLHttpRequest"
+                "X-Requested-With": "XMLHttpRequest",
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
             };
             var vRes = await requestPostForm(MAIN_URL + "/mobile/verify2.php", "verify=" + encodeURIComponent(addHash), vHeaders);
             var vText = String(vRes.body || "");
@@ -687,7 +698,7 @@
                 }
                 // All Done but no cookie in this response; keep looping a little.
             }
-            if (i < 7) await sleep(BYPASS_RETRY_DELAY_MS);
+            if (i < BYPASS_MAX_TRIES - 1) await sleep(BYPASS_RETRY_DELAY_MS);
         }
         // Failure path: clear the stored cookie (mirrors clearCookie() in the source).
         try {
@@ -707,7 +718,7 @@
             var store = await loadTokenStore();
             var entry = store[providerId];
             if (entry && entry.value && Date.now() - (entry.time || 0) < COOKIE_TTL_MS) {
-                bypassCookie = { name: entry.name || "t_hash", value: entry.value, time: entry.time || Date.now() };
+                bypassCookie = { name: entry.name || "t_hash_t", value: entry.value, time: entry.time || Date.now() };
                 return entry.value;
             }
         } catch (_) {}
@@ -1452,7 +1463,7 @@
                 "&t=" + encodeURIComponent(input.title || config.name) + "&tm=" + unixTime();
             console.log("[netmirror][loadStreams] GET " + playlistUrl);
 
-            var cookieName = bypassCookie.name || "t_hash";
+            var cookieName = (bypassCookie && bypassCookie.name) || "t_hash_t";
             var cookieHeaderValue = cookieName + "=" + token + "; ott=" + (config.playerOtt || config.ott) + "; hd=on";
             var plHeaders = {
                 "Accept": "*/*",
