@@ -362,7 +362,7 @@
   {
     "packageName": "com.igris.repo.netmirror",
     "name": "NetMirror",
-    "version": 16,
+    "version": 17,
     "baseUrl": "https://net52.cc",
     "providers": [
       {
