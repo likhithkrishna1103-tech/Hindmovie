@@ -1,8 +1,8 @@
 {
   "packageName": "com.igris.repo.movies4u",
   "name": "Movies4U",
-  "version": 42,
-  "baseUrl": "https://new6.movies4u.clinic",
+  "version": 49,
+  "baseUrl": "https://new7.movies4u.clinic",
   "description": "Movie picks with straightforward stream links.",
   "authors": ["IGRIS"],
   "languages": ["hi", "en", "ta", "te", "ml", "kn"],
