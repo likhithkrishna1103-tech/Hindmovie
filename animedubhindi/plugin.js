@@ -1056,6 +1056,148 @@
         }
     }
 
+    async function httpRequest(url, options) {
+        url = String(url || "").trim();
+        options = options || {};
+        var method = options.method || "GET";
+        var headers = options.headers || {};
+        var body = options.body;
+        var allowRedirects = options.allowRedirects !== false;
+
+        if (method === "GET" && (allowRedirects || typeof fetch !== "function") && typeof http_get === "function") {
+            try {
+                var res = await http_get(url, headers);
+                return {
+                    status: res && typeof res.status !== "undefined" ? res.status : 200,
+                    body: res && typeof res.body !== "undefined" ? String(res.body || "") : "",
+                    headers: parseHeaders(res && res.headers),
+                    finalUrl: String(res && (res.finalUrl || res.url) || url)
+                };
+            } catch (_) {}
+        }
+
+        if (typeof fetch === "function") {
+            var fetchOptions = {
+                method: method,
+                headers: headers,
+                body: body,
+                redirect: allowRedirects ? "follow" : "manual"
+            };
+            var fres = await fetch(url, fetchOptions);
+            var fbody = await fres.text();
+            return {
+                status: fres.status,
+                body: fbody,
+                headers: parseHeaders(fres.headers),
+                finalUrl: fres.url || url
+            };
+        }
+
+        return normalHttpGet(url, headers);
+    }
+
+    async function resolveFinalHttpUrl(startUrl, customHeaders, maxRedirects) {
+        maxRedirects = typeof maxRedirects === "number" ? maxRedirects : 8;
+        var currentUrl = String(startUrl || "");
+        for (var hops = 0; hops < maxRedirects; hops++) {
+            var dlMatch = currentUrl.match(/dl\.php\?link=([^&]+)/i);
+            if (dlMatch) {
+                try { return decodeURIComponent(dlMatch[1]); } catch (_) { return dlMatch[1]; }
+            }
+            var headers = Object.assign({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Referer": currentUrl
+            }, customHeaders || {});
+
+            try {
+                var res = await httpRequest(currentUrl, { headers: headers, allowRedirects: false });
+                var loc = res.headers && (res.headers.location || res.headers.Location || res.headers["hx-redirect"] || res.headers["HX-Redirect"]);
+                if (!loc) {
+                    var finalMatch = (res.finalUrl || "").match(/dl\.php\?link=([^&]+)/i);
+                    if (finalMatch) {
+                        try { return decodeURIComponent(finalMatch[1]); } catch (_) { return finalMatch[1]; }
+                    }
+                    return res.finalUrl || currentUrl;
+                }
+                currentUrl = fixUrl(loc, currentUrl);
+            } catch (_) {
+                return currentUrl;
+            }
+        }
+        return currentUrl;
+    }
+
+    async function resolveBuzzServer(url, refererLabel) {
+        var ref = refererLabel || "BuzzServer";
+        var quality = parseQuality(url);
+        var browserHeaders = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Referer": url,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Ch-Ua-Mobile": "?0"
+        };
+        try {
+            var pageRes = await httpRequest(url, { headers: browserHeaders, allowRedirects: true });
+            var html = pageRes.body || "";
+            var hxMatch = html.match(/a[^>]+hx-get=["']([^"']*download[^"']*)["']/i) || html.match(/hx-get=["']([^"']+)["']/i);
+            var hxGet = hxMatch ? hxMatch[1] : null;
+            var copyMatch = html.match(/copyDownloadLink\(['"]([^'"]+)['"]\)/i);
+            var copyLink = copyMatch ? copyMatch[1].replace(/\\\//g, "/") : null;
+            var downloadUrl = hxGet ? fixUrl(hxGet, url)
+                            : copyLink ? fixUrl(copyLink, url)
+                            : url.replace(/\/$/, "") + "/download";
+            var reqHeaders = Object.assign({}, browserHeaders, {
+                "HX-Request": "true",
+                "Referer": url
+            });
+            var dlRes = await httpRequest(downloadUrl, { headers: reqHeaders, allowRedirects: false });
+            var redirectUrl = (dlRes.headers && (dlRes.headers["hx-redirect"] || dlRes.headers["HX-Redirect"] || dlRes.headers.location || dlRes.headers.Location)) || dlRes.finalUrl || downloadUrl;
+            return [toStreamResult(redirectUrl, ref + " [BuzzServer]", quality)];
+        } catch (_) {
+            try {
+                var fallbackRes = await httpRequest(url.replace(/\/$/, "") + "/download", {
+                    headers: { "User-Agent": browserHeaders["User-Agent"], "Referer": url, "HX-Request": "true" },
+                    allowRedirects: false
+                });
+                var fallbackRedirect = (fallbackRes.headers && (fallbackRes.headers["hx-redirect"] || fallbackRes.headers["HX-Redirect"] || fallbackRes.headers.location || fallbackRes.headers.Location)) || url;
+                return [toStreamResult(fallbackRedirect, ref + " [BuzzServer]", quality)];
+            } catch (err) {
+                return [toStreamResult(url, ref + " [BuzzServer]", quality)];
+            }
+        }
+    }
+
+    function resolveHubCloudJsHrefs(html) {
+        var mappings = {};
+        var elementHrefRegex = /document\.getElementById\(\s*["']([^"']+)["']\s*\)\.href\s*=\s*([a-zA-Z0-9_$]+)/g;
+        var match;
+        while ((match = elementHrefRegex.exec(html))) {
+            var id = match[1];
+            var varName = match[2];
+            var varDeclRegex = new RegExp("(?:var|let|const)\\s+" + varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*=\\s*[\"']([^\"']+)[\"']", "i");
+            var declMatch = html.match(varDeclRegex);
+            if (declMatch && declMatch[1]) {
+                mappings[id] = declMatch[1];
+            }
+        }
+        var pxlVarMatch = html.match(/(?:var|let|const)?\s*pxl\w*\s*=\s*["'](https?:\/\/[^"']+)["']/i);
+        if (pxlVarMatch && pxlVarMatch[1]) {
+            mappings["_pxl"] = pxlVarMatch[1];
+            if (!mappings["pxl-1"]) mappings["pxl-1"] = pxlVarMatch[1];
+        }
+        var allPxl = html.match(/https?:\/\/pixeldrain\.[a-z]+\/u\/[a-zA-Z0-9]+/gi) || [];
+        for (var p = 0; p < allPxl.length; p++) {
+            if (!/negn6f/i.test(allPxl[p])) {
+                if (!mappings["_pxl"]) mappings["_pxl"] = allPxl[p];
+                if (!mappings["pxl-1"]) mappings["pxl-1"] = allPxl[p];
+                break;
+            }
+        }
+        return mappings;
+    }
+
     async function extractHubCloud(url, source, quality) {
         var results = [];
         try {
@@ -1078,34 +1220,140 @@
             if (!pageHtml) return results;
             var sizeEl = pageHtml.match(/<i[^>]*id="size"[^>]*>([\s\S]*?)<\/i>/i);
             var fileSize = sizeEl ? cleanText(stripHtml(sizeEl[1])) : "";
+            var sizeSuffix = fileSize ? (" [" + fileSize + "]") : "";
             var mergedQuality = quality || parseQuality(pageHtml + " " + fileSize);
-            var linkRe = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+            var jsHrefs = resolveHubCloudJsHrefs(pageHtml);
+
+            var linkRe = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
             var match;
+            var anchors = [];
             while ((match = linkRe.exec(pageHtml))) {
-                var link = match[1];
-                var text = cleanText(stripHtml(match[2])).toLowerCase();
+                var attrs = match[1];
+                var rawText = cleanText(stripHtml(match[2]));
+                var hrefMatch = attrs.match(/\bhref=["']([^"']+)["']/i);
+                if (!hrefMatch) continue;
+                var link = hrefMatch[1];
                 if (!link || link.indexOf("#") === 0 || link.indexOf("javascript:") === 0) continue;
-                if (text.indexOf("login") !== -1 || text.indexOf("sign in") !== -1) continue;
-                if (text.indexOf("vpn") !== -1 || text.indexOf("how ?") !== -1 || text.indexOf("tutorial") !== -1) continue;
-                if (text.indexOf("idm") !== -1 || text.indexOf("google") !== -1) continue;
-                if (text.indexOf("telegram") !== -1 && text.indexOf("download") === -1) continue;
-                if (text.indexOf("advertise") !== -1) continue;
-                if (link.indexOf("tinyurl.com") !== -1) continue;
-                if (link.indexOf("google.com") !== -1) continue;
-                if (text.indexOf("create an account") !== -1) continue;
-                if (text.indexOf("watch online") !== -1) continue;
-                var absUrl = fixUrl(link, hubOrigin);
-                if (text.indexOf("download") !== -1 && absUrl) {
-                    var ln = text.replace(/\s+/g, " ").trim();
-                    results.push(toStreamResult(absUrl, source + " " + ln, mergedQuality));
-                } else if (text.indexOf("10gbps") !== -1 && absUrl) {
-                    results.push(toStreamResult(absUrl, source + " 10Gbps", mergedQuality));
-                } else if (link.indexOf("r2.dev") !== -1 || link.indexOf("cloudfront.net") !== -1) {
-                    results.push(toStreamResult(absUrl, source + " Direct", mergedQuality));
-                } else if (link.indexOf("http") === 0 && absUrl) {
-                    results.push(toStreamResult(absUrl, source, mergedQuality));
+                var idMatch = attrs.match(/\bid=["']([^"']+)["']/i);
+                anchors.push({
+                    href: fixUrl(link, hubOrigin),
+                    text: rawText,
+                    id: idMatch ? idMatch[1] : ""
+                });
+            }
+
+    function isRelevantHubCloudAnchor(label, href) {
+        label = String(label || "").toLowerCase();
+        href = String(href || "").toLowerCase();
+        if (/video-downloads\.googleusercontent\.com|instant\.busycdn\.xyz|fastcdn-dl\.pages\.dev|rest\.awscdn\.rest|hub\.diskcdn\.buzz|cdn\.[a-z0-9.-]*buzz/i.test(href)) return true;
+        if (/fsl server|pixeldra|pixelserver|pixel server|pixeldrain|10gbps|fast download|buzzserver|buzz server|buzz|fuckingfast|s3 server|fslv2|mega server/i.test(label)) return true;
+        if (/pixeldra|buzzserver|fuckingfast|10gbps/i.test(href)) return true;
+        if (/r2\.cloudflarestorage\.com|r2\.dev|cloudfront\.net/i.test(href)) return true;
+        return false;
+    }
+
+            for (var i = 0; i < anchors.length; i++) {
+                var a = anchors[i];
+                var anchorHref = (a.id && jsHrefs && jsHrefs[a.id]) || a.href;
+                var label = a.text.toLowerCase();
+
+                if (/login|sign in|vpn|how \?|tutorial|idm|google\.com|tinyurl\.com|create an account|watch online|advertise/i.test(label + " " + anchorHref)) {
+                    continue;
+                }
+                if (/telegram/i.test(label) && !/download/i.test(label)) continue;
+                if (!isRelevantHubCloudAnchor(label, anchorHref)) continue;
+
+                // Direct streaming video links
+                if (/video-downloads\.googleusercontent\.com|instant\.busycdn\.xyz|fastcdn-dl\.pages\.dev|rest\.awscdn\.rest|hub\.diskcdn\.buzz|cdn\.[a-z0-9.-]*buzz/i.test(anchorHref)) {
+                    results.push(toStreamResult(anchorHref, source + sizeSuffix, mergedQuality));
+                    continue;
+                }
+
+                // FSL Server
+                if (/fsl server/i.test(label)) {
+                    results.push(toStreamResult(anchorHref, source + " [FSL Server]" + sizeSuffix, mergedQuality));
+                    continue;
+                }
+
+                // BuzzServer / FuckingFast
+                if (/buzzserver|buzz server|buzz|fuckingfast/i.test(label) || /buzzserver|fuckingfast/i.test(anchorHref)) {
+                    try {
+                        var buzzStreams = await resolveBuzzServer(anchorHref, source);
+                        if (buzzStreams && buzzStreams.length) {
+                            buzzStreams.forEach(function(s) {
+                                results.push(toStreamResult(s.url, source + " [BuzzServer]" + sizeSuffix, mergedQuality, s.headers));
+                            });
+                            continue;
+                        }
+                    } catch (_) {}
+                    results.push(toStreamResult(anchorHref, source + " [BuzzServer]" + sizeSuffix, mergedQuality));
+                    continue;
+                }
+
+                // Pixeldrain
+                if (/pixeldra|pixelserver|pixel server|pixeldrain/i.test(label) || /pixeldra/i.test(anchorHref)) {
+                    var pxlLink = anchorHref;
+                    if (/negn6f/i.test(pxlLink) || (!/\/u\//.test(pxlLink) && !/\/api\//.test(pxlLink))) {
+                        if (jsHrefs && jsHrefs[a.id] && !/negn6f/i.test(jsHrefs[a.id])) {
+                            pxlLink = jsHrefs[a.id];
+                        } else if (jsHrefs && jsHrefs["pxl-1"] && !/negn6f/i.test(jsHrefs["pxl-1"])) {
+                            pxlLink = jsHrefs["pxl-1"];
+                        } else if (jsHrefs && jsHrefs["_pxl"] && !/negn6f/i.test(jsHrefs["_pxl"])) {
+                            pxlLink = jsHrefs["_pxl"];
+                        }
+                    }
+                    var pxlBase = originOf(pxlLink) || "https://pixeldrain.dev";
+                    var fileId = pxlLink.split("/").pop().split("?")[0];
+                    var pxlFinal = /download/i.test(pxlLink) ? pxlLink : (pxlBase + "/api/file/" + fileId + "?download");
+                    results.push(toStreamResult(pxlFinal, source + " Pixeldrain" + sizeSuffix, mergedQuality));
+                    continue;
+                }
+
+                // 10Gbps / Fast Download
+                if (/10gbps|fast download|download file/i.test(label) || /10gbps/i.test(anchorHref)) {
+                    try {
+                        var final10gbps = await resolveFinalHttpUrl(anchorHref, { "Referer": anchorHref });
+                        var dlMatch = final10gbps.match(/dl\.php\?link=([^&]+)/i);
+                        if (dlMatch) {
+                            try { final10gbps = decodeURIComponent(dlMatch[1]); } catch (_) { final10gbps = dlMatch[1]; }
+                        }
+                        results.push(toStreamResult(final10gbps, source + " 10Gbps [Download]" + sizeSuffix, mergedQuality));
+                    } catch (_) {
+                        results.push(toStreamResult(anchorHref, source + " 10Gbps [Download]" + sizeSuffix, mergedQuality));
+                    }
+                    continue;
+                }
+
+                // S3 Server
+                if (/s3 server/i.test(label)) {
+                    results.push(toStreamResult(anchorHref, source + " [S3 Server]" + sizeSuffix, mergedQuality));
+                    continue;
+                }
+
+                // Mega Server
+                if (/mega server/i.test(label)) {
+                    results.push(toStreamResult(anchorHref, source + " [Mega Server]" + sizeSuffix, mergedQuality));
+                    continue;
+                }
+
+                // FSLv2
+                if (/fslv2/i.test(label)) {
+                    results.push(toStreamResult(anchorHref, source + " [FSLv2]" + sizeSuffix, mergedQuality));
+                    continue;
+                }
+
+                // R2 / Cloudfront / CDN direct links
+                if (/r2\.cloudflarestorage\.com|r2\.dev|cloudfront\.net/i.test(anchorHref)) {
+                    results.push(toStreamResult(anchorHref, source + " Direct" + sizeSuffix, mergedQuality));
+                    continue;
+                }
+
+                // Fallback for download text
+                if (/download/i.test(label) && anchorHref) {
+                    results.push(toStreamResult(anchorHref, source + " " + label + sizeSuffix, mergedQuality));
                 }
             }
+
             return dedupeStreams(results);
         } catch (_) {
             return results;
@@ -1134,8 +1382,14 @@
         if (url.indexOf("gdflix") !== -1 || url.indexOf("gdlink") !== -1) {
             return extractGdflix(url, source, quality);
         }
-        if (url.indexOf("pixeldrain") !== -1 && /\/u\//.test(url)) {
-            return [toStreamResult("https://pixeldrain.dev/api/file/" + url.split("/").pop() + "?download", source, quality)];
+        if (url.indexOf("pixeldrain") !== -1) {
+            var pxlMatch = url.match(/pixeldrain\.[a-z]+\/(?:u|api\/file)\/([a-zA-Z0-9]+)/i);
+            if (pxlMatch && !/negn6f/i.test(pxlMatch[1])) {
+                return [toStreamResult("https://pixeldrain.dev/api/file/" + pxlMatch[1] + "?download", source, quality)];
+            }
+        }
+        if (/buzzserver|fuckingfast/i.test(url)) {
+            return resolveBuzzServer(url, source);
         }
         if (url.indexOf("gdmirrorbot.nl") !== -1) {
             var multiResults = await extractMulti(url, source, quality);
