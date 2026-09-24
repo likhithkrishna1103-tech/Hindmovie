@@ -17,7 +17,7 @@ If you find this project helpful, consider supporting its development!
 | :--- | :--- | :--- | :--- | :--- |
 | Anikage | 11 | Working ✅️ | Anime | en, ja |
 | Anilight | 1 | Working ✅️ | Anime | en, ja |
-| AnimeDubHindi | 4 | Working ✅️ | Anime | hi, en, ja, ta, te, ml, bn, kn |
+| AnimeDubHindi | 5 | Working ✅️ | Anime | hi, en, ja, ta, te, ml, bn, kn |
 | AnimeWave + AniKoto | 10 | Working ✅️ | Anime | en, ja |
 | AniSuge | 4 | Working ✅️ | Anime | en, ja |
 | Castle TV | 9 | Working ✅️ | Movies, Series | en, hi |
