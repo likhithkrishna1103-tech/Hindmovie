@@ -22,7 +22,7 @@ If you find this project helpful, consider supporting its development!
 | AniSuge | 4 | Working ✅️ | Anime | en, ja |
 | Castle TV | 9 | Working ✅️ | Movies, Series | en, hi |
 | Cinefreak | 10 | Working ✅️ | Others | en, hi, ta, te, ml, kn, bn |
-| CineStream | 26 | Working ✅️ | Movies, Series, Anime | en, hi, ja |
+| CineStream | 27 |  plugin is under Maintenance and will be fixed soon | Movies, Series, Anime | en, hi, ja |
 | HiAnime | 3 | Working ✅️ | Anime | en, ja |
 | HindMoviez | 17 | Working ✅️ | Movies, Series | hi, en, ta, te, ml, kn |
 | Live Sports 🏏 | 11 | Working ✅️ | LiveTv | en, hi |
