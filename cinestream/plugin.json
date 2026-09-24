@@ -6,5 +6,6 @@
   "description": "CineMeta-powered catalog with an expanded CineStream source stack, including Stremio, direct OTT mirrors, and embedded stream resolvers.",
   "authors": ["IGRIS"],
   "languages": ["en", "hi", "ja"],
-  "categories": ["Movies", "Series", "Anime"]
+  "categories": ["Movies", "Series", "Anime"],
+  "status": "Working ✅️"
 }

@@ -6,5 +6,6 @@
   "description": "Watch anime with sub/dub from Anikage",
   "authors": ["IGRIS"],
   "languages": ["en", "ja"],
-  "categories": ["Anime"]
+  "categories": ["Anime"],
+  "status": "Working ✅️"
 }

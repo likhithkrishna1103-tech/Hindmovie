@@ -6,5 +6,6 @@
   "description": "Sharp movies and series in one place.",
   "authors": ["IGRIS"],
   "languages": ["en", "hi"],
-  "categories": ["Movies", "Series"]
+  "categories": ["Movies", "Series"],
+  "status": "Working ✅️"
 }

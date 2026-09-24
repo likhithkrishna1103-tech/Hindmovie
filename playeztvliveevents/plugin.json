@@ -6,5 +6,6 @@
   "description": "Live sports from the PlayEZTV feed.",
   "authors": ["IGRIS"],
   "languages": ["en", "hi"],
-  "categories": ["LiveTv"]
+  "categories": ["LiveTv"],
+  "status": "Working ✅️"
 }

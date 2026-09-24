@@ -32,5 +32,6 @@
   "description": "A clone for hianime",
   "authors": ["IGRIS"],
   "languages": ["en", "ja"],
-  "categories": ["Anime"]
+  "categories": ["Anime"],
+  "status": "Working ✅️"
 }

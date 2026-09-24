@@ -18,5 +18,6 @@
   ],
   "authors": ["Igris"],
   "languages": ["hi", "en", "te", "ta", "ma"],
-  "categories": ["Movies", "series"]
+  "categories": ["Movies", "series"],
+  "status": "Working ✅️"
 }

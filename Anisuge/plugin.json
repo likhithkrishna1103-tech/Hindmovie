@@ -7,5 +7,6 @@
   "description": "A Varient for animewave",
   "authors": ["IGRIS"],
   "languages": ["en", "ja"],
-  "categories": ["Anime"]
+  "categories": ["Anime"],
+  "status": "Working ✅️"
 }

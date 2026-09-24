@@ -6,5 +6,6 @@
   "description": "Cinefreak plugin for ZORO",
   "authors": ["Igris"],
   "languages": ["en", "hi", "ta", "te", "ml", "kn", "bn"],
-  "categories": ["Others"]
+  "categories": ["Others"],
+  "status": "Working ✅️"
 }

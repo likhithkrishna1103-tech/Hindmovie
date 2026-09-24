@@ -36,5 +36,6 @@
   "description": "NetMirror providers ported from the CNCVerse Cloudstream extension with fast NewTV HLS stream resolution.",
   "authors": ["IGRIS"],
   "languages": ["en", "hi", "ta", "te", "ml", "kn", "bn", "mr", "pa", "gu"],
-  "categories": ["Movies", "Series", "Anime"]
+  "categories": ["Movies", "Series", "Anime"],
+  "status": "Working ✅️ but you may face few errors based on your isp provider or geo-blocking in that case using a vpn is recommended "
 }
