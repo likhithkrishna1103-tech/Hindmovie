@@ -4,8 +4,20 @@
   "version": 5,
   "baseUrl": "https://www.animedubhindi.cc",
   "description": "Hindi and multi-audio anime movies and series from AnimeDubHindi.",
-  "authors": ["IGRIS"],
-  "languages": ["hi", "en", "ja", "ta", "te", "ml", "bn", "kn"],
-  "categories": ["Anime"],
-  "status": "Working ✅️"
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "hi",
+    "en",
+    "ja",
+    "ta",
+    "te",
+    "ml",
+    "bn",
+    "kn"
+  ],
+  "categories": [
+    "Anime"
+  ]
 }

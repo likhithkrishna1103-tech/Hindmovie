@@ -26,8 +26,18 @@
     }
   ],
   "description": "😉 No description needed",
-  "authors": ["IGRIS"],
-  "languages": ["te", "ta", "hi", "ml", "kn", "en"],
-  "categories": ["Others"],
-  "status": "you can watch only upto 360p"
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "te",
+    "ta",
+    "hi",
+    "ml",
+    "kn",
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
 }

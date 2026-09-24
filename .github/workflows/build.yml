@@ -50,6 +50,15 @@ jobs:
           with open(readme_path, 'r', encoding='utf-8') as f:
               content = f.read()
 
+          status_file = 'status.json'
+          statuses = {}
+          if os.path.isfile(status_file):
+              try:
+                  with open(status_file, 'r', encoding='utf-8') as sf:
+                      statuses = json.load(sf)
+              except Exception as e:
+                  print(f"Error reading {status_file}: {e}")
+
           plugins = []
           for item in sorted(os.listdir('.')):
               # Ignore dist, hidden directories, and non-directories
@@ -60,9 +69,11 @@ jobs:
                   try:
                       with open(plugin_file, 'r', encoding='utf-8') as pf:
                           data = json.load(pf)
+                          pkg = str(data.get('packageName', '')).strip()
                           name = str(data.get('name', item)).strip()
                           version = str(data.get('version', 'N/A')).strip()
-                          status = str(data.get('status', 'N/A')).strip().replace('\n', ' ')
+                          status = statuses.get(pkg) or statuses.get(item) or statuses.get(name) or data.get('status', 'Working ✅️')
+                          status = str(status).strip().replace('\n', ' ')
 
                           cats = data.get('categories', [])
                           if isinstance(cats, list):

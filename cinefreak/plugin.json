@@ -4,8 +4,19 @@
   "version": 10,
   "baseUrl": "https://cinefreak.nl",
   "description": "Cinefreak plugin for ZORO",
-  "authors": ["Igris"],
-  "languages": ["en", "hi", "ta", "te", "ml", "kn", "bn"],
-  "categories": ["Others"],
-  "status": "Working ✅️"
+  "authors": [
+    "Igris"
+  ],
+  "languages": [
+    "en",
+    "hi",
+    "ta",
+    "te",
+    "ml",
+    "kn",
+    "bn"
+  ],
+  "categories": [
+    "Others"
+  ]
 }

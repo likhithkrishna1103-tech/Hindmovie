@@ -4,8 +4,14 @@
   "version": 11,
   "baseUrl": "https://adsflw.xyz",
   "description": "Live sports from the PlayEZTV feed.",
-  "authors": ["IGRIS"],
-  "languages": ["en", "hi"],
-  "categories": ["LiveTv"],
-  "status": "Working ✅️"
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "hi"
+  ],
+  "categories": [
+    "LiveTv"
+  ]
 }

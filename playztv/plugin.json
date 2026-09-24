@@ -46,8 +46,21 @@
     }
   ],
   "description": "Bundled live TV plugin with PlayZTV providers, Dark TV, and Free TV. Live events remain in the separate PlayEZTV Live Events plugin.",
-  "authors": ["IGRIS"],
-  "languages": ["en", "hi", "ta", "te", "ml", "kn", "bn", "mr", "pa"],
-  "categories": ["Livestream"],
-  "status": "Working ✅️"
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "hi",
+    "ta",
+    "te",
+    "ml",
+    "kn",
+    "bn",
+    "mr",
+    "pa"
+  ],
+  "categories": [
+    "Livestream"
+  ]
 }

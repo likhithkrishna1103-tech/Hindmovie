@@ -4,8 +4,14 @@
   "version": 1,
   "baseUrl": "https://anilight.live",
   "description": "Watch anime with sub/dub from Anilight",
-  "authors": ["IGRIS"],
-  "languages": ["en", "ja"],
-  "categories": ["Anime"],
-  "status": "Working ✅️"
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "ja"
+  ],
+  "categories": [
+    "Anime"
+  ]
 }

@@ -4,8 +4,14 @@
   "version": 3,
   "baseUrl": "https://hianime.at",
   "description": "Watch anime with sub/dub from HiAnime",
-  "authors": ["IGRIS"],
-  "languages": ["en", "ja"],
-  "categories": ["Anime"],
-  "status": "Working ✅️"
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "ja"
+  ],
+  "categories": [
+    "Anime"
+  ]
 }

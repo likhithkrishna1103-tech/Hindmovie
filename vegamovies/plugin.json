@@ -16,8 +16,18 @@
       "baseUrl": "https://rogmovies.vip"
     }
   ],
-  "authors": ["Igris"],
-  "languages": ["hi", "en", "te", "ta", "ma"],
-  "categories": ["Movies", "series"],
-  "status": "Working ✅️"
+  "authors": [
+    "Igris"
+  ],
+  "languages": [
+    "hi",
+    "en",
+    "te",
+    "ta",
+    "ma"
+  ],
+  "categories": [
+    "Movies",
+    "series"
+  ]
 }

@@ -4,14 +4,24 @@
   "version": 50,
   "baseUrl": "https://new7.movies4u.clinic",
   "description": "Movie picks with straightforward stream links.",
-  "authors": ["IGRIS"],
-  "languages": ["hi", "en", "ta", "te", "ml", "kn"],
-  "categories": ["Movies"],
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "hi",
+    "en",
+    "ta",
+    "te",
+    "ml",
+    "kn"
+  ],
+  "categories": [
+    "Movies"
+  ],
   "domains": [
     {
       "name": "movies4u.clinic (Primary)",
       "url": "https://new6.movies4u.clinic"
     }
-  ],
-  "status": "Working ✅️"
+  ]
 }

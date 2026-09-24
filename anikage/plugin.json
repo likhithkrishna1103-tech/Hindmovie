@@ -4,8 +4,14 @@
   "version": 11,
   "baseUrl": "https://anikage.cc",
   "description": "Watch anime with sub/dub from Anikage",
-  "authors": ["IGRIS"],
-  "languages": ["en", "ja"],
-  "categories": ["Anime"],
-  "status": "Working ✅️"
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "en",
+    "ja"
+  ],
+  "categories": [
+    "Anime"
+  ]
 }
