@@ -6,6 +6,7 @@ on:
     paths-ignore:
       - 'dist/**'
       - 'README.md'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,24 +15,113 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
       - name: Deploy Repository
         run: |
           npm install -g skystream-cli
           skystream deploy -u https://raw.githubusercontent.com/${{ github.repository }}/main
 
+      - name: Update README with Plugins Table
+        run: |
+          python3 - << 'EOF'
+          import os
+          import json
+          import re
+
+          readme_path = 'README.md'
+          if not os.path.exists(readme_path):
+              print("README.md not found!")
+              exit(1)
+
+          with open(readme_path, 'r', encoding='utf-8') as f:
+              content = f.read()
+
+          plugins = []
+          for item in sorted(os.listdir('.')):
+              # Ignore dist, hidden directories, and non-directories
+              if item == 'dist' or item.startswith('.') or not os.path.isdir(item):
+                  continue
+              plugin_file = os.path.join(item, 'plugin.json')
+              if os.path.isfile(plugin_file):
+                  try:
+                      with open(plugin_file, 'r', encoding='utf-8') as pf:
+                          data = json.load(pf)
+                          name = str(data.get('name', item)).strip()
+                          version = str(data.get('version', 'N/A')).strip()
+                          status = str(data.get('status', 'N/A')).strip().replace('\n', ' ')
+
+                          cats = data.get('categories', [])
+                          if isinstance(cats, list):
+                              categories = ', '.join(str(c) for c in cats)
+                          else:
+                              categories = str(cats).strip()
+
+                          langs = data.get('languages', [])
+                          if isinstance(langs, list):
+                              languages = ', '.join(str(l) for l in langs)
+                          else:
+                              languages = str(langs).strip()
+
+                          plugins.append((name, version, status, categories, languages))
+                  except Exception as e:
+                      print(f"Error reading {plugin_file}: {e}")
+
+          # Sort plugins alphabetically by name (case-insensitive)
+          plugins.sort(key=lambda x: x[0].lower())
+
+          # Generate Markdown Table
+          table_lines = [
+              '| Plugin | Version | Status | Categories | Languages |',
+              '| :--- | :--- | :--- | :--- | :--- |'
+          ]
+          for name, version, status, categories, languages in plugins:
+              table_lines.append(f"| {name} | {version} | {status} | {categories} | {languages} |")
+
+          table_str = '\n'.join(table_lines)
+          start_tag = '<!-- PLUGINS_TABLE_START -->'
+          end_tag = '<!-- PLUGINS_TABLE_END -->'
+          block = f"{start_tag}\n{table_str}\n{end_tag}"
+
+          if start_tag in content and end_tag in content:
+              pattern = re.compile(rf"{re.escape(start_tag)}.*?{re.escape(end_tag)}", re.DOTALL)
+              new_content = pattern.sub(block, content)
+          else:
+              match = re.search(r'(<a\s+href=[\"\']https://buymeacoffee\.com[^>]*>.*?</a>)', content, re.DOTALL)
+              if match:
+                  insert_pos = match.end()
+                  new_content = content[:insert_pos] + '\n\n---\n\n### 🧩 Plugins Status\n\n' + block + content[insert_pos:]
+              else:
+                  new_content = content + '\n\n### 🧩 Plugins Status\n\n' + block + '\n'
+
+          with open(readme_path, 'w', encoding='utf-8') as f:
+              f.write(new_content)
+
+          print(f"Successfully updated {readme_path} with {len(plugins)} plugins.")
+          EOF
+
       - name: Commit and Push changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "chore: automated deploy [skip ci]" || echo "No changes to commit"
-          git push
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: automated deploy and update readme [skip ci]"
+            git pull --rebase origin main
+            git push
+          fi
