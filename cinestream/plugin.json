@@ -1,11 +1,11 @@
 {
   "packageName": "com.igris.repo.cinestream",
   "name": "CineStream",
-  "version": 26,
+  "version": 27,
   "baseUrl": "https://cinemeta-catalogs.strem.io",
   "description": "CineMeta-powered catalog with an expanded CineStream source stack, including Stremio, direct OTT mirrors, and embedded stream resolvers.",
   "authors": ["IGRIS"],
   "languages": ["en", "hi", "ja"],
   "categories": ["Movies", "Series", "Anime"],
-  "status": "Working ✅️"
+  "status": " plugin is under Maintenance and will be fixed soon"
 }
