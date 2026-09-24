@@ -549,9 +549,7 @@
         if (value.indexOf("desidubanime") !== -1) return false;
         if (value.indexOf("t.me/") !== -1) return false;
         if (value.indexOf("watch") !== -1) return false;
-        return value.indexOf("hubcloud") !== -1
-            || value.indexOf("gdflix") !== -1
-            || value.indexOf("gdlink") !== -1;
+        return value.indexOf("hubcloud") !== -1;
     }
 
     function parseLinkGroupsFromHeadingBlocks(html, base) {
@@ -853,7 +851,8 @@
         var queue = [];
         var seen = {};
         groups.forEach(function(group) {
-            (Array.isArray(group && group.links) ? group.links : []).forEach(function(link) {
+            var links = Array.isArray(group && group.links) ? group.links : (group && group.url ? [group] : []);
+            links.forEach(function(link) {
                 var url = fixUrl(link && link.url, LINKS_URL);
                 if (!url || seen[url]) return;
                 seen[url] = true;
@@ -964,71 +963,6 @@
             return url;
         } catch (_) {
             return url;
-        }
-    }
-
-    async function extractGdflix(url, source, quality) {
-        var results = [];
-        try {
-            var res = await fetchPage(url, { referer: LINKS_URL + "/", base: LINKS_URL });
-            var html = String(res && res.body || "");
-            if (!html) return results;
-            var finalUrl = String(res && res.finalUrl || url);
-            var originMatch = finalUrl.match(/^(https?:\/\/[^\/]+)/i);
-            var origin = originMatch ? originMatch[1] : url;
-            var fileName = cleanText((html.match(/<title>\s*GDFlix\s*\|\s*([^<]+)<\/title>/i) || [])[1] || parseMeta(html, "og:description") || "");
-            var fileSize = "";
-            var sizeEl = html.match(/Name\s*:\s*([^<]+)<\/li>/i);
-            if (sizeEl) fileSize = cleanText(sizeEl[1]);
-            var mergedQuality = quality || parseQuality(fileName + " " + html);
-            var anchorRe = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-            var match;
-            while ((match = anchorRe.exec(html))) {
-                var href = match[1];
-                var label = cleanText(stripHtml(match[2]));
-                var lower = label.toLowerCase();
-                var absUrl = fixUrl(href, origin);
-                if (!absUrl) continue;
-                if (lower.indexOf("login") !== -1 || lower.indexOf("sign in") !== -1) continue;
-                if (lower.indexOf("about us") !== -1 || lower.indexOf("privacy") !== -1) continue;
-                if (lower.indexOf("terms") !== -1 || lower.indexOf("copyright") !== -1) continue;
-                if (lower.indexOf("dmca") !== -1 || lower.indexOf("contact us") !== -1) continue;
-                if (lower.indexOf("join telegram") !== -1 || href.indexOf("t.me") !== -1) continue;
-                if (lower.replace(/\s/g, "").indexOf("gdflix") !== -1) continue;
-                if (lower.indexOf("anime dub hindi") !== -1) continue;
-                if (lower.indexOf("direct dl") !== -1) {
-                    results.push(toStreamResult(absUrl, source + " Direct", mergedQuality));
-                } else if (lower.indexOf("cloud") !== -1 || lower.indexOf("zipdisk") !== -1) {
-                    var cloudUrl = absUrl;
-                    var urlParam = absUrl.match(/url=([^&]+)/i);
-                    if (urlParam && urlParam[1]) {
-                        try { cloudUrl = decodeURIComponent(urlParam[1]); } catch (_) {}
-                    }
-                    results.push(toStreamResult(cloudUrl, source + " Cloud", mergedQuality));
-                } else if (lower.indexOf("instant dl") !== -1) {
-                    results.push(toStreamResult(absUrl, source + " Instant", mergedQuality));
-                } else if ((lower.indexOf("pixel") !== -1 || lower.indexOf("pixeldra") !== -1) && /\/u\//.test(absUrl)) {
-                    var pixelId = absUrl.split("/").pop();
-                    results.push(toStreamResult("https://pixeldrain.dev/api/file/" + pixelId + "?download", source + " Pixeldrain", mergedQuality));
-                } else if (lower.indexOf("index link") !== -1) {
-                    results.push(toStreamResult(absUrl, source + " Index", mergedQuality));
-                } else if (lower.indexOf("drivebot") !== -1) {
-                    results.push(toStreamResult(absUrl, source + " DriveBot", mergedQuality, { "User-Agent": UA, "Referer": origin + "/", "Accept": "*/*" }));
-                } else if (lower.indexOf("gofile") !== -1) {
-                    results.push(toStreamResult(absUrl, source + " GoFile", mergedQuality));
-                } else if (lower.indexOf("telegram") !== -1) {
-                    results.push(toStreamResult(absUrl, source + " Telegram", mergedQuality));
-                } else if (absUrl.indexOf("busycdn") !== -1 || absUrl.indexOf("r2.dev") !== -1) {
-                    results.push(toStreamResult(absUrl, source + " Direct", mergedQuality));
-                }
-            }
-            if (!results.length && /pixeldrain\.dev\/u\/([A-Za-z0-9]+)/i.test(html)) {
-                var id = html.match(/pixeldrain\.dev\/u\/([A-Za-z0-9]+)/i)[1];
-                results.push(toStreamResult("https://pixeldrain.dev/api/file/" + id + "?download", source + " Pixeldrain", mergedQuality));
-            }
-            return dedupeStreams(results);
-        } catch (_) {
-            return results;
         }
     }
 
@@ -1153,33 +1087,33 @@
                 "Referer": url
             });
             var dlRes = await httpRequest(downloadUrl, { headers: reqHeaders, allowRedirects: false });
-            var redirectUrl = (dlRes.headers && (dlRes.headers["hx-redirect"] || dlRes.headers["HX-Redirect"] || dlRes.headers.location || dlRes.headers.Location)) || dlRes.finalUrl || downloadUrl;
-            return [toStreamResult(redirectUrl, ref + " [BuzzServer]", quality)];
-        } catch (_) {
-            try {
-                var fallbackRes = await httpRequest(url.replace(/\/$/, "") + "/download", {
-                    headers: { "User-Agent": browserHeaders["User-Agent"], "Referer": url, "HX-Request": "true" },
-                    allowRedirects: false
-                });
-                var fallbackRedirect = (fallbackRes.headers && (fallbackRes.headers["hx-redirect"] || fallbackRes.headers["HX-Redirect"] || fallbackRes.headers.location || fallbackRes.headers.Location)) || url;
-                return [toStreamResult(fallbackRedirect, ref + " [BuzzServer]", quality)];
-            } catch (err) {
-                return [toStreamResult(url, ref + " [BuzzServer]", quality)];
+            var redirectUrl = dlRes.headers && (dlRes.headers["hx-redirect"] || dlRes.headers["HX-Redirect"] || dlRes.headers.location || dlRes.headers.Location);
+            if (redirectUrl && redirectUrl !== downloadUrl) {
+                var finalRedirect = fixUrl(redirectUrl, url);
+                return [toStreamResult(finalRedirect, ref + " [BuzzServer]", quality)];
             }
+            return [];
+        } catch (_) {
+            return [];
         }
     }
 
     function resolveHubCloudJsHrefs(html) {
         var mappings = {};
-        var elementHrefRegex = /document\.getElementById\(\s*["']([^"']+)["']\s*\)\.href\s*=\s*([a-zA-Z0-9_$]+)/g;
+        var elementHrefRegex = /document\.getElementById\(\s*["']([^"']+)["']\s*\)\.href\s*=\s*([^;]+)/g;
         var match;
         while ((match = elementHrefRegex.exec(html))) {
             var id = match[1];
-            var varName = match[2];
-            var varDeclRegex = new RegExp("(?:var|let|const)\\s+" + varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*=\\s*[\"']([^\"']+)[\"']", "i");
-            var declMatch = html.match(varDeclRegex);
-            if (declMatch && declMatch[1]) {
-                mappings[id] = declMatch[1];
+            var rhs = match[2].trim().replace(/^['"]|['"]$/g, "");
+            if (/^https?:\/\//i.test(rhs)) {
+                mappings[id] = rhs;
+            } else {
+                var varName = rhs;
+                var varDeclRegex = new RegExp("(?:var|let|const)?\\s*" + varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*=\\s*[\"']([^\"']+)[\"']", "i");
+                var declMatch = html.match(varDeclRegex);
+                if (declMatch && declMatch[1]) {
+                    mappings[id] = declMatch[1];
+                }
             }
         }
         var pxlVarMatch = html.match(/(?:var|let|const)?\s*pxl\w*\s*=\s*["'](https?:\/\/[^"']+)["']/i);
@@ -1209,8 +1143,8 @@
                 var html = String(res && res.body || "");
                 if (!html) return results;
                 var doc = new JsoupLite(html);
-                var dlEl = doc.find("#download");
-                var rawHref = dlEl ? dlEl.attr("href") : "";
+                var hubEl = doc.find("a[href*='hubcloud.php']") || doc.find("#download") || doc.find("a.btn");
+                var rawHref = hubEl ? hubEl.attr("href") : "";
                 if (rawHref) {
                     href = /^https?:\/\//i.test(rawHref) ? rawHref : hubOrigin.replace(/\/+$/, "") + "/" + rawHref.replace(/^\/+/, "");
                 }
@@ -1219,9 +1153,13 @@
             var pageHtml = String(pageRes && pageRes.body || "");
             if (!pageHtml) return results;
             var sizeEl = pageHtml.match(/<i[^>]*id="size"[^>]*>([\s\S]*?)<\/i>/i);
-            var fileSize = sizeEl ? cleanText(stripHtml(sizeEl[1])) : "";
-            var sizeSuffix = fileSize ? (" [" + fileSize + "]") : "";
-            var mergedQuality = quality || parseQuality(pageHtml + " " + fileSize);
+            var sizeText = sizeEl ? cleanText(stripHtml(sizeEl[1])) : "";
+            var cleanSize = sizeText ? sizeText.split("|")[0].trim() : "";
+            var sizeSuffix = cleanSize ? (" [" + cleanSize + "]") : "";
+
+            var headerEl = pageHtml.match(/<div[^>]*class="[^"]*card-header[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+            var headerText = headerEl ? cleanText(stripHtml(headerEl[1])) : "";
+            var mergedQuality = quality || parseQuality(headerText + " " + sizeText) || 0;
             var jsHrefs = resolveHubCloudJsHrefs(pageHtml);
 
             var linkRe = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
@@ -1242,16 +1180,6 @@
                 });
             }
 
-    function isRelevantHubCloudAnchor(label, href) {
-        label = String(label || "").toLowerCase();
-        href = String(href || "").toLowerCase();
-        if (/video-downloads\.googleusercontent\.com|instant\.busycdn\.xyz|fastcdn-dl\.pages\.dev|rest\.awscdn\.rest|hub\.diskcdn\.buzz|cdn\.[a-z0-9.-]*buzz/i.test(href)) return true;
-        if (/fsl server|pixeldra|pixelserver|pixel server|pixeldrain|10gbps|fast download|buzzserver|buzz server|buzz|fuckingfast|s3 server|fslv2|mega server/i.test(label)) return true;
-        if (/pixeldra|buzzserver|fuckingfast|10gbps/i.test(href)) return true;
-        if (/r2\.cloudflarestorage\.com|r2\.dev|cloudfront\.net/i.test(href)) return true;
-        return false;
-    }
-
             for (var i = 0; i < anchors.length; i++) {
                 var a = anchors[i];
                 var anchorHref = (a.id && jsHrefs && jsHrefs[a.id]) || a.href;
@@ -1261,96 +1189,97 @@
                     continue;
                 }
                 if (/telegram/i.test(label) && !/download/i.test(label)) continue;
-                if (!isRelevantHubCloudAnchor(label, anchorHref)) continue;
 
-                // Direct streaming video links
-                if (/video-downloads\.googleusercontent\.com|instant\.busycdn\.xyz|fastcdn-dl\.pages\.dev|rest\.awscdn\.rest|hub\.diskcdn\.buzz|cdn\.[a-z0-9.-]*buzz/i.test(anchorHref)) {
-                    results.push(toStreamResult(anchorHref, source + sizeSuffix, mergedQuality));
-                    continue;
-                }
-
-                // FSL Server
+                // 1. FSL Server
                 if (/fsl server/i.test(label)) {
                     results.push(toStreamResult(anchorHref, source + " [FSL Server]" + sizeSuffix, mergedQuality));
                     continue;
                 }
 
-                // BuzzServer / FuckingFast
+                // 2. Download File / Instant Download / Instant
+                if (/instant download|download file|\binstant\b/i.test(label)) {
+                    results.push(toStreamResult(anchorHref, source + " [Instant Download] " + a.text + sizeSuffix, mergedQuality));
+                    continue;
+                }
+
+                // 3. BuzzServer / FuckingFast
                 if (/buzzserver|buzz server|buzz|fuckingfast/i.test(label) || /buzzserver|fuckingfast/i.test(anchorHref)) {
                     try {
                         var buzzStreams = await resolveBuzzServer(anchorHref, source);
                         if (buzzStreams && buzzStreams.length) {
                             buzzStreams.forEach(function(s) {
-                                results.push(toStreamResult(s.url, source + " [BuzzServer]" + sizeSuffix, mergedQuality, s.headers));
+                                results.push(toStreamResult(s.url, source + " [BuzzServer] " + a.text + sizeSuffix, mergedQuality, s.headers));
                             });
-                            continue;
                         }
                     } catch (_) {}
-                    results.push(toStreamResult(anchorHref, source + " [BuzzServer]" + sizeSuffix, mergedQuality));
                     continue;
                 }
 
-                // Pixeldrain
+                // 4. Pixeldrain
                 if (/pixeldra|pixelserver|pixel server|pixeldrain/i.test(label) || /pixeldra/i.test(anchorHref)) {
                     var pxlLink = anchorHref;
                     if (/negn6f/i.test(pxlLink) || (!/\/u\//.test(pxlLink) && !/\/api\//.test(pxlLink))) {
                         if (jsHrefs && jsHrefs[a.id] && !/negn6f/i.test(jsHrefs[a.id])) {
                             pxlLink = jsHrefs[a.id];
-                        } else if (jsHrefs && jsHrefs["pxl-1"] && !/negn6f/i.test(jsHrefs["pxl-1"])) {
-                            pxlLink = jsHrefs["pxl-1"];
                         } else if (jsHrefs && jsHrefs["_pxl"] && !/negn6f/i.test(jsHrefs["_pxl"])) {
                             pxlLink = jsHrefs["_pxl"];
+                        } else if (jsHrefs && jsHrefs["pxl-1"] && !/negn6f/i.test(jsHrefs["pxl-1"])) {
+                            pxlLink = jsHrefs["pxl-1"];
                         }
                     }
-                    var pxlBase = originOf(pxlLink) || "https://pixeldrain.dev";
-                    var fileId = pxlLink.split("/").pop().split("?")[0];
-                    var pxlFinal = /download/i.test(pxlLink) ? pxlLink : (pxlBase + "/api/file/" + fileId + "?download");
+                    var pxlMatch = pxlLink.match(/https?:\/\/pixeldrain\.[a-z]+\/u\/([a-zA-Z0-9]+)/i) || pxlLink.match(/\/u\/([a-zA-Z0-9]+)/i);
+                    var fileId = pxlMatch ? pxlMatch[1] : pxlLink.split("/").pop().split("?")[0];
+                    var pxlBase = originOf(pxlLink) || "https://pixeldrain.com";
+                    var pxlFinal = pxlBase + "/api/file/" + fileId + "?download";
                     results.push(toStreamResult(pxlFinal, source + " Pixeldrain" + sizeSuffix, mergedQuality));
                     continue;
                 }
 
-                // 10Gbps / Fast Download
-                if (/10gbps|fast download|download file/i.test(label) || /10gbps/i.test(anchorHref)) {
+                // 5. S3 Server
+                if (/s3 server/i.test(label)) {
+                    results.push(toStreamResult(anchorHref, source + " [S3 Server]" + sizeSuffix, mergedQuality));
+                    continue;
+                }
+
+                // 6. FSLv2
+                if (/fslv2/i.test(label)) {
+                    results.push(toStreamResult(anchorHref, source + " [FSLv2]" + sizeSuffix, mergedQuality));
+                    continue;
+                }
+
+                // 7. Mega Server
+                if (/mega server/i.test(label)) {
+                    results.push(toStreamResult(anchorHref, source + " [Mega Server]" + sizeSuffix, mergedQuality));
+                    continue;
+                }
+
+                // 8. 10Gbps / Fast Download
+                if (/10gbps|fast download/i.test(label) || /10gbps/i.test(anchorHref)) {
                     try {
                         var final10gbps = await resolveFinalHttpUrl(anchorHref, { "Referer": anchorHref });
-                        var dlMatch = final10gbps.match(/dl\.php\?link=([^&]+)/i);
-                        if (dlMatch) {
-                            try { final10gbps = decodeURIComponent(dlMatch[1]); } catch (_) { final10gbps = dlMatch[1]; }
+                        if (final10gbps) {
+                            if (final10gbps.indexOf("link=") !== -1) {
+                                var linkPart = final10gbps.split("link=")[1].split("&")[0];
+                                try { final10gbps = decodeURIComponent(linkPart); } catch (_) { final10gbps = linkPart; }
+                            }
+                            results.push(toStreamResult(final10gbps, source + " 10Gbps [Download]" + sizeSuffix, mergedQuality));
                         }
-                        results.push(toStreamResult(final10gbps, source + " 10Gbps [Download]" + sizeSuffix, mergedQuality));
                     } catch (_) {
                         results.push(toStreamResult(anchorHref, source + " 10Gbps [Download]" + sizeSuffix, mergedQuality));
                     }
                     continue;
                 }
 
-                // S3 Server
-                if (/s3 server/i.test(label)) {
-                    results.push(toStreamResult(anchorHref, source + " [S3 Server]" + sizeSuffix, mergedQuality));
+                // Direct streaming video links / CDNs
+                if (/video-downloads\.googleusercontent\.com|instant\.busycdn\.xyz|fastcdn-dl\.pages\.dev|rest\.awscdn\.rest|hub\.diskcdn\.buzz|cdn\.[a-z0-9.-]*buzz|r2\.cloudflarestorage\.com|r2\.dev|cloudfront\.net/i.test(anchorHref)) {
+                    results.push(toStreamResult(anchorHref, source + sizeSuffix, mergedQuality));
                     continue;
                 }
 
-                // Mega Server
-                if (/mega server/i.test(label)) {
-                    results.push(toStreamResult(anchorHref, source + " [Mega Server]" + sizeSuffix, mergedQuality));
+                // Fallback direct video file extension
+                if (/\.(mkv|mp4|m3u8)(\?|$)/i.test(anchorHref)) {
+                    results.push(toStreamResult(anchorHref, source + sizeSuffix, mergedQuality));
                     continue;
-                }
-
-                // FSLv2
-                if (/fslv2/i.test(label)) {
-                    results.push(toStreamResult(anchorHref, source + " [FSLv2]" + sizeSuffix, mergedQuality));
-                    continue;
-                }
-
-                // R2 / Cloudfront / CDN direct links
-                if (/r2\.cloudflarestorage\.com|r2\.dev|cloudfront\.net/i.test(anchorHref)) {
-                    results.push(toStreamResult(anchorHref, source + " Direct" + sizeSuffix, mergedQuality));
-                    continue;
-                }
-
-                // Fallback for download text
-                if (/download/i.test(label) && anchorHref) {
-                    results.push(toStreamResult(anchorHref, source + " " + label + sizeSuffix, mergedQuality));
                 }
             }
 
@@ -1379,9 +1308,6 @@
         if (!url) return [];
         var extracted = await tryBuiltinExtractor(url, source, quality);
         if (extracted.length) return extracted;
-        if (url.indexOf("gdflix") !== -1 || url.indexOf("gdlink") !== -1) {
-            return extractGdflix(url, source, quality);
-        }
         if (url.indexOf("pixeldrain") !== -1) {
             var pxlMatch = url.match(/pixeldrain\.[a-z]+\/(?:u|api\/file)\/([a-zA-Z0-9]+)/i);
             if (pxlMatch && !/negn6f/i.test(pxlMatch[1])) {
