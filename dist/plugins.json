@@ -1,0 +1,502 @@
+[
+  {
+    "packageName": "com.igris.repo.anisuge",
+    "name": "AniSuge",
+    "version": 4,
+    "baseUrl": "https://anisuge.tv",
+    "domains": [
+      "https://anisuge.tv"
+    ],
+    "description": "A Varient for animewave",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "status": "Working ✅️",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anisuge.sky"
+  },
+  {
+    "packageName": "com.igris.repo.anikage",
+    "name": "Anikage",
+    "version": 11,
+    "baseUrl": "https://anikage.cc",
+    "description": "Watch anime with sub/dub from Anikage",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "status": "Working ✅️",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anikage.sky"
+  },
+  {
+    "packageName": "com.igris.repo.anilight",
+    "name": "Anilight",
+    "version": 1,
+    "baseUrl": "https://anilight.live",
+    "description": "Watch anime with sub/dub from Anilight",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "status": "Working ✅️",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anilight.sky"
+  },
+  {
+    "packageName": "com.igris.repo.animedubhindi",
+    "name": "AnimeDubHindi",
+    "version": 4,
+    "baseUrl": "https://www.animedubhindi.cc",
+    "description": "Hindi and multi-audio anime movies and series from AnimeDubHindi.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "hi",
+      "en",
+      "ja",
+      "ta",
+      "te",
+      "ml",
+      "bn",
+      "kn"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "status": "Working ✅️",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animedubhindi.sky"
+  },
+  {
+    "packageName": "com.igris.repo.animewave",
+    "name": "AnimeWave + AniKoto",
+    "version": 10,
+    "baseUrl": "https://animewave.to",
+    "domains": [
+      {
+        "name": "animewave",
+        "url": "https://animewave.to"
+      },
+      {
+        "name": "anikoto.net",
+        "url": "https://anikoto.net"
+      },
+      {
+        "name": "anikototv.to",
+        "url": "https://anikototv.to"
+      },
+      {
+        "name": "anikoto.cz",
+        "url": "https://anikoto.cz"
+      },
+      {
+        "name": "anikoto.me",
+        "url": "https://anikoto.me"
+      },
+      {
+        "name": "anikototv.se",
+        "url": "https://anikototv.se"
+      }
+    ],
+    "description": "A clone for hianime",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "status": "Working ✅️",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animewave.sky"
+  },
+  {
+    "packageName": "com.igris.repo.castletv",
+    "name": "Castle TV",
+    "version": 9,
+    "baseUrl": "https://example.com",
+    "description": "Sharp movies and series in one place.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "hi"
+    ],
+    "categories": [
+      "Movies",
+      "Series"
+    ],
+    "status": "Working ✅️",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.castletv.sky"
+  },
+  {
+    "packageName": "com.igris.repo.cinefreak",
+    "name": "Cinefreak",
+    "version": 10,
+    "baseUrl": "https://cinefreak.nl",
+    "description": "Cinefreak plugin for ZORO",
+    "authors": [
+      "Igris"
+    ],
+    "languages": [
+      "en",
+      "hi",
+      "ta",
+      "te",
+      "ml",
+      "kn",
+      "bn"
+    ],
+    "categories": [
+      "Others"
+    ],
+    "status": "Working ✅️",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.cinefreak.sky"
+  },
+  {
+    "packageName": "com.igris.repo.cinestream",
+    "name": "CineStream",
+    "version": 26,
+    "baseUrl": "https://cinemeta-catalogs.strem.io",
+    "description": "CineMeta-powered catalog with an expanded CineStream source stack, including Stremio, direct OTT mirrors, and embedded stream resolvers.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "hi",
+      "ja"
+    ],
+    "categories": [
+      "Movies",
+      "Series",
+      "Anime"
+    ],
+    "status": "Working ✅️",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.cinestream.sky"
+  },
+  {
+    "packageName": "com.igris.repo.hianime",
+    "name": "HiAnime",
+    "version": 3,
+    "baseUrl": "https://hianime.at",
+    "description": "Watch anime with sub/dub from HiAnime",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "status": "Working ✅️",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.hianime.sky"
+  },
+  {
+    "packageName": "com.igris.repo.hindmoviez",
+    "name": "HindMoviez",
+    "version": 17,
+    "baseUrl": "https://hindmovie.icu",
+    "description": "Trending movies and series, quickly.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "hi",
+      "en",
+      "ta",
+      "te",
+      "ml",
+      "kn"
+    ],
+    "categories": [
+      "Movies",
+      "Series"
+    ],
+    "domains": [
+      {
+        "name": "hindmovie.icu",
+        "url": "https://hindmovie.icu"
+      }
+    ],
+    "status": "Working ✅️",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.hindmoviez.sky"
+  },
+  {
+    "packageName": "com.igris.repo.movies4u",
+    "name": "Movies4U",
+    "version": 50,
+    "baseUrl": "https://new7.movies4u.clinic",
+    "description": "Movie picks with straightforward stream links.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "hi",
+      "en",
+      "ta",
+      "te",
+      "ml",
+      "kn"
+    ],
+    "categories": [
+      "Movies"
+    ],
+    "domains": [
+      {
+        "name": "movies4u.clinic (Primary)",
+        "url": "https://new6.movies4u.clinic"
+      }
+    ],
+    "status": "Working ✅️",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.movies4u.sky"
+  },
+  {
+    "packageName": "com.igris.repo.netmirror",
+    "name": "NetMirror",
+    "version": 17,
+    "baseUrl": "https://net52.cc",
+    "providers": [
+      {
+        "id": "netflix",
+        "name": "Netflix"
+      },
+      {
+        "id": "prime",
+        "name": "Prime Video"
+      },
+      {
+        "id": "hotstar",
+        "name": "Hotstar"
+      },
+      {
+        "id": "disney",
+        "name": "Disney"
+      },
+      {
+        "id": "marvel",
+        "name": "Marvel"
+      },
+      {
+        "id": "starwars",
+        "name": "Star Wars"
+      },
+      {
+        "id": "pixar",
+        "name": "Pixar"
+      }
+    ],
+    "description": "NetMirror providers ported from the CNCVerse Cloudstream extension with fast NewTV HLS stream resolution.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "hi",
+      "ta",
+      "te",
+      "ml",
+      "kn",
+      "bn",
+      "mr",
+      "pa",
+      "gu"
+    ],
+    "categories": [
+      "Movies",
+      "Series",
+      "Anime"
+    ],
+    "status": "Working ✅️ but you may face few errors based on your isp provider or geo-blocking in that case using a vpn is recommended ",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.netmirror.sky"
+  },
+  {
+    "packageName": "com.igris.repo.playeztvliveevents",
+    "name": "Live Sports 🏏",
+    "version": 11,
+    "baseUrl": "https://adsflw.xyz",
+    "description": "Live sports from the PlayEZTV feed.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "hi"
+    ],
+    "categories": [
+      "LiveTv"
+    ],
+    "status": "Working ✅️",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playeztvliveevents.sky"
+  },
+  {
+    "packageName": "com.igris.repo.playztv",
+    "name": "PlayZTV",
+    "version": 13,
+    "baseUrl": "https://adsflw.xyz",
+    "providers": [
+      {
+        "id": "jio",
+        "name": "Jio"
+      },
+      {
+        "id": "zee",
+        "name": "Zee"
+      },
+      {
+        "id": "sony",
+        "name": "Sony"
+      },
+      {
+        "id": "bdixtv",
+        "name": "BDIX TV"
+      },
+      {
+        "id": "sunnxt",
+        "name": "Sun NXT"
+      },
+      {
+        "id": "dishtv",
+        "name": "DishTV"
+      },
+      {
+        "id": "freesports",
+        "name": "FreeSports"
+      },
+      {
+        "id": "piratestv",
+        "name": "Pirates TV"
+      },
+      {
+        "id": "darktv",
+        "name": "Dark TV"
+      },
+      {
+        "id": "freetv",
+        "name": "Free TV"
+      }
+    ],
+    "description": "Bundled live TV plugin with PlayZTV providers, Dark TV, and Free TV. Live events remain in the separate PlayEZTV Live Events plugin.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "en",
+      "hi",
+      "ta",
+      "te",
+      "ml",
+      "kn",
+      "bn",
+      "mr",
+      "pa"
+    ],
+    "categories": [
+      "Livestream"
+    ],
+    "status": "Working ✅️",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.playztv.sky"
+  },
+  {
+    "packageName": "com.igris.repo.vegamovies",
+    "name": "VegaMovies & RogMovies",
+    "version": 3,
+    "baseUrl": "https://vegamovies.mq",
+    "description": "VegaMovies and RogMovies providers",
+    "providers": [
+      {
+        "id": "vegamovies",
+        "name": "VegaMovies",
+        "baseUrl": "https://vegamovies.mq"
+      },
+      {
+        "id": "rogmovies",
+        "name": "RogMovies",
+        "baseUrl": "https://rogmovies.vip"
+      }
+    ],
+    "authors": [
+      "Igris"
+    ],
+    "languages": [
+      "hi",
+      "en",
+      "te",
+      "ta",
+      "ma"
+    ],
+    "categories": [
+      "Movies",
+      "series"
+    ],
+    "status": "Working ✅️",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.vegamovies.sky"
+  },
+  {
+    "packageName": "com.igris.repo.youtube",
+    "name": "YouTube",
+    "version": 34,
+    "baseUrl": "https://www.youtube.com",
+    "providers": [
+      {
+        "id": "youtube_telugu",
+        "name": "YouTube Telugu"
+      },
+      {
+        "id": "youtube_tamil",
+        "name": "YouTube Tamil"
+      },
+      {
+        "id": "youtube_hindi",
+        "name": "YouTube Hindi"
+      },
+      {
+        "id": "youtube_malayalam",
+        "name": "YouTube Malayalam"
+      },
+      {
+        "id": "youtube_kannada",
+        "name": "YouTube Kannada"
+      }
+    ],
+    "description": "😉 No description needed",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "te",
+      "ta",
+      "hi",
+      "ml",
+      "kn",
+      "en"
+    ],
+    "categories": [
+      "Others"
+    ],
+    "status": "you can watch only upto 360p",
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.youtube.sky"
+  }
+]
