@@ -29,7 +29,7 @@ If you find this project helpful, consider supporting its development!
 | Movies4U | 50 | Working ✅️ | Movies | hi, en, ta, te, ml, kn |
 | NetMirror | 17 | Working ✅️ but you may face few errors based on your isp provider or geo-blocking in that case using a vpn is recommended | Movies, Series, Anime | en, hi, ta, te, ml, kn, bn, mr, pa, gu |
 | PlayZTV | 13 | Working ✅️ | Livestream | en, hi, ta, te, ml, kn, bn, mr, pa |
-| VegaMovies & RogMovies | 3 | Working ✅️ | Movies, series | hi, en, te, ta, ma |
+| VegaMovies & RogMovies | 4 | Working ✅️ | Movies, series | hi, en, te, ta, ma |
 | YouTube | 34 | you can watch only upto 360p | Others | te, ta, hi, ml, kn, en |
 <!-- PLUGINS_TABLE_END -->
 
