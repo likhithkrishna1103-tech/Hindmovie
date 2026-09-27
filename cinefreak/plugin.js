@@ -1134,8 +1134,8 @@
             links: links || [],
             title: context && context.title || "",
             type: context && context.type || "movie",
-            season: context && context.season || null,
-            episode: context && context.episode || null
+            season: context && context.season !== undefined ? context.season : null,
+            episode: context && context.episode !== undefined ? context.episode : null
         });
     }
 
@@ -2632,10 +2632,10 @@
                 }
                 movieLinks = uniqueBy(movieLinks, function (item) { return item.href; });
 
-                var streamPayload = buildLoadPayload(sourceUrl, movieLinks, { title: title, type: "movie" });
-                var movieEpisode = {
-                    season: 1,
-                    episode: 1,
+                var streamPayload = buildLoadPayload(sourceUrl, movieLinks, { title: title, type: "movie", season: 0, episode: 0 });
+                var movieEpisode = new Episode({
+                    season: 0,
+                    episode: 0,
                     dubStatus: "none",
                     playbackPolicy: "none",
                     streams: [],
@@ -2646,7 +2646,7 @@
                     runtime: runtime,
                     rating: score,
                     headers: defaultHeaders({ "Referer": sourceUrl })
-                };
+                });
                 Analytics.logEvent('cinefreak_load', {});
                 cb({
                     success: true,
