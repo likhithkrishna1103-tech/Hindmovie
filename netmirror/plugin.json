@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.netmirror",
   "name": "Netmirror",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://net52.cc",
   "providers": [
     {
@@ -34,15 +34,7 @@
     }
   ],
   "description": "Stream movies and series from Netflix, Prime Video, Hotstar, and Disney studios.",
-  "authors": [
-    "IGRIS"
-  ],
-  "languages": [
-    "en",
-    "hi"
-  ],
-  "categories": [
-    "Movies",
-    "TV Shows"
-  ]
+  "authors": ["IGRIS"],
+  "languages": ["en", "hi"],
+  "categories": ["Movies", "TV Shows"]
 }

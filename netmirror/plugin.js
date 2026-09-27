@@ -634,27 +634,96 @@
     }
 
     /**
+     * Safely parses any URL, JSON payload, or media identifier into { id, ott, studio, provider }.
+     * Avoids using `new URL()` which throws TypeError in mobile JS engines on relative or JSON URLs.
+     */
+    function parseMediaUrl(url) {
+        var defaultProv = selectedProvider();
+        if (!url) {
+            return { id: "", ott: defaultProv.ott, studio: defaultProv.studio, provider: defaultProv };
+        }
+
+        if (typeof url === "object") {
+            var prov = (function () {
+                if (url.providerId && PROVIDERS[url.providerId]) return PROVIDERS[url.providerId];
+                if (url.studio && PROVIDERS[String(url.studio).toLowerCase()]) return PROVIDERS[String(url.studio).toLowerCase()];
+                if (url.ott) {
+                    var keys = Object.keys(PROVIDERS);
+                    for (var i = 0; i < keys.length; i++) {
+                        if (PROVIDERS[keys[i]].ott === url.ott) return PROVIDERS[keys[i]];
+                    }
+                }
+                return defaultProv;
+            })();
+            return {
+                id: String(url.id || ""),
+                ott: url.ott || prov.ott,
+                studio: url.studio || prov.studio,
+                provider: prov
+            };
+        }
+
+        var str = String(url).trim();
+        if ((str.charAt(0) === "{" && str.charAt(str.length - 1) === "}") || str.indexOf('"id"') !== -1) {
+            try {
+                var obj = JSON.parse(str);
+                if (obj && typeof obj === "object") {
+                    return parseMediaUrl(obj);
+                }
+            } catch (_) {}
+        }
+
+        var idMatch = str.match(/[?&]id=([^&#]+)/i) || str.match(/\/(?:post|watch|title|play|movies|series|episodes)\/([^/?#]+)/i);
+        var ottMatch = str.match(/[?&]ott=([^&#]+)/i);
+        var studioMatch = str.match(/[?&]studio=([^&#]+)/i);
+
+        var id = idMatch ? idMatch[1] : str.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "");
+        var ott = ottMatch ? ottMatch[1] : undefined;
+        var studio = studioMatch ? studioMatch[1] : undefined;
+
+        var prov = (function () {
+            if (studio) {
+                var sLower = studio.toLowerCase();
+                if (PROVIDERS[sLower]) return PROVIDERS[sLower];
+            }
+            if (ott) {
+                var keys = Object.keys(PROVIDERS);
+                for (var i = 0; i < keys.length; i++) {
+                    var p = PROVIDERS[keys[i]];
+                    if (p && p.ott === ott) return p;
+                }
+            }
+            if (str.indexOf("/pv") !== -1 || str.indexOf("prime") !== -1) return PROVIDERS.prime;
+            if (str.indexOf("/hs") !== -1 || str.indexOf("hotstar") !== -1) return PROVIDERS.hotstar;
+            return defaultProv;
+        })();
+
+        return {
+            id: id,
+            ott: ott || prov.ott,
+            studio: studio || prov.studio,
+            provider: prov
+        };
+    }
+
+    /**
      * Loads detailed metadata and episodes.
      * @param {string} url
      * @param {(res: Response) => void} cb
      */
     async function load(url, cb) {
         try {
-            var u = new URL(url);
-            var id = u.searchParams.get("id");
-            var ott = u.searchParams.get("ott") || selectedProvider().ott;
-            var studio = u.searchParams.get("studio");
+            var media = parseMediaUrl(url);
+            var id = media.id;
+            var config = media.provider || selectedProvider();
 
-            var config = (function () {
-                var keys = Object.keys(PROVIDERS);
-                for (var i = 0; i < keys.length; i++) {
-                    var p = PROVIDERS[keys[i]];
-                    if (!p) continue;
-                    if (studio && p.studio === studio) return p;
-                    if (!studio && p.ott === ott) return p;
-                }
-                return selectedProvider();
-            })();
+            if (!id) {
+                return cb({
+                    success: false,
+                    errorCode: "LOAD_ERROR",
+                    message: "Invalid or missing media id: " + String(url)
+                });
+            }
 
             var cookie = await bypassCookie(false);
             var now = Date.now();
@@ -693,19 +762,20 @@
             if (isSeries) {
                 for (var e = 0; e < data.episodes.length; e++) {
                     var ep = data.episodes[e];
-                    var epId = String(ep.id);
+                    if (!ep) continue;
+                    var epId = String(ep.id || "");
                     var epNum = ep.ep ? parseInt(String(ep.ep).replace(/E/i, ""), 10) : (e + 1);
                     var sNum = ep.s ? parseInt(String(ep.s).replace(/S/i, ""), 10) : 1;
                     var epRuntime = parseDurationMinutes(ep.time);
 
                     episodes.push(new Episode({
-                        name: ep.t || ("Episode " + epNum),
+                        name: ep.t ? String(ep.t).trim() : ("Episode " + epNum),
                         url: BASE_URL + "/watch?id=" + epId + "&ott=" + config.ott + (config.studio ? "&studio=" + config.studio : ""),
-                        season: sNum,
-                        episode: epNum,
-                        runtime: epRuntime,
-                        posterUrl: config.episodePoster(epId),
-                        headers: { "Referer": BASE_URL + "/home" }
+                        season: Number(sNum),
+                        episode: Number(epNum),
+                        runtime: epRuntime ? Number(epRuntime) : undefined,
+                        dubStatus: "none",
+                        playbackPolicy: "none"
                     }));
                 }
 
@@ -714,6 +784,7 @@
                 if (seasons.length > 1) {
                     var remainingSeasons = seasons.slice(0, seasons.length - 1);
                     var seasonPromises = remainingSeasons.map(async function (s) {
+                        if (!s || !s.id) return [];
                         var sid = s.id;
                         var sUrl = BASE_URL + "/mobile" + config.prefix + "/episodes.php?s=" + sid + "&series=" + id + "&t=" + now + "&page=1";
                         try {
@@ -721,21 +792,22 @@
                             var sJson = sRes.json();
                             if (sJson && Array.isArray(sJson.episodes)) {
                                 return sJson.episodes.map(function (sep, idx) {
-                                    var sepId = String(sep.id);
+                                    if (!sep) return null;
+                                    var sepId = String(sep.id || "");
                                     var sepNum = sep.ep ? parseInt(String(sep.ep).replace(/E/i, ""), 10) : (idx + 1);
                                     var sesNum = sep.s ? parseInt(String(sep.s).replace(/S/i, ""), 10) : parseInt(s.s, 10) || 1;
                                     var sepRuntime = parseDurationMinutes(sep.time);
 
                                     return new Episode({
-                                        name: sep.t || ("Episode " + sepNum),
+                                        name: sep.t ? String(sep.t).trim() : ("Episode " + sepNum),
                                         url: BASE_URL + "/watch?id=" + sepId + "&ott=" + config.ott + (config.studio ? "&studio=" + config.studio : ""),
-                                        season: sesNum,
-                                        episode: sepNum,
-                                        runtime: sepRuntime,
-                                        posterUrl: config.episodePoster(sepId),
-                                        headers: { "Referer": BASE_URL + "/home" }
+                                        season: Number(sesNum),
+                                        episode: Number(sepNum),
+                                        runtime: sepRuntime ? Number(sepRuntime) : undefined,
+                                        dubStatus: "none",
+                                        playbackPolicy: "none"
                                     });
-                                });
+                                }).filter(Boolean);
                             }
                         } catch (_) {}
                         return [];
@@ -753,9 +825,9 @@
                     url: BASE_URL + "/watch?id=" + id + "&ott=" + config.ott + (config.studio ? "&studio=" + config.studio : ""),
                     season: 1,
                     episode: 1,
-                    runtime: duration,
-                    posterUrl: config.poster(id),
-                    headers: { "Referer": BASE_URL + "/home" }
+                    runtime: duration ? Number(duration) : undefined,
+                    dubStatus: "none",
+                    playbackPolicy: "none"
                 }));
             }
 
@@ -767,7 +839,7 @@
                     if (sug && sug.id) {
                         var sugId = String(sug.id);
                         recommendations.push(new MultimediaItem({
-                            title: sug.t || "",
+                            title: sug.t ? String(sug.t).trim() : "",
                             url: BASE_URL + config.prefix + "/post?id=" + sugId + "&ott=" + config.ott + (config.studio ? "&studio=" + config.studio : ""),
                             posterUrl: config.poster(sugId),
                             type: isSeries ? "series" : "movie"
@@ -780,18 +852,17 @@
                 title: title,
                 url: url,
                 posterUrl: config.poster(id),
-                bannerUrl: config.background(id),
                 type: isSeries ? "series" : "movie",
-                description: synopsis,
-                releaseDate: year ? String(year) : undefined,
-                score: rating,
-                runtime: duration,
-                genres: genres,
-                directors: directors,
-                actors: cast,
-                episodes: episodes,
-                recommendations: recommendations,
-                headers: { "Referer": BASE_URL + "/home" }
+                year: year ? Number(year) : undefined,
+                score: rating ? Number(rating) : undefined,
+                duration: duration ? Number(duration) : undefined,
+                status: isSeries ? "ongoing" : "completed",
+                contentRating: data.ua ? String(data.ua).trim() : undefined,
+                playbackPolicy: "none",
+                isAdult: false,
+                cast: cast.length > 0 ? cast : undefined,
+                recommendations: recommendations.length > 0 ? recommendations : undefined,
+                episodes: episodes
             });
 
             cb({
@@ -801,7 +872,7 @@
         } catch (e) {
             cb({
                 success: false,
-                errorCode: "PARSE_ERROR",
+                errorCode: "LOAD_ERROR",
                 message: String(e && (e.stack || e.message) || e)
             });
         }
@@ -814,9 +885,9 @@
      */
     async function loadStreams(url, cb) {
         try {
-            var u = new URL(url);
-            var id = u.searchParams.get("id");
-            var ott = u.searchParams.get("ott") || "nf";
+            var media = parseMediaUrl(url);
+            var id = media.id;
+            var ott = media.ott || "nf";
             var playerOtt = (ott === "dp" || ott === "hs") ? "hs" : ott;
 
             var userToken = await getNewTvUserToken(playerOtt, false);
@@ -835,7 +906,7 @@
             if (json && json.video_link) {
                 var stream = new StreamResult({
                     url: json.video_link,
-                    source: "Auto",
+                    quality: "Auto",
                     headers: {
                         "Referer": json.referer || BASE_URL,
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
