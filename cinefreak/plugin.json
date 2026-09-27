@@ -1,22 +1,10 @@
 {
   "packageName": "com.igris.repo.cinefreak",
   "name": "Cinefreak",
-  "version": 11,
+  "version": 12,
   "baseUrl": "https://cinefreak.nl",
   "description": "Cinefreak plugin for ZORO",
-  "authors": [
-    "Igris"
-  ],
-  "languages": [
-    "en",
-    "hi",
-    "ta",
-    "te",
-    "ml",
-    "kn",
-    "bn"
-  ],
-  "categories": [
-    "Others"
-  ]
+  "authors": ["Igris"],
+  "languages": ["en", "hi", "ta", "te", "ml", "kn", "bn"],
+  "categories": ["Others"]
 }

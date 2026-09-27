@@ -152,16 +152,21 @@
 
     function parseJsonSafe(value, fallback) {
         if (value && typeof value === "object") return value;
+        var str = String(value || "").trim();
         try {
-            return JSON.parse(String(value || ""));
-        } catch (_) {
-            try {
-                var text = String(value || "").replace(/^'+|'+$/g, "").replace(/^"+|"+$/g, "");
-                return JSON.parse(text);
-            } catch (_) {
-                return fallback;
+            return JSON.parse(str);
+        } catch (_) {}
+        try {
+            var text = str.replace(/^'+|'+$/g, "").replace(/^"+|"+$/g, "");
+            return JSON.parse(text);
+        } catch (_) {}
+        try {
+            if (str.indexOf('\\"') !== -1) {
+                var unescaped = str.replace(/\\\\"/g, '"').replace(/\\"/g, '"');
+                return JSON.parse(unescaped);
             }
-        }
+        } catch (_) {}
+        return fallback;
     }
 
     function hasMeaningfulJsonData(value) {
@@ -1187,7 +1192,8 @@
         return /\.(m3u8|mp4|mkv|avi|mov|webm)(?:[?#]|$)/i.test(val)
             || /\/api\/file\/.+/i.test(val)
             || /gofile\.io\/download/i.test(val)
-            || /cloudflarestorage\.com|amazonaws\.com/i.test(val);
+            || /cloudflarestorage\.com|amazonaws\.com/i.test(val)
+            || /workers\.dev\/download\.aspx/i.test(val);
     }
 
     function looksLikeGoogleDriveUrl(url) {
@@ -1207,6 +1213,7 @@
         if (looksLikeGoogleDriveUrl(value)) return true;
         if (/mdrive\.ink\//i.test(value)) return true;
         if (/vcloud\.zip|fastdl\.zip/i.test(value)) return true;
+        if (/workers\.dev\/download\.aspx/i.test(value)) return true;
         // Cinefreak file hosts: decoded generate.php links land here; treat as usable download pages
         if (/cinecloud|neodrive|hubdrive\.|buzzserver|streamtape/i.test(value)) return true;
         return false;
@@ -1222,6 +1229,7 @@
             || /video-downloads\.googleusercontent\.com|instant\.busycdn\.xyz|fastcdn-dl\.pages\.dev|rest\.awscdn\.rest|diskcdn\.buzz|hub\.diskcdn\.buzz|hub\.hailmary\.lat/i.test(value)
             || /gofile\.io\/download/i.test(value)
             || /\/cdn-cgi\/content\?id=/i.test(value)
+            || /workers\.dev\/download\.aspx/i.test(value)
             || looksLikeGoogleDriveUrl(value);
     }
 
@@ -2093,54 +2101,139 @@
         });
     }
 
-    function resolveCinecloud(url, refererLabel) {
+    function parseCinecloudHtml(html, base, refererLabel) {
         var ref = refererLabel || "CineCloud";
+        var headers = defaultHeaders({ "Referer": base + "/" });
+        var sizeMatch = html.match(/<tr\b[^>]*>[\s\S]*?File Size[\s\S]*?<td\b[^>]*class=["'][^"']*text-right[^"']*["'][^>]*>([\s\S]*?)<\/td>/i);
+        var fileSize = sizeMatch ? trim(stripTags(sizeMatch[1])) : "";
+        var sizeSuffix = fileSize ? (" " + fileSize) : "";
+
+        var anchors = parseAnchors(html, base);
+        var results = [];
+        var pending = [];
+
+        for (var i = 0; i < anchors.length; i++) {
+            var a = anchors[i];
+            var href = a.href;
+            var text = trim(a.text);
+            if (!href || !/^https?:\/\//i.test(href)) continue;
+            if (/terms-conditions|privacy-policy|abuse|#|facebook|t\.me/i.test(href)) continue;
+
+            if (/fast cloud|\[fsl\]/i.test(text)) {
+                var fslQuality = getQualityFromText(text + " " + href) || getQualityFromText(base);
+                results.push(buildStreamResult(href, ref + " [FSL]" + sizeSuffix, headers, fslQuality));
+            } else if (/cloud \[resumable\]/i.test(text) || /\/d\//i.test(href)) {
+                pending.push(getText(href, headers).then(function (subHtml) {
+                    var dlNowMatch = subHtml.match(/<a\b[^>]*class=["'][^"']*\bdownload-now\b[^"']*["'][^>]*href=["']([^"']+)["']/i)
+                        || subHtml.match(/<a\b[^>]*href=["']([^"']+)["'][^>]*class=["'][^"']*\bdownload-now\b[^"']*["']/i);
+                    if (dlNowMatch && dlNowMatch[1]) {
+                        var directDl = absoluteUrl(href, dlNowMatch[1]);
+                        var rq = getQualityFromText(directDl) || getQualityFromText(href);
+                        return [buildStreamResult(directDl, ref + " [ResumeCloud]" + sizeSuffix, headers, rq)];
+                    }
+                    return [];
+                }).catch(function () { return []; }));
+            } else if (/instant download/i.test(text) || /\/w\//i.test(href)) {
+                pending.push(getText(href, headers).then(function (subHtml) {
+                    var instantLinks = [];
+                    var instantMatch = subHtml.match(/<a\b[^>]*class=["'][^"']*instant-download[^"']*["'][^>]*href=["']([^"']+)["']/i)
+                        || subHtml.match(/<a\b[^>]*href=["']([^"']+)["'][^>]*class=["'][^"']*instant-download[^"']*["']/i)
+                        || subHtml.match(/<a\b[^>]*href=["'](https?:\/\/[^"']*(?:workers\.dev|download\.aspx|cloudflarestorage|\.r2\.)[^"']*)["']/i);
+                    if (instantMatch && instantMatch[1]) {
+                        instantLinks.push(absoluteUrl(href, instantMatch[1]));
+                    } else {
+                        var subAnchors = parseAnchors(subHtml, baseOrigin(href)).filter(function (x) {
+                            return !/terms-conditions|privacy-policy|abuse|#|facebook|t\.me/i.test(x.href) &&
+                                   (/workers\.dev|download\.aspx|cloudflarestorage|\.r2\./i.test(x.href) || isUsableStreamUrl(x.href));
+                        });
+                        for (var k = 0; k < subAnchors.length; k++) instantLinks.push(subAnchors[k].href);
+                    }
+                    return instantLinks.map(function (sUrl) {
+                        var rq = getQualityFromText(sUrl) || getQualityFromText(href);
+                        return buildStreamResult(sUrl, ref + " [Instant]" + sizeSuffix, headers, rq);
+                    });
+                }).catch(function () { return []; }));
+            } else if (/pixeldrain/i.test(text + " " + href)) {
+                pending.push(resolvePixeldrain(href, ref + " Pixeldrain"));
+            }
+        }
+
+        return Promise.all(pending).then(function (subs) {
+            for (var s = 0; s < subs.length; s++) {
+                for (var r = 0; r < subs[s].length; r++) results.push(subs[s][r]);
+            }
+            return uniqueBy(results, function (item) { return item.url; });
+        });
+    }
+
+    function resolveCinecloud(url, refererLabel) {
+        var base = baseOrigin(url) || "https://new5.cinecloud.site";
+        var headers = defaultHeaders({ "Referer": base + "/" });
+        var targetUrl = url;
+        if (targetUrl.indexOf("/x/") !== -1) {
+            targetUrl = targetUrl.replace("/x/", "/f/");
+        }
+        return getText(targetUrl, headers).then(function (html) {
+            return parseCinecloudHtml(html, base, refererLabel);
+        }).catch(function () {
+            return [buildStreamResult(targetUrl, refererLabel || "CineCloud", headers, getQualityFromText(targetUrl))];
+        });
+    }
+
+    function resolveCinefreakGenerate(url, refererLabel) {
+        var ref = refererLabel || "Cinefreak";
         var headers = defaultHeaders({ "Referer": baseOrigin(url) + "/" });
         return getText(url, headers).then(function (html) {
-            var sizeMatch = html.match(/<tr\b[^>]*>[\s\S]*?File Size[\s\S]*?<td\b[^>]*class=["'][^"']*text-right[^"']*["'][^>]*>([\s\S]*?)<\/td>/i);
-            var fileSize = sizeMatch ? trim(stripTags(sizeMatch[1])) : "";
-            var sizeSuffix = fileSize ? (" " + fileSize) : "";
-
-            var anchors = parseAnchors(html, baseOrigin(url));
-            var results = [];
-            var pending = [];
-
-            for (var i = 0; i < anchors.length; i++) {
-                var a = anchors[i];
-                var href = a.href;
-                var text = trim(a.text);
-                if (!href || !/^https?:\/\//i.test(href)) continue;
-
-                if (/fast cloud|\[fsl\]/i.test(text)) {
-                    var fslQuality = getQualityFromText(text + " " + href) || getQualityFromText(url);
-                    results.push(buildStreamResult(href, ref + " [FSL]" + sizeSuffix, headers, fslQuality));
-                } else if (/cloud \[resumable\]/i.test(text)) {
-                    pending.push(getText(href, headers).then(function (subHtml) {
-                        var dlAnchors = parseAnchors(subHtml, baseOrigin(href)).filter(function (x) {
-                            return /download-now|download now|\/w\/|cloudflarestorage|\.r2\./i.test(x.href + " " + x.text);
-                        });
-                        if (!dlAnchors.length) dlAnchors = parseAnchors(subHtml, baseOrigin(href));
-                        return dlAnchors.map(function (x) {
-                            var rq = getQualityFromText(x.text + " " + x.href) || getQualityFromText(url);
-                            return buildStreamResult(x.href, ref + " [ResumeCloud]" + sizeSuffix, headers, rq);
-                        });
-                    }).catch(function () { return []; }));
-                } else if (/pixeldrain/i.test(text)) {
-                    pending.push(resolvePixeldrain(href, ref + " Pixeldrain"));
+            var m = html.match(/(?:window\.)?location\.href\s*=\s*["']([^"']+)["']/i) ||
+                    html.match(/generate\.php\?id=([^&"'\\]+)(?:\\u0026|&amp;|&)go=([^"'\s\\&]+)/i);
+            var nextUrl = "";
+            if (m) {
+                var rawMatch = m[1].replace(/\\u0026/g, "&");
+                if (/^https?:\/\//i.test(rawMatch)) {
+                    nextUrl = rawMatch;
+                } else if (m[2]) {
+                    nextUrl = absoluteUrl(url, "/generate.php?id=" + m[1] + "&go=" + m[2]);
+                } else {
+                    nextUrl = absoluteUrl(url, rawMatch);
+                }
+            } else {
+                var goMatch = html.match(/go=([a-zA-Z0-9._-]+)/i);
+                if (goMatch) {
+                    nextUrl = url + (url.indexOf("?") !== -1 ? "&" : "?") + "go=" + goMatch[1];
                 }
             }
+            if (!nextUrl) return [];
 
-            return Promise.all(pending).then(function (subs) {
-                for (var s = 0; s < subs.length; s++) {
-                    for (var r = 0; r < subs[s].length; r++) results.push(subs[s][r]);
+            return request(nextUrl, {
+                method: "GET",
+                headers: defaultHeaders({ "Referer": url }),
+                timeout: 20000
+            }).then(function (res) {
+                var loc = res && res.headers && (res.headers.location || res.headers.Location);
+                var dest = loc || (res && res.finalUrl && res.finalUrl !== nextUrl ? res.finalUrl : "");
+                if (dest && /^https?:\/\//i.test(dest)) {
+                    return resolveExtractorUrl(dest, ref);
                 }
-                if (!results.length) {
-                    return [buildStreamResult(url, ref, headers, getQualityFromText(url))];
+                var body = res && (res.body || res.text || "") || "";
+                var domainMatch = body.match(/https?:\/\/[a-z0-9.-]*(?:cinecloud|neodrive)[a-z0-9.-]*/i);
+                var baseUrl = domainMatch ? domainMatch[0] : "https://new5.cinecloud.site";
+                var codeMatch = body.match(/\/(?:f|w|d)\/([a-f0-9]{6,16})/i);
+                if (codeMatch) {
+                    return parseCinecloudHtml(body, baseUrl, ref).then(function (streams) {
+                        if (streams && streams.length) return streams;
+                        return resolveExtractorUrl(baseUrl + "/f/" + codeMatch[1], ref);
+                    });
                 }
-                return uniqueBy(results, function (item) { return item.url; });
+                var canonicalMatch = body.match(/<link\b[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i);
+                if (canonicalMatch && /^https?:\/\//i.test(canonicalMatch[1])) {
+                    return resolveExtractorUrl(canonicalMatch[1], ref);
+                }
+                return [];
+            }).catch(function () {
+                return [];
             });
         }).catch(function () {
-            return [buildStreamResult(url, ref, headers, getQualityFromText(url))];
+            return [];
         });
     }
 
@@ -2210,6 +2303,19 @@
 
     function resolveExtractorUrl(url, refererLabel) {
         if (!url) return Promise.resolve([]);
+        // Handle Cinefreak generate.php download links
+        if (/generate\.php/i.test(url)) {
+            var idMatch = String(url || "").match(/[?&]id=([^&\s"']+)/i);
+            if (idMatch && !/^v\d/i.test(idMatch[1])) {
+                var decoded = decodeBase64Safe(idMatch[1]);
+                if (decoded && /^https?:\/\//i.test(decoded)) {
+                    var cut = decoded.indexOf("newgo32");
+                    if (cut !== -1) decoded = trim(decoded.substring(0, cut));
+                    return resolveExtractorUrl(decoded, refererLabel || "Cinefreak");
+                }
+            }
+            return withTimeout(resolveCinefreakGenerate(url, refererLabel || "Cinefreak"), 25000, "CinefreakGenerate");
+        }
         // Handle id= query param base64 decode and newgo32 strip (as done in Cinefreak .cs3)
         var idMatch = String(url || "").match(/[?&]id=([^&\s"']+)/i);
         if (idMatch) {
@@ -2624,7 +2730,7 @@
                     for (var j = 0; j < anchors.length; j++) {
                         var a = anchors[j];
                         // Only keep real extractor-wrapped links (generate.php) or external hosts
-                        if (!/generate\.php/i.test(a.href) && !/^https?:\/\/(?!cinefreak\.nl)/i.test(a.href)) continue;
+                        if (!/generate\.php/i.test(a.href) && (!/^https?:\/\//i.test(a.href) || baseOrigin(a.href) === baseOrigin(sourceUrl))) continue;
                         var label = trim(labelBlocks[i].label + " " + a.text);
                         var quality = getQualityFromText(label + " " + a.href) || getQualityFromText(labelBlocks[i].label);
                         movieLinks.push({ label: label, href: a.href, quality: quality });
