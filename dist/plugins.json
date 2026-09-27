@@ -265,11 +265,41 @@
   {
     "packageName": "com.igris.repo.netmirror",
     "name": "Netmirror",
-    "version": 1,
+    "version": 2,
     "baseUrl": "https://net52.cc",
-    "description": "Stream movies and series from Netflix, Prime Video, and Hotstar mirrors.",
+    "providers": [
+      {
+        "id": "netflix",
+        "name": "Netflix"
+      },
+      {
+        "id": "prime",
+        "name": "Prime Video"
+      },
+      {
+        "id": "hotstar",
+        "name": "Hotstar"
+      },
+      {
+        "id": "disney",
+        "name": "Disney"
+      },
+      {
+        "id": "marvel",
+        "name": "Marvel"
+      },
+      {
+        "id": "starwars",
+        "name": "Star Wars"
+      },
+      {
+        "id": "pixar",
+        "name": "Pixar"
+      }
+    ],
+    "description": "Stream movies and series from Netflix, Prime Video, Hotstar, and Disney studios.",
     "authors": [
-      "Developer"
+      "IGRIS"
     ],
     "languages": [
       "en",
