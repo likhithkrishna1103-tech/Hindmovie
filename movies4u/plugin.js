@@ -203,16 +203,27 @@
 
   function parseJsonSafe(value, fallback) {
     if (value && typeof value === "object") return value;
+    var raw = String(value || "").trim();
+    if (!raw) return fallback;
     try {
-      return JSON.parse(String(value || ""));
+      return JSON.parse(raw);
     } catch (_) {
       try {
-        var text = String(value || "")
+        var text = raw
           .replace(/^'+|'+$/g, "")
           .replace(/^"+|"+$/g, "");
         return JSON.parse(text);
       } catch (_) {
-        return fallback;
+        try {
+          var unescaped = raw
+            .replace(/^'+|'+$/g, "")
+            .replace(/^"+|"+$/g, "")
+            .replace(/\\\\"/g, '"')
+            .replace(/\\"/g, '"');
+          return JSON.parse(unescaped);
+        } catch (_) {
+          return fallback;
+        }
       }
     }
   }
