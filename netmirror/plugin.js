@@ -744,13 +744,27 @@
             var year = parseInt(String(data.year), 10) || undefined;
             var rating = parseScore(data.match);
             var duration = parseDurationMinutes(data.runtime);
-            var genres = String(data.genre || "").split(",").map(function (s) { return s.trim(); }).filter(Boolean);
-            var isSeries = Array.isArray(data.episodes) && data.episodes.length > 0;
+            var validEpisodes = Array.isArray(data.episodes) ? data.episodes.filter(function (ep) { return ep && ep.id; }) : [];
+            var isSeries = validEpisodes.length > 0 || (Array.isArray(data.season) && data.season.length > 0);
 
             var cast = [];
-            if (data.cast) {
-                var castNames = String(data.cast).split(",").map(function (s) { return s.trim(); }).filter(Boolean);
-                cast = castNames.map(function (name) { return new Actor({ name: name }); });
+            var rawCast = data.cast || data.cast_data || data.actors;
+            if (rawCast) {
+                if (Array.isArray(rawCast)) {
+                    cast = rawCast.map(function (c) {
+                        if (c && typeof c === "object") {
+                            return new Actor({
+                                name: c.name || c.n || "",
+                                role: c.role || c.character || c.r || undefined,
+                                image: c.image || c.img || c.profile || c.poster || undefined
+                            });
+                        }
+                        return new Actor({ name: String(c || "").trim() });
+                    }).filter(function (a) { return !!a.name; });
+                } else {
+                    var castNames = String(rawCast).split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+                    cast = castNames.map(function (name) { return new Actor({ name: name }); });
+                }
             }
 
             var directors = [];
@@ -760,9 +774,8 @@
 
             var episodes = [];
             if (isSeries) {
-                for (var e = 0; e < data.episodes.length; e++) {
-                    var ep = data.episodes[e];
-                    if (!ep) continue;
+                for (var e = 0; e < validEpisodes.length; e++) {
+                    var ep = validEpisodes[e];
                     var epId = String(ep.id || "");
                     var epNum = ep.ep ? parseInt(String(ep.ep).replace(/E/i, ""), 10) : (e + 1);
                     var sNum = ep.s ? parseInt(String(ep.s).replace(/S/i, ""), 10) : 1;
@@ -825,12 +838,12 @@
                     }
                 }
             } else {
-                // Single movie
+                // Single movie (season 0 and episode 0)
                 episodes.push(new Episode({
                     name: title,
                     url: BASE_URL + "/watch?id=" + id + "&ott=" + config.ott + (config.studio ? "&studio=" + config.studio : ""),
-                    season: 1,
-                    episode: 1,
+                    season: 0,
+                    episode: 0,
                     runtime: duration ? Number(duration) : undefined,
                     description: synopsis || undefined,
                     posterUrl: config.poster(id),

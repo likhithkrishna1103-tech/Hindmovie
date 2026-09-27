@@ -1198,7 +1198,7 @@
         "m4ufree": "https://ww4.m4ufree.lat",
         "pencurimoviesubmalay": "https://pencurimoviesubmalay26.site",
         "zinkmovies": "https://new2.zinkmovies.mobi",
-        "cinefreak": "https://cinefreak.nl",
+        "cinefreak": "https://cinefreak.ch",
         "coflix": "https://coflix.esq"
     };
 
@@ -5431,7 +5431,6 @@
             var queries = uniqueBy([seasonQuery, media.title, media.originalTitle, media.imdbId], function(item) { return trim(String(item || "").toLowerCase()); }).filter(Boolean);
             var rows = await searchTitles(queries);
             var candidates = rankedMatches(rows, queries, media.year, media.isMovie ? "movie" : null, 3);
-            if (!candidates.length && rows.length) candidates = rows.slice(0, 3);
             if (!candidates.length) return [];
 
             for (var c = 0; c < candidates.length; c++) {
@@ -7108,6 +7107,32 @@
             return url;
         }
 
+        async function resolveCinefreakGenerate(generateUrl, referer, label) {
+            try {
+                var res = await request(generateUrl, { headers: defaultHeaders({ "Referer": referer }) });
+                if (!res || !res.body) return [];
+                var goMatch = res.body.match(/window\.location\.href\s*=\s*["'](\/generate\.php\?[^"']+)["']/i);
+                if (!goMatch) return [];
+                var goPath = goMatch[1].replace(/\\u0026/g, "&");
+                var mainUrl = await getMainUrl();
+                var goUrl = absoluteUrl(mainUrl, goPath);
+                var goRes = await request(goUrl, { headers: defaultHeaders({ "Referer": generateUrl }), allowRedirects: true });
+                if (!goRes) return [];
+                var cloudUrl = goRes.finalUrl || "";
+                var cloudHtml = goRes.body || "";
+                var fcMatch = cloudHtml.match(/href=["'](\/fc\/[^"']+)["']/i);
+                if (fcMatch) {
+                    var fcUrl = absoluteUrl(cloudUrl, fcMatch[1]);
+                    var directRes = await request(fcUrl, { headers: defaultHeaders({ "Referer": cloudUrl }), allowRedirects: false }).catch(function() { return null; });
+                    var loc = directRes && directRes.headers && (directRes.headers.location || directRes.headers.Location);
+                    var finalStreamUrl = loc || fcUrl;
+                    var q = qualityFromText(finalStreamUrl + " " + label) || 720;
+                    return [buildResolvedStream(finalStreamUrl, "Cinefreak [FSL]", q, { "Referer": cloudUrl }, label)];
+                }
+            } catch (_) {}
+            return [];
+        }
+
         async function resolve(media) {
             if (media.anime) return [];
             var queries = uniqueBy([media.title, media.originalTitle], function(item) { return normalizeTitle(item); }).filter(Boolean);
@@ -7174,28 +7199,29 @@
             }
 
             linksToResolve = uniqueBy(linksToResolve, function(item) { return item.url; });
-            var streams = [];
-            for (var r = 0; r < Math.min(linksToResolve.length, 6); r++) {
-                var item = linksToResolve[r];
+            var resolvedLists = await Promise.all(linksToResolve.slice(0, 4).map(async function(item) {
                 var rawUrl = item.url;
-                if (!rawUrl) continue;
+                if (!rawUrl) return [];
                 try {
-                    var resolved = [];
+                    if (/generate\.php/i.test(rawUrl)) {
+                        var genStreams = await resolveCinefreakGenerate(rawUrl, match.url, item.label);
+                        if (genStreams.length) return genStreams;
+                    }
                     if (/hubcloud/i.test(rawUrl)) {
-                        resolved = await resolveHubCloudGlobal(rawUrl, "Cinefreak");
+                        var hcStreams = await resolveHubCloudGlobal(rawUrl, "Cinefreak");
+                        if (hcStreams.length) return hcStreams;
                     }
-                    if (!resolved.length) {
-                        resolved = await resolveCommonExtractorUrl(rawUrl, "Cinefreak", match.url, 0);
-                    }
-                    if (!resolved.length && isCommonDirectMediaUrl(rawUrl)) {
-                        resolved.push(buildResolvedStream(rawUrl, "Cinefreak", qualityFromText(item.label || rawUrl), {}, item.label || rawUrl));
-                    }
-                    for (var s = 0; s < resolved.length; s++) {
-                        streams.push(resolved[s]);
+                    if (isCommonDirectMediaUrl(rawUrl)) {
+                        return [buildResolvedStream(rawUrl, "Cinefreak", qualityFromText(item.label || rawUrl), {}, item.label || rawUrl)];
                     }
                 } catch (_) {}
-            }
+                return [];
+            }));
 
+            var streams = [];
+            for (var sl = 0; sl < resolvedLists.length; sl++) {
+                streams = streams.concat(resolvedLists[sl]);
+            }
             return dedupeStreams(streams);
         }
 
