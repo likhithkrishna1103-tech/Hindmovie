@@ -1037,14 +1037,14 @@
     var MIN_REQUIRED_STREAMS = 3; // Early termination threshold
     var EARLY_TERMINATION_ENABLED = true;
     var PROVIDER_TIMEOUT_OVERRIDE = {
-        "p_anilight": 4000,
-        "p_anikage": 4000,
-        "p_hianime": 4000,
-        "p_animewave": 4500,
-        "p_vegamovies": 5000,
+        "p_anilight": 4500,
+        "p_anikage": 4500,
+        "p_hianime": 4500,
+        "p_animewave": 5000,
+        "p_vegamovies": 7000,
         "p_cinefreak": 5000,
         "p_movies4u": 5000,
-        "p_hindmoviez": 5000,
+        "p_hindmoviez": 7000,
         "p_castle": 5000
     };
 
@@ -1140,7 +1140,7 @@
     }
 
 
-    var DOMAINS_JSON_URL = "https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json";
+    var DOMAINS_JSON_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
     var COMMON_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
     var domainsCache = null;
     var domainsCacheAt = 0;
@@ -3708,338 +3708,7 @@
         };
     })();
 
-    var HindmoviezSource = (function() {
-        var FALLBACK_DOMAINS = [
-            "https://hindmovie.fit",
-            "https://hindmovie.icu",
-            "https://hindmoviez.cafe",
-            "https://hindmoviez.com",
-            "https://hindmoviez.net",
-            "https://hindmoviez.in"
-        ];
-        var SKIP_PATTERNS = [
-            /t\.me\//i, /telegram\./i, /facebook\.com/i, /instagram\.com/i,
-            /twitter\.com/i, /youtube\.com/i, /doubleclick/i, /googlesyndication/i,
-            /contact/i, /disclaimer/i
-        ];
 
-        var cachedMainUrl = "";
-        var cachedMainUrlAt = 0;
-        var DOMAIN_TTL = 30 * 60 * 1000;
-
-        function getOrigin(url) {
-            return baseOrigin(url);
-        }
-
-        function isBlockedBody(body) {
-            var text = String(body || "");
-            return /just a moment/i.test(text)
-                || /checking if the site connection is secure/i.test(text)
-                || /cf-browser-verification/i.test(text)
-                || (/attention required/i.test(text) && /cloudflare/i.test(text));
-        }
-
-        function isGoodUrl(url) {
-            var value = String(url || "");
-            if (!/^https?:\/\//i.test(value)) return false;
-            for (var i = 0; i < SKIP_PATTERNS.length; i++) {
-                if (SKIP_PATTERNS[i].test(value)) return false;
-            }
-            return true;
-        }
-
-        function parseArticles(html, mainUrl) {
-            var items = [];
-            var blocks = String(html || "").match(/<article[\s\S]*?<\/article>/gi) || [];
-            if (!blocks.length) blocks = String(html || "").match(/<div[^>]+class="[^"]*\bpost\b[^"]*"[\s\S]*?<\/div>/gi) || [];
-            for (var i = 0; i < blocks.length; i++) {
-                var block = blocks[i];
-                var title = stripTags(firstMatch(block, [
-                    /<h[23][^>]*class=["'][^"']*entry-title[^"']*["'][^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i,
-                    /<h[23][^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>[\s\S]*?<\/h[23]>/i
-                ]));
-                var href = absoluteUrl(mainUrl, firstMatch(block, [/<a[^>]+href=["']([^"']+)["']/i]));
-                if (!title || !href) continue;
-                items.push({
-                    title: trim(title),
-                    url: href,
-                    type: /season/i.test(title) ? "series" : "movie"
-                });
-            }
-            return items;
-        }
-
-        async function isHealthyDomain(url) {
-            try {
-                var text = await getText(String(url || "").replace(/\/$/, "") + "/", {});
-                return !isBlockedBody(text);
-            } catch (_) {
-                return false;
-            }
-        }
-
-        async function getMainUrl(force) {
-            var now = Date.now();
-            if (!force && cachedMainUrl && (now - cachedMainUrlAt) < DOMAIN_TTL) return cachedMainUrl;
-            var candidates = [];
-            try {
-                var domainJson = await getDomainsJson();
-                if (domainJson && domainJson.hindmoviez) candidates.push(domainJson.hindmoviez);
-                if (domainJson && domainJson.hindmoviez_url) candidates.push(domainJson.hindmoviez_url);
-            } catch (_) { }
-            candidates = candidates.concat(FALLBACK_DOMAINS);
-            var uniq = uniqueValues(candidates);
-            for (var i = 0; i < uniq.length; i++) {
-                if (await isHealthyDomain(uniq[i])) {
-                    cachedMainUrl = String(uniq[i]).replace(/\/$/, "");
-                    cachedMainUrlAt = Date.now();
-                    return cachedMainUrl;
-                }
-            }
-            cachedMainUrl = FALLBACK_DOMAINS[0];
-            cachedMainUrlAt = Date.now();
-            return cachedMainUrl;
-        }
-
-        async function rewriteToActiveDomain(url) {
-            var origin = getOrigin(url);
-            if (!origin) return url;
-            var mainUrl = await getMainUrl(false);
-            var activeOrigin = getOrigin(mainUrl);
-            return origin === activeOrigin ? url : String(url).replace(origin, activeOrigin);
-        }
-
-        async function siteRequest(url) {
-            var current = await rewriteToActiveDomain(url);
-            var lastError = null;
-            for (var i = 0; i < 2; i++) {
-                try {
-                    var body = await getText(current, { "Referer": getOrigin(current) + "/" }, true);
-                    if (isBlockedBody(body)) throw new Error("Blocked by anti-bot");
-                    return { url: current, body: body };
-                } catch (error) {
-                    lastError = error;
-                    var mainUrl = await getMainUrl(true);
-                    current = String(current).replace(getOrigin(current), getOrigin(mainUrl));
-                }
-            }
-            throw lastError || new Error("Hindmoviez request failed");
-        }
-
-        async function fetchFinal(url, maxHops) {
-            var current = url;
-            for (var i = 0; i < (maxHops || 4); i++) {
-                var res = await request(current, {
-                    headers: { "Referer": getOrigin(current) + "/" },
-                    allowRedirects: false
-                }).catch(function() { return null; });
-                if (!res) return { url: current, body: "" };
-                var body = String(res.body || "");
-                var redirect = res.headers && (res.headers.location || res.headers["x-redirect-location"]);
-                if (redirect) {
-                    current = absoluteUrl(current, redirect);
-                    continue;
-                }
-                var meta = body.match(/<meta[^>]+http-equiv=["']refresh["'][^>]+content="[^;]*;\s*url=([^"'>\s]+)/i);
-                if (meta) {
-                    current = absoluteUrl(current, meta[1].replace(/['"]/g, ""));
-                    continue;
-                }
-                var js = body.match(/window\.location(?:\.href)?\s*=\s*["']([^"']+)["']/i)
-                    || body.match(/location\.replace\(\s*["']([^"']+)["']\s*\)/i);
-                if (js) {
-                    current = absoluteUrl(current, js[1]);
-                    continue;
-                }
-                return { url: current, body: body };
-            }
-            return { url: current, body: "" };
-        }
-
-        function parseAnchorsByClass(body, classPart, baseUrl) {
-            var out = [];
-            var regex = /<a([^>]*)href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi;
-            var match;
-            while ((match = regex.exec(String(body || "")))) {
-                var attrs = String(match[1] || "") + " " + String(match[3] || "");
-                if (!new RegExp('class=["\'][^"\']*' + classPart + '[^"\']*["\']', "i").test(attrs)) continue;
-                out.push({
-                    href: absoluteUrl(baseUrl, match[2]),
-                    text: stripTags(match[4] || "")
-                });
-            }
-            return out;
-        }
-
-        function parseAnchorsContainingButtonClass(body, classPart, baseUrl) {
-            var out = [];
-            var regex = new RegExp('<a[^>]+href=["\']([^"\']+)["\'][^>]*>[\\s\\S]*?<button[^>]+class=["\'][^"\']*' + classPart + '[^"\']*["\'][^>]*>([\\s\\S]*?)<\\/button>[\\s\\S]*?<\\/a>', "gi");
-            var match;
-            while ((match = regex.exec(String(body || "")))) {
-                out.push({
-                    href: absoluteUrl(baseUrl, match[1]),
-                    text: stripTags(match[2] || "")
-                });
-            }
-            return out;
-        }
-
-        function isCandidateStreamPageUrl(url) {
-            return /hshare\.|gdirect\.|hcloud\.|gdtot\.|redirect\.php|file\.php/i.test(String(url || ""));
-        }
-
-        async function collectMovieLinks(html, mainUrl) {
-            var candidates = [];
-            var match;
-            var regexes = [
-                /<a[^>]+class=["'][^"']*maxbutton[^"']*["'][^>]+href=["']([^"']+)["']/gi,
-                /<a[^>]+class=["'][^"']*download-btn[^"']*["'][^>]+href=["']([^"']+)["']/gi
-            ];
-            for (var i = 0; i < regexes.length; i++) {
-                while ((match = regexes[i].exec(String(html || "")))) {
-                    candidates.push(absoluteUrl(mainUrl, match[1]));
-                }
-            }
-
-            var anchors = parseAnchors(html, mainUrl);
-            for (var j = 0; j < anchors.length; j++) {
-                if (isGoodUrl(anchors[j].href) && /download|480p|720p|1080p|4k|mvlink/i.test(String(anchors[j].text || ""))) {
-                    candidates.push(anchors[j].href);
-                }
-            }
-
-            candidates = uniqueValues(candidates);
-            if (!candidates.length) {
-                return uniqueValues(anchors.map(function(row) {
-                    return isGoodUrl(row.href) ? row.href : "";
-                }).filter(Boolean));
-            }
-
-            var nested = [];
-            for (var x = 0; x < Math.min(candidates.length, 6); x++) {
-                try {
-                    var page = await siteRequest(candidates[x]);
-                    var links = parseAnchors(page.body, page.url).map(function(row) { return row.href; }).filter(function(href) {
-                        return isGoodUrl(href) && isCandidateStreamPageUrl(href);
-                    });
-                    nested = nested.concat(links);
-                } catch (_) { }
-            }
-            return uniqueValues(nested);
-        }
-
-        async function collectSeriesEpisodePages(html, mainUrl, targetSeason, targetEpisode) {
-            var out = [];
-            var regex = /<h[23][^>]*>[\s\S]*?Season\s*(\d+)[\s\S]*?<\/h[23]>[\s\S]*?<a[^>]+href=["']([^"']+)["']/gi;
-            var match;
-            while ((match = regex.exec(String(html || "")))) {
-                var seasonNumber = Number(match[1]);
-                if (seasonNumber !== Number(targetSeason)) continue;
-                var listUrl = absoluteUrl(mainUrl, match[2]);
-                try {
-                    var listPage = await siteRequest(listUrl);
-                    var anchors = parseAnchors(listPage.body, listPage.url);
-                    for (var i = 0; i < anchors.length; i++) {
-                        var text = String(anchors[i].text || "");
-                        var epMatch = text.match(/Episode\s*(\d+)/i)
-                            || text.match(/\bEp\.?\s*(\d+)/i)
-                            || text.match(/\bE(\d+)\b/i);
-                        if (!epMatch || Number(epMatch[1]) !== Number(targetEpisode)) continue;
-                        if (isGoodUrl(anchors[i].href)) out.push(anchors[i].href);
-                    }
-                } catch (_) { }
-            }
-            if (out.length) return uniqueValues(out);
-            var anchors = parseAnchors(html, mainUrl);
-            var seasonLinks = [];
-            for (var j = 0; j < anchors.length; j++) {
-                var anchor = anchors[j];
-                var seasonMatch = String(anchor.text || "").match(/Season\s*(\d+)/i) || String(anchor.href || "").match(/season[-\s]?(\d+)/i);
-                if (!seasonMatch || Number(seasonMatch[1]) !== Number(targetSeason)) continue;
-                if (isGoodUrl(anchor.href)) seasonLinks.push(anchor.href);
-            }
-            seasonLinks = uniqueValues(seasonLinks);
-            for (var k = 0; k < Math.min(seasonLinks.length, 6); k++) {
-                try {
-                    var seasonPage = await siteRequest(seasonLinks[k], { attempts: 1 });
-                    var episodeAnchors = parseAnchors(seasonPage.body, seasonPage.url);
-                    for (var x = 0; x < episodeAnchors.length; x++) {
-                        var text = String(episodeAnchors[x].text || "");
-                        var epMatch = text.match(/Episode\s*(\d+)/i)
-                            || text.match(/\bEp\.?\s*(\d+)/i)
-                            || text.match(/\bE(\d+)\b/i);
-                        if (!epMatch || Number(epMatch[1]) !== Number(targetEpisode)) continue;
-                        if (isGoodUrl(episodeAnchors[x].href)) out.push(episodeAnchors[x].href);
-                    }
-                } catch (_) { }
-            }
-            return uniqueValues(out);
-        }
-
-        async function extractPageStreams(pageUrl) {
-            try {
-                var finalPage = await fetchFinal(pageUrl, 4);
-                var body = finalPage.body || "";
-                var heading = stripTags(firstMatch(body, [/<h2[^>]*>([\s\S]*?)<\/h2>/i]));
-                var quality = qualityFromText(heading || pageUrl);
-                var finalLinks = [];
-                finalLinks = finalLinks.concat(parseAnchorsByClass(body, "button", finalPage.url));
-                finalLinks = finalLinks.concat(parseAnchorsContainingButtonClass(body, "button", finalPage.url));
-                finalLinks = finalLinks.filter(function(row) { return row && isGoodUrl(row.href); });
-                if (!finalLinks.length) return [];
-                var chosen = finalLinks[0];
-                return [{
-                    url: chosen.href,
-                    quality: quality || qualityFromText(chosen.text || chosen.href),
-                    source: withSimplifiedSource("Hindmoviez [" + trim(chosen.text || "HCloud") + "]", heading || chosen.text || chosen.href),
-                    headers: { "Referer": finalPage.url }
-                }];
-            } catch (_) {
-                return [];
-            }
-        }
-
-        async function searchTitles(queries) {
-            var mainUrl = await getMainUrl(false);
-            for (var i = 0; i < queries.length; i++) {
-                var query = trim(queries[i]);
-                if (!query) continue;
-                try {
-                    var res = await siteRequest(mainUrl + "/?s=" + encodeURIComponent(query));
-                    var items = parseArticles(res.body, mainUrl);
-                    if (items.length) return items;
-                } catch (_) { }
-            }
-            return [];
-        }
-
-        async function resolve(media) {
-            var queries = uniqueBy([media.title, media.originalTitle], function(item) { return normalizeTitle(item); }).filter(Boolean);
-            var results = await searchTitles(queries);
-            var match = bestMatch(results, queries, media.year, media.isMovie ? "movie" : "series");
-            if (!match || !match.url) return [];
-
-            var page = await siteRequest(match.url).catch(function() { return null; });
-            if (!page || !page.body) return [];
-
-            var pageUrls = media.isMovie
-                ? await collectMovieLinks(page.body, page.url)
-                : await collectSeriesEpisodePages(page.body, page.url, media.season, media.episode);
-            if (!pageUrls.length) return [];
-
-            var out = [];
-            for (var i = 0; i < Math.min(pageUrls.length, 3); i++) {
-                out = out.concat(await extractPageStreams(pageUrls[i]));
-            }
-            return dedupeStreams(out);
-        }
-
-        return {
-            key: "p_hindmoviez",
-            name: "Hindmoviez",
-            resolve: resolve
-        };
-    })();
 
     var AnimeToshoSource = (function() {
         var API_BASE = "https://feed.animetosho.org";
@@ -7047,6 +6716,350 @@
         };
     })();
 
+    var HindmoviezSource = (function() {
+        var DEFAULT_DOMAIN = "https://hindmovie.dev";
+        var SECRET = "5e96085c56e0f54eda657790ac58d19b271479c504367fc9e6a6c33f1f824e6b";
+
+        async function getMainUrl() {
+            return await getDynamicDomain("hindmoviez", DEFAULT_DOMAIN);
+        }
+
+        function toBase64Url(text) {
+            var input = String(text || "");
+            var utf8 = [];
+            for (var i = 0; i < input.length; i++) {
+                var code = input.charCodeAt(i);
+                if (code < 0x80) utf8.push(code);
+                else if (code < 0x800) utf8.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+                else utf8.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+            }
+            var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            var out = "";
+            for (var j = 0; j < utf8.length; j += 3) {
+                var a = utf8[j];
+                var b = j + 1 < utf8.length ? utf8[j + 1] : 0;
+                var c = j + 2 < utf8.length ? utf8[j + 2] : 0;
+                var triplet = (a << 16) | (b << 8) | c;
+                out += chars[(triplet >> 18) & 63];
+                out += chars[(triplet >> 12) & 63];
+                out += j + 1 < utf8.length ? chars[(triplet >> 6) & 63] : "=";
+                out += j + 2 < utf8.length ? chars[triplet & 63] : "=";
+            }
+            return out.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+        }
+
+        function hmacSha256HMZ(keyStr, dataStr) {
+            function strToWords(str) {
+                var words = [];
+                for (var i = 0; i < str.length; i++) {
+                    words[i >> 2] |= (str.charCodeAt(i) & 0xff) << (24 - (i % 4) * 8);
+                }
+                return words;
+            }
+            function wordsToHex(words) {
+                var hex = "";
+                for (var i = 0; i < words.length; i++) {
+                    var h = (words[i] >>> 0).toString(16);
+                    while (h.length < 8) h = "0" + h;
+                    hex += h;
+                }
+                return hex;
+            }
+            function sha256Words(words, lenBits) {
+                var K = [
+                    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+                    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+                    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+                    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+                    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+                    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+                    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+                    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+                ];
+                var H = [
+                    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+                ];
+                var totalWords = Math.ceil((lenBits + 65) / 512) * 16;
+                var w = new Array(totalWords).fill(0);
+                for (var i = 0; i < words.length; i++) w[i] = words[i];
+                w[lenBits >> 5] |= 0x80 << (24 - (lenBits % 32));
+                w[totalWords - 1] = lenBits;
+                for (var j = 0; j < totalWords; j += 16) {
+                    var chunk = w.slice(j, j + 16);
+                    var W = new Array(64);
+                    for (var k = 0; k < 16; k++) W[k] = chunk[k];
+                    for (var m = 16; m < 64; m++) {
+                        var s0 = ((W[m - 15] >>> 7) | (W[m - 15] << 25)) ^ ((W[m - 15] >>> 18) | (W[m - 15] << 14)) ^ (W[m - 15] >>> 3);
+                        var s1 = ((W[m - 2] >>> 17) | (W[m - 2] << 15)) ^ ((W[m - 2] >>> 19) | (W[m - 2] << 13)) ^ (W[m - 2] >>> 10);
+                        W[m] = (W[m - 16] + s0 + W[m - 7] + s1) | 0;
+                    }
+                    var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+                    for (var n = 0; n < 64; n++) {
+                        var S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+                        var ch = (e & f) ^ (~e & g);
+                        var temp1 = (h + S1 + ch + K[n] + W[n]) | 0;
+                        var S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+                        var maj = (a & b) ^ (a & c) ^ (b & c);
+                        var temp2 = (S0 + maj) | 0;
+                        h = g; g = f; f = e; e = (d + temp1) | 0; d = c; c = b; b = a; a = (temp1 + temp2) | 0;
+                    }
+                    H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+                    H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+                }
+                return H;
+            }
+            var keyWords = strToWords(keyStr);
+            if (keyStr.length > 64) {
+                var h = sha256Words(keyWords, keyStr.length * 8);
+                keyWords = h.concat(new Array(8).fill(0));
+            } else {
+                while (keyWords.length < 16) keyWords.push(0);
+            }
+            var ipad = new Array(16);
+            var opad = new Array(16);
+            for (var p = 0; p < 16; p++) {
+                ipad[p] = keyWords[p] ^ 0x36363636;
+                opad[p] = keyWords[p] ^ 0x5c5c5c5c;
+            }
+            var dataWords = strToWords(dataStr);
+            var ipadData = ipad.concat(dataWords);
+            var innerHash = sha256Words(ipadData, 512 + dataStr.length * 8);
+            var opadInnerHash = opad.concat(innerHash);
+            var outerHash = sha256Words(opadInnerHash, 512 + 256);
+            return wordsToHex(outerHash);
+        }
+
+        function signHshareUrl(url) {
+            var match = String(url || "").match(/^(https?:\/\/[^/]+)\/\?id=([^&#]+)/i);
+            if (!match) return url;
+            var domain = match[1];
+            var rawId = decodeURIComponent(match[2].replace(/\+/g, "%2B"));
+            var t = Math.floor(Date.now() / 1000);
+            var encoded = toBase64Url(rawId);
+            var s = hmacSha256HMZ(SECRET, encoded + "|" + t).substring(0, 16);
+            return domain + "/r.php?d=" + encodeURIComponent(encoded) + "&t=" + t + "&s=" + s;
+        }
+
+        async function fetchFinal(url, maxHops) {
+            var cur = url;
+            maxHops = maxHops || 4;
+            for (var i = 0; i < maxHops; i++) {
+                var res = await request(cur, { headers: commonHeaders({ "Referer": cur }), allowRedirects: false }).catch(function() { return null; });
+                if (!res) return { url: cur, body: "" };
+                var loc = res.headers && (res.headers.location || res.headers.Location);
+                if (loc) {
+                    cur = absoluteUrl(cur, loc);
+                    continue;
+                }
+                var body = res.body || "";
+                var meta = body.match(/<meta[^>]+http-equiv="refresh"[^>]+content="[^;]*;\s*url=([^"'>\s]+)/i);
+                if (meta) {
+                    cur = absoluteUrl(cur, meta[1].replace(/['"]/g, ""));
+                    continue;
+                }
+                var js = body.match(/window\.location(?:\.href)?\s*=\s*["']([^"']+)["']/i)
+                    || body.match(/location\.replace\s*\(\s*["']([^"']+)["']\s*\)/i);
+                if (js) {
+                    cur = absoluteUrl(cur, js[1]);
+                    continue;
+                }
+                var finalUrl = (res && res.finalUrl) || cur;
+                return { url: finalUrl, body: body };
+            }
+            return { url: cur, body: "" };
+        }
+
+        async function extractGdshine(gdUrl, quality) {
+            var id = String(gdUrl || "").replace(/[?#].*$/, "").split("/").filter(Boolean).pop();
+            if (!id) return [];
+            try {
+                var fileRes = await request("https://gdshine.org/api/files/s/" + id, {
+                    headers: commonHeaders({ "Referer": "https://gdshine.org/" })
+                }).catch(function() { return null; });
+                var parsed = parseJsonSafe(fileRes && fileRes.body, {});
+                var fileData = parsed && parsed.data;
+                if (fileData && fileData.id) {
+                    var workerRes = await request("https://gdshine.org/api/downloads/" + fileData.id + "/via-worker", {
+                        method: "POST",
+                        headers: commonHeaders({
+                            "Referer": "https://gdshine.org/",
+                            "Content-Type": "application/json"
+                        }),
+                        body: "{}"
+                    }).catch(function() { return null; });
+                    var workerParsed = parseJsonSafe(workerRes && workerRes.body, {});
+                    var copyUrl = workerParsed && workerParsed.data && workerParsed.data.copyUrl;
+                    if (copyUrl && /^https?:\/\//i.test(copyUrl)) {
+                        return [{
+                            url: copyUrl,
+                            quality: quality || qualityFromText(fileData.name) || 1080,
+                            source: "HindMoviez [Gdshine]",
+                            headers: {}
+                        }];
+                    }
+                }
+            } catch (_) {}
+            return [];
+        }
+
+        async function extractPageStreams(pageUrl) {
+            var target = pageUrl;
+            if (pageUrl.indexOf("?id=") !== -1) {
+                target = signHshareUrl(pageUrl);
+            }
+            var finalObj = await fetchFinal(target, 3);
+            var body = finalObj.body || "";
+            var resolvedPageUrl = finalObj.url;
+            var fileName = stripTags((body.match(/<title>([^<]+)<\/title>/i) || [])[1] || "");
+            var pageQuality = qualityFromText(fileName) || 720;
+
+            var anchors = parseAnchors(body, resolvedPageUrl);
+            var streams = [];
+            var directItems = [];
+
+            for (var i = 0; i < anchors.length; i++) {
+                var a = anchors[i];
+                if (/gdshine\.org/i.test(a.href)) {
+                    directItems.push({ type: "gdshine", url: a.href, text: a.text });
+                } else if (/hcloud\.ink/i.test(a.href)) {
+                    directItems.push({ type: "hcloud", url: a.href, text: a.text });
+                }
+            }
+
+            var results = await Promise.all(directItems.map(async function(item) {
+                if (item.type === "gdshine") {
+                    return await extractGdshine(item.url, pageQuality);
+                } else if (item.type === "hcloud") {
+                    var hcloudRes = await request(item.url, { headers: commonHeaders({ "Referer": resolvedPageUrl }) }).catch(function() { return null; });
+                    var hcloudBody = (hcloudRes && hcloudRes.body) || "";
+                    var hcloudUrl = (hcloudRes && hcloudRes.finalUrl) || item.url;
+                    var hcloudAnchors = parseAnchors(hcloudBody, hcloudUrl);
+                    var out = [];
+                    for (var h = 0; h < hcloudAnchors.length; h++) {
+                        var ha = hcloudAnchors[h];
+                        if (/workers\.dev|googleusercontent|download/i.test(ha.href) || /Server \d/i.test(ha.text)) {
+                            out.push({
+                                url: ha.href.replace(/&amp;/g, "&"),
+                                quality: pageQuality,
+                                source: "HindMoviez [" + (ha.text || "Server") + "]",
+                                headers: { "Referer": hcloudUrl }
+                            });
+                        }
+                    }
+                    return out;
+                }
+                return [];
+            }));
+
+            for (var r = 0; r < results.length; r++) {
+                streams = streams.concat(results[r]);
+            }
+            return streams;
+        }
+
+        async function searchTitles(queries) {
+            var mainUrl = await getMainUrl();
+            var outMap = {};
+            for (var i = 0; i < queries.length; i++) {
+                var q = trim(queries[i]);
+                if (!q) continue;
+                try {
+                    var html = await getText(mainUrl + "/?s=" + encodeURIComponent(q), commonHeaders({ "Referer": mainUrl + "/" })).catch(function() { return ""; });
+                    var rawAnchors = [];
+                    var regex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+                    var match;
+                    while ((match = regex.exec(html))) {
+                        var rawInner = match[2];
+                        var altMatch = rawInner.match(/alt=["']([^"']+)["']/i);
+                        var cleanText = stripTags(rawInner);
+                        var bestTitle = altMatch && altMatch[1] && altMatch[1].length > cleanText.length ? altMatch[1] : cleanText;
+                        rawAnchors.push({ href: absoluteUrl(mainUrl, decodeHtml(match[1])), text: bestTitle });
+                    }
+                    for (var j = 0; j < rawAnchors.length; j++) {
+                        var a = rawAnchors[j];
+                        if (!/\/\d{4}\/|\/[a-z0-9-]+-(?:19|20)\d{2}-[a-z0-9-]+\//i.test(a.href) && !/dual-audio|hindi/i.test(a.href)) continue;
+                        var title = trim(a.text);
+                        if (!title || title.length < 3 || /^(?:read more|download|web-dl|hdrip|bluray)$/i.test(title)) continue;
+                        var existing = outMap[a.href];
+                        if (!existing || title.length > existing.title.length) {
+                            outMap[a.href] = {
+                                title: title,
+                                url: a.href,
+                                year: Number(firstMatch(title, [/\b(19\d\d|20\d\d)\b/])) || undefined,
+                                type: /season|series|episode/i.test(title) ? "series" : "movie"
+                            };
+                        }
+                    }
+                } catch (_) {}
+                if (Object.keys(outMap).length) break;
+            }
+            return Object.values(outMap);
+        }
+
+        async function resolve(media) {
+            if (media.anime) return [];
+            var queries = uniqueBy([media.title, media.originalTitle], function(item) { return normalizeTitle(item); }).filter(Boolean);
+            var results = await searchTitles(queries);
+            var match = bestMatch(results, queries, media.year, media.isMovie ? "movie" : "series");
+            if (!match || !match.url) return [];
+
+            var mainUrl = await getMainUrl();
+            var html = await getText(match.url, commonHeaders({ "Referer": mainUrl + "/" })).catch(function() { return ""; });
+            if (!html) return [];
+
+            var content = (html.match(/<div[^>]+class="[^"]*entry-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] || html;
+            var candidates = [];
+            var mRegex = /<a[^>]+class="[^"]*(?:maxbutton|download-btn)[^"]*"[^>]+href="([^"']+)"/gi;
+            var m;
+            while ((m = mRegex.exec(content))) {
+                candidates.push(m[1]);
+            }
+            var anchors = parseAnchors(content, match.url);
+            for (var i = 0; i < anchors.length; i++) {
+                var a = anchors[i];
+                if (/mvlink|hshare|gdirect|gdshine|hcloud/i.test(a.href)) {
+                    candidates.push(a.href);
+                }
+            }
+            candidates = uniqueBy(candidates, function(x) { return x; }).filter(function(u) {
+                return !/quality\/|category\/|language\/|genre\/|year\/|disk\.yandex/i.test(u);
+            }).slice(-2);
+
+            var streamPageUrls = [];
+            await Promise.all(candidates.map(async function(candUrl) {
+                if (/hshare|gdirect|gdshine|hcloud|\?id=/i.test(candUrl)) {
+                    streamPageUrls.push(candUrl);
+                    return;
+                }
+                var candPage = await getText(candUrl, commonHeaders({ "Referer": match.url })).catch(function() { return ""; });
+                var candAnchors = parseAnchors(candPage, candUrl);
+                for (var c = 0; c < candAnchors.length; c++) {
+                    var ca = candAnchors[c];
+                    if (/hshare|gdirect|gdshine|hcloud|\?id=/i.test(ca.href)) {
+                        streamPageUrls.push(ca.href);
+                    }
+                }
+            }));
+
+            streamPageUrls = uniqueBy(streamPageUrls, function(x) { return x; }).sort(function(a, b) {
+                return (qualityFromText(b) || 0) - (qualityFromText(a) || 0);
+            }).slice(0, 1);
+            var streamGroups = await Promise.all(streamPageUrls.map(extractPageStreams));
+            var streams = [];
+            for (var g = 0; g < streamGroups.length; g++) {
+                streams = streams.concat(streamGroups[g]);
+            }
+            return dedupeStreams(streams);
+        }
+
+        return {
+            key: "p_hindmoviez",
+            name: "HindMoviez",
+            isAnime: false,
+            resolve: resolve
+        };
+    })();
+
     var CinefreakSource = (function() {
         var DEFAULT_BASE_URL = "https://cinefreak.ch";
 
@@ -7078,12 +7091,13 @@
                         var rawTitle = String(item.t || item.title || "");
                         var itemSlug = String(item.l || item.href || item.slug || "");
                         if (!rawTitle || !itemSlug) continue;
-                        var yearMatch = rawTitle.match(/\((\d{4})\)/);
+                        var yearMatch = rawTitle.match(/\b(19\d\d|20\d\d)\b/);
+                        var slugPath = /^https?:\/\//i.test(itemSlug) ? itemSlug : ("/" + itemSlug.replace(/^\/+/, "").replace(/\/+$/, "") + "/");
                         out.push({
-                            title: trim(rawTitle.replace(/\s*\(?\d{4}\)?.*$/i, "")) || rawTitle,
+                            title: trim(rawTitle.replace(/\s*\(?(?:19|20)\d{2}\)?.*$/i, "")) || rawTitle,
                             rawTitle: rawTitle,
                             year: yearMatch ? Number(yearMatch[1]) : undefined,
-                            url: absoluteUrl(mainUrl, itemSlug.replace(/\/+$/, "") + "/"),
+                            url: absoluteUrl(mainUrl, slugPath),
                             type: /season|series|episode/i.test(rawTitle) ? "series" : "movie"
                         });
                     }
@@ -7116,18 +7130,19 @@
                 var goPath = goMatch[1].replace(/\\u0026/g, "&");
                 var mainUrl = await getMainUrl();
                 var goUrl = absoluteUrl(mainUrl, goPath);
-                var goRes = await request(goUrl, { headers: defaultHeaders({ "Referer": generateUrl }), allowRedirects: true });
+                var goRes = await request(goUrl, { headers: defaultHeaders({ "Referer": generateUrl }), allowRedirects: false });
                 if (!goRes) return [];
-                var cloudUrl = goRes.finalUrl || "";
                 var cloudHtml = goRes.body || "";
+                var hostMatch = cloudHtml.match(/https?:\/\/(new\d*\.cinecloud\.[a-z]+)/i) || cloudHtml.match(/https?:\/\/([a-z0-9.-]*cinecloud\.[a-z]+)/i);
+                var cinecloudOrigin = hostMatch ? ("https://" + hostMatch[1]) : "https://new5.cinecloud.site";
                 var fcMatch = cloudHtml.match(/href=["'](\/fc\/[^"']+)["']/i);
                 if (fcMatch) {
-                    var fcUrl = absoluteUrl(cloudUrl, fcMatch[1]);
-                    var directRes = await request(fcUrl, { headers: defaultHeaders({ "Referer": cloudUrl }), allowRedirects: false }).catch(function() { return null; });
+                    var fcUrl = cinecloudOrigin + fcMatch[1];
+                    var directRes = await request(fcUrl, { headers: defaultHeaders({ "Referer": cinecloudOrigin + "/" }), allowRedirects: false }).catch(function() { return null; });
                     var loc = directRes && directRes.headers && (directRes.headers.location || directRes.headers.Location);
                     var finalStreamUrl = loc || fcUrl;
                     var q = qualityFromText(finalStreamUrl + " " + label) || 720;
-                    return [buildResolvedStream(finalStreamUrl, "Cinefreak [FSL]", q, { "Referer": cloudUrl }, label)];
+                    return [buildResolvedStream(finalStreamUrl, "Cinefreak [FSL]", q, { "Referer": cinecloudOrigin + "/" }, label)];
                 }
             } catch (_) {}
             return [];
@@ -7137,7 +7152,9 @@
             if (media.anime) return [];
             var queries = uniqueBy([media.title, media.originalTitle], function(item) { return normalizeTitle(item); }).filter(Boolean);
             var results = await searchTitles(queries);
+            console.log("[Cinefreak] queries:", JSON.stringify(queries), "results:", results.length);
             var match = bestMatch(results, queries, media.year, media.isMovie ? "movie" : "series");
+            console.log("[Cinefreak] match:", match ? match.url : "null");
             if (!match || !match.url) return [];
 
             var mainUrl = await getMainUrl();
@@ -7146,22 +7163,13 @@
 
             var linksToResolve = [];
             if (media.isMovie) {
-                var movieTitleRegex = /<h4\b[^>]*class=["'][^"']*movie-title[^"']*["'][^>]*>([\s\S]*?)<\/h4>/gi;
-                var labelBlocks = [];
-                var mt;
-                while ((mt = movieTitleRegex.exec(html))) {
-                    labelBlocks.push({ label: trim(stripTags(mt[1])), index: mt.index });
-                }
-                for (var i = 0; i < labelBlocks.length; i++) {
-                    var start = labelBlocks[i].index;
-                    var end = (i + 1 < labelBlocks.length) ? labelBlocks[i + 1].index : html.length;
-                    var segment = html.slice(start, end);
-                    var anchors = parseAnchors(segment, baseOrigin(match.url));
-                    for (var j = 0; j < anchors.length; j++) {
-                        var a = anchors[j];
-                        if (/generate\.php/i.test(a.href) || (!/cinefreak/i.test(a.href) && /^https?:\/\//i.test(a.href))) {
+                var anchors = parseAnchors(html, baseOrigin(match.url));
+                for (var j = 0; j < anchors.length; j++) {
+                    var a = anchors[j];
+                    if (/generate\.php/i.test(a.href) || (!/cinefreak/i.test(a.href) && /^https?:\/\//i.test(a.href))) {
+                        if (!/telegram|facebook|twitter|instagram|whatsapp|youtube|chrome|google/i.test(a.href)) {
                             var dest = extractGenerateUrl(a.href);
-                            linksToResolve.push({ url: dest, label: labelBlocks[i].label + " " + (a.text || "") });
+                            linksToResolve.push({ url: dest, label: a.text || media.title });
                         }
                     }
                 }
@@ -7619,10 +7627,10 @@
                 tier2: [AnimetsuSource, AnimePaheSource, AnimewaveSource]
             };
         } else {
-            var t1 = [CinefreakSource, CastleSource, VegaMoviesSource];
+            var t1 = [VegaMoviesSource, HindmoviezSource, CinefreakSource];
             var t2 = !media.isMovie
                 ? [Movies4uSource]
-                : [Movies4uSource, HindmoviezSource];
+                : [Movies4uSource, CastleSource];
             return { tier1: t1, tier2: t2 };
         }
     }
@@ -7681,7 +7689,7 @@
                 // Master deadline
                 masterTimer = setTimeout(function() {
                     finish("master_deadline");
-                }, 5200);
+                }, 7500);
 
                 function dispatchTier2IfNeeded() {
                     if (!tier2Dispatched && tier2.length > 0 && streams.length < MIN_REQUIRED_STREAMS && !hasCallbackFired) {
@@ -7745,6 +7753,7 @@
                         })
                         .catch(function(err) {
                             var el = Date.now() - st;
+                            console.log("[ERR] " + prov.name + ": " + (err && err.message || err));
                             updateProviderHealth(prov, false);
                             onProviderResult([], prov, el);
                         });
