@@ -27,7 +27,7 @@ If you find this project helpful, consider supporting its development!
 | HindMoviez | 17 | Working ✅️ | Movies, Series | hi, en, ta, te, ml, kn |
 | Live Sports 🏏 | 11 | Working ✅️ | LiveTv | en, hi |
 | Movies4U | 50 | Working ✅️ | Movies | hi, en, ta, te, ml, kn |
-| Netmirror | 2 | Working ✅️ | Movies, TV Shows | en, hi |
+| Netmirror | 2 | under development and will be fixed soon | Movies, TV Shows | en, hi |
 | NetMirrorMobile | 17 | Working ✅️ but you may face few errors based on your isp provider or geo-blocking in that case using a vpn is recommended | Movies, Series, Anime | en, hi, ta, te, ml, kn, bn, mr, pa, gu |
 | PlayZTV | 13 | Working ✅️ | Livestream | en, hi, ta, te, ml, kn, bn, mr, pa |
 | VegaMovies & RogMovies | 4 | Working ✅️ | Movies, series | hi, en, te, ta, ma |
