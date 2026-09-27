@@ -1,23 +1,12 @@
 {
   "packageName": "com.igris.repo.movies4u",
   "name": "Movies4U",
-  "version": 50,
+  "version": 51,
   "baseUrl": "https://new7.movies4u.clinic",
   "description": "Movie picks with straightforward stream links.",
-  "authors": [
-    "IGRIS"
-  ],
-  "languages": [
-    "hi",
-    "en",
-    "ta",
-    "te",
-    "ml",
-    "kn"
-  ],
-  "categories": [
-    "Movies"
-  ],
+  "authors": ["IGRIS"],
+  "languages": ["hi", "en", "ta", "te", "ml", "kn"],
+  "categories": ["Movies"],
   "domains": [
     {
       "name": "movies4u.clinic (Primary)",
