@@ -265,7 +265,7 @@
   {
     "packageName": "com.igris.repo.netmirror",
     "name": "Netmirror",
-    "version": 4,
+    "version": 5,
     "baseUrl": "https://net52.cc",
     "providers": [
       {
