@@ -998,10 +998,10 @@
         ]);
     }
 
-    var SCRAPE_CONCURRENCY = 3;
+    var SCRAPE_CONCURRENCY = 6;
     var PROVIDER_LINK_CONCURRENCY = 6;
     var PROVIDER_CANDIDATE_LIMIT = 3;
-    var PROVIDER_TIMEOUT_MS = 10000;
+    var PROVIDER_TIMEOUT_MS = 6000;
     
     // OPTIMIZATION: Provider caching and health tracking
     var PROVIDER_CACHE = {};
@@ -1010,14 +1010,15 @@
     var MIN_REQUIRED_STREAMS = 3; // Early termination threshold
     var EARLY_TERMINATION_ENABLED = true;
     var PROVIDER_TIMEOUT_OVERRIDE = {
-        "p_bollyflix": 3000,
-        "p_animetsu": 4000,
-        "p_primesrc": 4000,
-        "p_vidfastpro": 3000,
-        "p_streamvix": 4000,
-        "p_notorrent": 4000,
-        "p_vegamovies": 3000,
-        "p_lordflix": 5000
+        "p_anilight": 4000,
+        "p_anikage": 4000,
+        "p_hianime": 4000,
+        "p_animewave": 4500,
+        "p_vegamovies": 5000,
+        "p_cinefreak": 5000,
+        "p_movies4u": 5000,
+        "p_hindmoviez": 5000,
+        "p_castle": 5000
     };
 
     async function mapLimit(list, limit, iteratee) {
@@ -1136,9 +1137,51 @@
         return domainsCache || {};
     }
 
+    var LOCAL_DOMAINS = {
+        "moviesdrive": "https://new3.moviesdrive.christmas",
+        "HDHUB4u": "https://new5.hdhub4u.cl",
+        "4khdhub": "https://4khdhub.one",
+        "MultiMovies": "https://multimovies.makeup",
+        "bollyflix": "https://bollyflix.af",
+        "UHDMovies": "https://uhdmovies.autos",
+        "moviesmod": "https://moviesmod.army",
+        "topMovies": "https://moviesleech.bar",
+        "hdmovie2": "https://hdmovie2a.cfd",
+        "vegamovies": "https://vegamovies.gallery",
+        "rogmovies": "https://new1.rogmovies.click",
+        "luxmovies": "https://luxmovies1.shop",
+        "movierulzhd": "https://123movies9.run",
+        "banglaplex": "https://banglaplex.lat",
+        "toonstream": "https://toon-stream.site",
+        "telugumv": "https://telugumv.net",
+        "filmycab": "https://filmycab.co",
+        "tellyhd": "https://tellyhd.im",
+        "filmyfiy": "https://filmyfly.now",
+        "hindmoviez": "https://hindmovie.fit",
+        "tamilblasters": "https://www.1tamilblasters.sale",
+        "hubcloud": "https://hubcloud.cx",
+        "movienestbd": "https://movienestbd.pics",
+        "movies4u": "https://new7.movies4u.clinic",
+        "cinevood": "https://cinevood.men",
+        "dudefilms": "https://dudefilms.garden",
+        "fibwatch": "https://fibwatch.art",
+        "fibtoon": "https://fibtoon.top",
+        "fibdrama": "https://fibdrama.top",
+        "xprimehub": "https://xprimehub.pics",
+        "m4ufree": "https://ww4.m4ufree.lat",
+        "pencurimoviesubmalay": "https://pencurimoviesubmalay26.site",
+        "zinkmovies": "https://new2.zinkmovies.mobi",
+        "cinefreak": "https://cinefreak.nl",
+        "coflix": "https://coflix.esq"
+    };
+
     async function getDynamicDomain(key, fallback) {
         var json = await getDomainsJson().catch(function() { return {}; });
-        var value = trim(String(json && json[key] || fallback || ""));
+        var raw = trim(String(json && json[key] || ""));
+        if (!raw || /google\.com|example\.com/i.test(raw)) {
+            raw = LOCAL_DOMAINS[key] || fallback || "";
+        }
+        var value = trim(String(raw || fallback || ""));
         return value.replace(/\/+$/g, "");
     }
 
@@ -1680,8 +1723,57 @@
     }
 
     function parsePayload(url) {
-        var parsed = parseJsonSafe(url, null);
+        if (url && typeof url === "object") return url;
+        var raw = String(url || "").trim();
+        if (!raw) throw new Error("Invalid CineStream payload");
+
+        var parsed = parseJsonSafe(raw, null);
         if (parsed && typeof parsed === "object") return parsed;
+
+        if (raw.indexOf('\\"') !== -1 || raw.indexOf('\\\\"') !== -1) {
+            var unescaped = raw.replace(/\\\\"/g, '"').replace(/\\"/g, '"');
+            parsed = parseJsonSafe(unescaped, null);
+            if (parsed && typeof parsed === "object") return parsed;
+        }
+
+        if (raw.indexOf("%") !== -1) {
+            try {
+                var decoded = decodeURIComponent(raw);
+                parsed = parseJsonSafe(decoded, null);
+                if (parsed && typeof parsed === "object") return parsed;
+            } catch (_) {}
+        }
+
+        if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+            try {
+                var unquoted = raw.slice(1, -1);
+                var unquotedParsed = parseJsonSafe(unquoted, null);
+                if (unquotedParsed && typeof unquotedParsed === "object") return unquotedParsed;
+                if (typeof unquotedParsed === "string") {
+                    var inner = parseJsonSafe(unquotedParsed, null);
+                    if (inner && typeof inner === "object") return inner;
+                }
+            } catch (_) {}
+        }
+
+        var tmdbMatch = raw.match(/(?:tv|movie|anime)\/(\d+)/i) || raw.match(/tmdbId[=:]\s*(\d+)/i);
+        if (tmdbMatch) {
+            var isTv = /tv/i.test(raw);
+            return {
+                mode: "tmdb",
+                tmdbId: Number(tmdbMatch[1]),
+                mediaType: isTv ? "tv" : "movie"
+            };
+        }
+
+        if (/^\d+$/.test(raw)) {
+            return {
+                mode: "tmdb",
+                tmdbId: Number(raw),
+                mediaType: "tv"
+            };
+        }
+
         throw new Error("Invalid CineStream payload");
     }
 
@@ -2406,7 +2498,7 @@
     })();
 
     var Movies4uSource = (function() {
-        var DEFAULT_BASE_URL = "https://new1.movies4u.style";
+        var DEFAULT_BASE_URL = "https://new7.movies4u.clinic";
         var domainCache = null;
 
         function defaultHeaders(extra) {
@@ -3369,6 +3461,7 @@
         return {
             key: "p_gojo",
             name: "Animetsu",
+            isAnime: true,
             resolve: resolve
         };
     })();
@@ -3583,12 +3676,15 @@
         return {
             key: "p_animepahe",
             name: "AnimePahe",
+            isAnime: true,
             resolve: resolve
         };
     })();
 
     var HindmoviezSource = (function() {
         var FALLBACK_DOMAINS = [
+            "https://hindmovie.fit",
+            "https://hindmovie.icu",
             "https://hindmoviez.cafe",
             "https://hindmoviez.com",
             "https://hindmoviez.net",
@@ -5177,6 +5273,16 @@
 
         async function vmResolveVcloud(source, context) {
             var sourceUrl = typeof source === "string" ? source : source.source;
+            if (/fastdl/i.test(sourceUrl)) {
+                var fastDoc = await vmGetDocument(sourceUrl, vmHeaders({ "Referer": source.referer || context.sourceUrl || ((await getMainUrl()) + "/") }), true);
+                if (fastDoc && fastDoc.body) {
+                    var reurl = firstMatch(fastDoc.body, [/var\s+reurl\s*=\s*["']([^"']+)["']/i, /https?:\/\/[^\s"']+googleusercontent\.com[^\s"']+/i]);
+                    if (reurl) {
+                        if (/link=/i.test(reurl)) reurl = decodeURIComponent(reurl.split("link=")[1]);
+                        return [buildResolvedStream(reurl, "VegaMovies [G-Direct]", qualityFromText(context.title || "720p") || 720, {}, context.title || "Episode")];
+                    }
+                }
+            }
             var base = baseOrigin(sourceUrl);
             var latestBase = await getDynamicDomain(/hubcloud|gamerxyt/i.test(sourceUrl) ? "hubcloud" : "vcloud", base);
             var newUrl = base && latestBase && base !== latestBase ? sourceUrl.replace(base, latestBase) : sourceUrl;
@@ -5276,83 +5382,127 @@
         }
 
         async function resolve(media) {
-            var queries = uniqueBy([media.title, media.originalTitle, media.imdbId], function(item) { return trim(String(item || "").toLowerCase()); }).filter(Boolean);
+            if (media.anime && !media.isMovie) return [];
+            var seasonQuery = !media.isMovie ? (media.title + " Season " + (media.season || 1)) : "";
+            var queries = uniqueBy([seasonQuery, media.title, media.originalTitle, media.imdbId], function(item) { return trim(String(item || "").toLowerCase()); }).filter(Boolean);
             var rows = await searchTitles(queries);
-            var match = bestMatch(rows, queries, media.year, media.isMovie ? "movie" : null);
-            if (!match || !match.url) return [];
+            var candidates = rankedMatches(rows, queries, media.year, media.isMovie ? "movie" : null, 3);
+            if (!candidates.length && rows.length) candidates = rows.slice(0, 3);
+            if (!candidates.length) return [];
 
-            var pageUrl = match.url;
-            var res = await vmGetDocument(pageUrl, vmHeaders({ "Referer": (await getMainUrl()) + "/" }), true);
-            if (!res) return [];
-            pageUrl = res.finalUrl || pageUrl;
-            var html = res.body || "";
-            var title = vmCleanTitle(firstMatch(html, [/<h1\b[^>]*>([\s\S]*?)<\/h1>/i, /<title\b[^>]*>([\s\S]*?)<\/title>/i])) || match.title || media.title;
-            var imdbUrl = vmExtractImdbUrl(html);
-            var type = /Series-SYNOPSIS\/PLOT|Series Info|Series synopsis\/PLOT/i.test(html) || vmMediaType(title) === "series" ? "series" : "movie";
-            var meta = await vmFetchCinemeta(type, imdbUrl);
+            for (var c = 0; c < candidates.length; c++) {
+                var match = candidates[c];
+                if (!match || !match.url) continue;
 
-            if (type === "movie" && media.isMovie) {
-                var groups = vmQualityGroups(html, pageUrl);
-                var sources = [];
-                for (var i = 0; i < groups.length; i++) {
-                    for (var j = 0; j < groups[i].anchors.length; j++) {
-                        var anchor = groups[i].anchors[j];
-                        if (!/dwd-button|Download/i.test(anchor.html + " " + anchor.text)) continue;
+                var pageUrl = match.url;
+                var res = await vmGetDocument(pageUrl, vmHeaders({ "Referer": (await getMainUrl()) + "/" }), true);
+                if (!res) continue;
+                pageUrl = res.finalUrl || pageUrl;
+                var html = res.body || "";
+                var title = vmCleanTitle(firstMatch(html, [/<h1\b[^>]*>([\s\S]*?)<\/h1>/i, /<title\b[^>]*>([\s\S]*?)<\/title>/i])) || match.title || media.title;
+                var imdbUrl = vmExtractImdbUrl(html);
+                var type = /Series-SYNOPSIS\/PLOT|Series Info|Series synopsis\/PLOT/i.test(html) || vmMediaType(title) === "series" ? "series" : "movie";
+                var meta = await vmFetchCinemeta(type, imdbUrl);
+
+                if (type === "movie" && media.isMovie) {
+                    var groups = vmQualityGroups(html, pageUrl);
+                    var sources = [];
+                    for (var i = 0; i < groups.length; i++) {
+                        for (var j = 0; j < groups[i].anchors.length; j++) {
+                            var anchor = groups[i].anchors[j];
+                            if (!/dwd-button|Download/i.test(anchor.html + " " + anchor.text)) continue;
+                            try {
+                                var linkPage = await vmGetDocument(anchor.href, vmHeaders({ "Referer": pageUrl }), true);
+                                if (!linkPage) continue;
+                                sources = sources.concat(vmExtractNexdriveSources(linkPage.body, linkPage.finalUrl || anchor.href, {
+                                    title: groups[i].title,
+                                    quality: groups[i].quality
+                                }));
+                            } catch (_) { }
+                        }
+                    }
+                    sources = uniqueBy(sources, function(item) { return item.source; });
+                    var streams = [];
+                    for (var x = 0; x < sources.length; x++) {
+                        streams = streams.concat(await vmResolveGeneric(sources[x], {
+                            sourceUrl: pageUrl,
+                            title: meta && meta.name || title,
+                            type: "movie",
+                            season: 1,
+                            episode: 1
+                        }));
+                    }
+                    var deduped = dedupeStreams(streams);
+                    if (deduped.length) return deduped;
+                }
+                if (type === "series" && !media.isMovie) {
+                    var seriesGroups = vmQualityGroups(html, pageUrl);
+                    var seriesSources = [];
+                    for (var y = 0; y < seriesGroups.length; y++) {
+                        var group = seriesGroups[y];
+                        if (media.season && Number(group.season || 1) !== Number(media.season)) continue;
+                        var anchor = vmSelectSeriesIntermediateAnchor(group);
+                        if (!anchor || !anchor.href) continue;
                         try {
-                            var linkPage = await vmGetDocument(anchor.href, vmHeaders({ "Referer": pageUrl }), true);
-                            if (!linkPage) continue;
-                            sources = sources.concat(vmExtractNexdriveSources(linkPage.body, linkPage.finalUrl || anchor.href, {
-                                title: groups[i].title,
-                                quality: groups[i].quality
-                            }));
+                            var seriesPage = await vmGetDocument(anchor.href, vmHeaders({ "Referer": pageUrl }), true);
+                            if (!seriesPage) continue;
+                            var episodeSources = vmExtractEpisodeVcloudSources(seriesPage.body, seriesPage.finalUrl || anchor.href, {
+                                title: group.title,
+                                quality: group.quality
+                            });
+                            for (var z = 0; z < episodeSources.length; z++) {
+                                if (media.episode && Number(episodeSources[z].episode) !== Number(media.episode)) continue;
+                                seriesSources.push(episodeSources[z]);
+                            }
                         } catch (_) { }
                     }
-                }
-                sources = uniqueBy(sources, function(item) { return item.source; });
-                var streams = [];
-                for (var x = 0; x < sources.length; x++) {
-                    streams = streams.concat(await vmResolveGeneric(sources[x], {
-                        sourceUrl: pageUrl,
-                        title: meta && meta.name || title,
-                        type: "movie",
-                        season: 1,
-                        episode: 1
-                    }));
-                }
-                return dedupeStreams(streams);
-            }
-            if (type === "series" && !media.isMovie) {
-                var seriesGroups = vmQualityGroups(html, pageUrl);
-                var seriesSources = [];
-                for (var y = 0; y < seriesGroups.length; y++) {
-                    var group = seriesGroups[y];
-                    if (media.season && Number(group.season || 1) !== Number(media.season)) continue;
-                    var anchor = vmSelectSeriesIntermediateAnchor(group);
-                    if (!anchor || !anchor.href) continue;
-                    try {
-                        var seriesPage = await vmGetDocument(anchor.href, vmHeaders({ "Referer": pageUrl }), true);
-                        if (!seriesPage) continue;
-                        var episodeSources = vmExtractEpisodeVcloudSources(seriesPage.body, seriesPage.finalUrl || anchor.href, {
-                            title: group.title,
-                            quality: group.quality
+
+                    if (!seriesSources.length) {
+                        var nexDirs = vmParseAnchors(html, pageUrl).filter(function(a) {
+                            return /nexdrive\.fit/i.test(a.href);
                         });
-                        for (var z = 0; z < episodeSources.length; z++) {
-                            if (media.episode && Number(episodeSources[z].episode) !== Number(media.episode)) continue;
-                            seriesSources.push(episodeSources[z]);
+                        for (var nd = 0; nd < nexDirs.length; nd++) {
+                            try {
+                                var nexDoc = await vmGetDocument(nexDirs[nd].href, vmHeaders({ "Referer": pageUrl }), true);
+                                if (!nexDoc || !nexDoc.body) continue;
+                                var nre = /<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]\s*>([\s\S]*?)(?=<h[1-6]\b|$)/gi;
+                                var nmatch;
+                                while ((nmatch = nre.exec(nexDoc.body))) {
+                                    var epNum = Number(firstMatch(stripTags(nmatch[1]), [/Episodes?\s*:?\s*(\d+)/i]));
+                                    if (epNum && media.episode && epNum === Number(media.episode)) {
+                                        var nanchors = vmParseAnchors(nmatch[2], nexDoc.finalUrl || nexDirs[nd].href).filter(function(a) {
+                                            return /vcloud|fastdl|hubcloud/i.test(a.href);
+                                        });
+                                        for (var na = 0; na < nanchors.length; na++) {
+                                            seriesSources.push({
+                                                episode: epNum,
+                                                source: nanchors[na].href,
+                                                sourceName: "V-Cloud",
+                                                title: stripTags(nmatch[1]),
+                                                quality: qualityFromText(nmatch[1] + " " + nanchors[na].href) || 720,
+                                                referer: nexDoc.finalUrl || nexDirs[nd].href
+                                            });
+                                        }
+                                    }
+                                }
+                            } catch (_) {}
                         }
-                    } catch (_) { }
+                    }
+
+                    seriesSources = uniqueBy(seriesSources, function(item) { return item.source; });
+                    var seriesStreams = [];
+                    for (var q = 0; q < seriesSources.length; q++) {
+                        seriesStreams = seriesStreams.concat(await vmResolveGeneric(seriesSources[q], {
+                            sourceUrl: pageUrl,
+                            title: meta && meta.name || title,
+                            type: "series",
+                            season: media.season || 1,
+                            episode: media.episode || 1
+                        }));
+                    }
+                    var sDeduped = dedupeStreams(seriesStreams);
+                    if (sDeduped.length) return sDeduped;
                 }
-                seriesSources = uniqueBy(seriesSources, function(item) { return item.source; });
-                var seriesStreams = [];
-                for (var q = 0; q < seriesSources.length; q++) {
-                    seriesStreams.push(buildResolvedStream(
-                        seriesSources[q].source,
-                        seriesSources[q].sourceName || "VegaMovies",
-                        seriesSources[q].quality || qualityFromText(seriesSources[q].title || ""),
-                        { "Referer": seriesSources[q].referer || pageUrl }
-                    ));
-                }
-                return dedupeStreams(seriesStreams);
             }
             return [];
         }
@@ -5360,6 +5510,7 @@
         return {
             key: "p_vegamovies",
             name: "VegaMovies",
+            isHybrid: true,
             resolve: resolve
         };
     })();
@@ -6822,39 +6973,570 @@
         };
     })();
 
+    var CinefreakSource = (function() {
+        var DEFAULT_BASE_URL = "https://cinefreak.ch";
+
+        function defaultHeaders(extra) {
+            return Object.assign({
+                "User-Agent": COMMON_USER_AGENT,
+                "Accept": "*/*",
+                "Referer": DEFAULT_BASE_URL + "/"
+            }, extra || {});
+        }
+
+        async function getMainUrl() {
+            return await getDynamicDomain("cinefreak", DEFAULT_BASE_URL);
+        }
+
+        async function searchTitles(queries) {
+            var mainUrl = await getMainUrl();
+            var out = [];
+            for (var i = 0; i < queries.length; i++) {
+                var query = trim(queries[i]);
+                if (!query) continue;
+                try {
+                    var url = mainUrl + "/search-api.php?q=" + encodeURIComponent(query);
+                    var res = await request(url, { headers: defaultHeaders({ "Referer": mainUrl + "/" }) });
+                    var parsed = parseJsonSafe(res.body, {});
+                    var data = Array.isArray(parsed) ? parsed : (parsed && parsed.results) || [];
+                    for (var j = 0; j < data.length; j++) {
+                        var item = data[j];
+                        var rawTitle = String(item.t || item.title || "");
+                        var itemSlug = String(item.l || item.href || item.slug || "");
+                        if (!rawTitle || !itemSlug) continue;
+                        var yearMatch = rawTitle.match(/\((\d{4})\)/);
+                        out.push({
+                            title: trim(rawTitle.replace(/\s*\(?\d{4}\)?.*$/i, "")) || rawTitle,
+                            rawTitle: rawTitle,
+                            year: yearMatch ? Number(yearMatch[1]) : undefined,
+                            url: absoluteUrl(mainUrl, itemSlug),
+                            type: /season|series|episode/i.test(rawTitle) ? "series" : "movie"
+                        });
+                    }
+                } catch (_) {}
+                if (out.length) break;
+            }
+            return uniqueBy(out, function(item) { return item.url; });
+        }
+
+        function extractGenerateUrl(url) {
+            var idMatch = String(url || "").match(/[?&]id=([^&\s"']+)/i);
+            if (!idMatch) return url;
+            try {
+                var decoded = (typeof atob === "function") ? atob(idMatch[1]) : Buffer.from(idMatch[1], "base64").toString("utf8");
+                if (decoded && /^https?:\/\//i.test(decoded)) {
+                    var cut = decoded.indexOf("newgo32");
+                    if (cut !== -1) decoded = trim(decoded.substring(0, cut));
+                    return decoded;
+                }
+            } catch (_) {}
+            return url;
+        }
+
+        async function resolve(media) {
+            if (media.anime) return [];
+            var queries = uniqueBy([media.title, media.originalTitle], function(item) { return normalizeTitle(item); }).filter(Boolean);
+            var results = await searchTitles(queries);
+            var match = bestMatch(results, queries, media.year, media.isMovie ? "movie" : "series");
+            if (!match || !match.url) return [];
+
+            var mainUrl = await getMainUrl();
+            var html = await getText(match.url, defaultHeaders({ "Referer": mainUrl + "/" })).catch(function() { return ""; });
+            if (!html) return [];
+
+            var linksToResolve = [];
+            if (media.isMovie) {
+                var movieTitleRegex = /<h4\b[^>]*class=["'][^"']*movie-title[^"']*["'][^>]*>([\s\S]*?)<\/h4>/gi;
+                var labelBlocks = [];
+                var mt;
+                while ((mt = movieTitleRegex.exec(html))) {
+                    labelBlocks.push({ label: trim(stripTags(mt[1])), index: mt.index });
+                }
+                for (var i = 0; i < labelBlocks.length; i++) {
+                    var start = labelBlocks[i].index;
+                    var end = (i + 1 < labelBlocks.length) ? labelBlocks[i + 1].index : html.length;
+                    var segment = html.slice(start, end);
+                    var anchors = parseAnchors(segment, baseOrigin(match.url));
+                    for (var j = 0; j < anchors.length; j++) {
+                        var a = anchors[j];
+                        if (/generate\.php/i.test(a.href) || (!/cinefreak/i.test(a.href) && /^https?:\/\//i.test(a.href))) {
+                            var dest = extractGenerateUrl(a.href);
+                            linksToResolve.push({ url: dest, label: labelBlocks[i].label + " " + (a.text || "") });
+                        }
+                    }
+                }
+            } else {
+                var epCardRegex = /<div\b[^>]*class=["'][^"']*ep-card[^"']*["'][^>]*>/gi;
+                var epStarts = [];
+                var em;
+                while ((em = epCardRegex.exec(html))) { epStarts.push(em.index); }
+                if (!epStarts.length) epStarts = [0];
+
+                for (var e = 0; e < epStarts.length; e++) {
+                    var epStart = epStarts[e];
+                    var epEnd = (e + 1 < epStarts.length) ? epStarts[e + 1] : html.length;
+                    var epBlock = html.slice(epStart, epEnd);
+
+                    var seasonMatch = String(epBlock).match(/class=["'][^"']*season-number[^"']*["'][^>]*>\s*S?0*(\d+)/i)
+                        || String(epBlock).match(/S(\d+)/i);
+                    var seasonNum = seasonMatch ? Number(seasonMatch[1]) : 1;
+                    if (media.season && seasonNum !== Number(media.season)) continue;
+
+                    var epBadge = String(epBlock).match(/class=["'][^"']*episode-badge[^"']*["'][^>]*>\s*Episode\s*(\d+)(?:-(\d+))?/i);
+                    var epStartNum = epBadge ? Number(epBadge[1]) : (e + 1);
+                    var epEndNum = (epBadge && epBadge[2]) ? Number(epBadge[2]) : epStartNum;
+                    if (media.episode && (Number(media.episode) < epStartNum || Number(media.episode) > epEndNum)) continue;
+
+                    var epAnchors = parseAnchors(epBlock, baseOrigin(match.url));
+                    for (var k = 0; k < epAnchors.length; k++) {
+                        var ea = epAnchors[k];
+                        if (/generate\.php/i.test(ea.href) || (!/cinefreak/i.test(ea.href) && /^https?:\/\//i.test(ea.href))) {
+                            var target = extractGenerateUrl(ea.href);
+                            linksToResolve.push({ url: target, label: ea.text || ("S" + seasonNum + "E" + media.episode) });
+                        }
+                    }
+                }
+            }
+
+            linksToResolve = uniqueBy(linksToResolve, function(item) { return item.url; });
+            var streams = [];
+            for (var r = 0; r < Math.min(linksToResolve.length, 6); r++) {
+                var item = linksToResolve[r];
+                var rawUrl = item.url;
+                if (!rawUrl) continue;
+                try {
+                    var resolved = [];
+                    if (/hubcloud/i.test(rawUrl)) {
+                        resolved = await resolveHubCloudGlobal(rawUrl, "Cinefreak");
+                    }
+                    if (!resolved.length) {
+                        resolved = await resolveCommonExtractorUrl(rawUrl, "Cinefreak", match.url, 0);
+                    }
+                    if (!resolved.length && isCommonDirectMediaUrl(rawUrl)) {
+                        resolved.push(buildResolvedStream(rawUrl, "Cinefreak", qualityFromText(item.label || rawUrl), {}, item.label || rawUrl));
+                    }
+                    for (var s = 0; s < resolved.length; s++) {
+                        streams.push(resolved[s]);
+                    }
+                } catch (_) {}
+            }
+
+            return dedupeStreams(streams);
+        }
+
+        return {
+            key: "p_cinefreak",
+            name: "Cinefreak",
+            isAnime: false,
+            resolve: resolve
+        };
+    })();
+
+    var AnilightSource = (function() {
+        var API_URL = "https://api.anilight.live";
+        var BASE_URL = "https://anilight.live";
+
+        var HEADERS = {
+            "User-Agent": COMMON_USER_AGENT,
+            "Accept": "application/json, text/plain, */*",
+            "Referer": BASE_URL + "/",
+            "Origin": BASE_URL
+        };
+
+        var STREAM_HEADERS = {
+            "User-Agent": COMMON_USER_AGENT,
+            "Referer": BASE_URL + "/"
+        };
+
+        async function resolve(media) {
+            if (!media.anime) return [];
+            var queries = uniqueBy([media.title, media.originalTitle], function(item) { return normalizeTitle(item); }).filter(Boolean);
+            var animeId = 0;
+            for (var i = 0; i < queries.length; i++) {
+                var q = queries[i];
+                if (!q) continue;
+                try {
+                    var searchUrl = API_URL + "/api/filter?page=1&search=" + encodeURIComponent(q);
+                    var res = await request(searchUrl, { headers: HEADERS });
+                    var data = parseJsonSafe(res.body, {});
+                    var mediaList = Array.isArray(data && data.media) ? data.media : [];
+                    for (var j = 0; j < mediaList.length; j++) {
+                        var m = mediaList[j];
+                        var eng = m.title && m.title.english || "";
+                        var rom = m.title && m.title.romaji || "";
+                        if (titleScore(eng, queries) > 50 || titleScore(rom, queries) > 50 || mediaList.length === 1) {
+                            animeId = m.id;
+                            break;
+                        }
+                    }
+                } catch (_) {}
+                if (animeId) break;
+            }
+
+            if (!animeId) return [];
+
+            var epNum = Number(media.episode || 1);
+            var providers = ["light", "mello", "misa", "near", "rem"];
+            var sourceRequests = providers.map(function(p) {
+                return {
+                    url: API_URL + "/api/sources?id=" + animeId + "&epNum=" + epNum + "&type=sub&providerId=" + p,
+                    headers: HEADERS
+                };
+            });
+
+            var responses = await httpParallelGet(sourceRequests);
+            var streams = [];
+            for (var k = 0; k < responses.length; k++) {
+                var sRes = responses[k];
+                var srcData = parseJsonSafe(sRes && sRes.body, {});
+                var sources = Array.isArray(srcData.sources) ? srcData.sources : [];
+                var provName = providers[k] ? (providers[k].charAt(0).toUpperCase() + providers[k].slice(1)) : "Anilight";
+
+                for (var s = 0; s < sources.length; s++) {
+                    var src = sources[s];
+                    if (!src || !src.url || src.type === "embed") continue;
+                    var qual = qualityFromText(src.quality || src.url) || 1080;
+                    streams.push({
+                        url: src.url,
+                        source: withSimplifiedSource("Anilight [" + provName + "]", src.url),
+                        quality: qual,
+                        headers: STREAM_HEADERS
+                    });
+                }
+            }
+
+            return dedupeStreams(streams);
+        }
+
+        return {
+            key: "p_anilight",
+            name: "Anilight",
+            isAnime: true,
+            resolve: resolve
+        };
+    })();
+
+    var AnikageSource = (function() {
+        var BASE_URL = "https://anikage.cc";
+        var PROXY_URL = "https://og.bakayaro.live";
+        var HEADERS = {
+            "User-Agent": COMMON_USER_AGENT,
+            "Referer": BASE_URL + "/",
+            "Origin": BASE_URL
+        };
+
+        async function resolve(media) {
+            if (!media.anime) return [];
+            var queries = uniqueBy([media.title, media.originalTitle], function(item) { return normalizeTitle(item); }).filter(Boolean);
+            var slug = "";
+            for (var i = 0; i < queries.length; i++) {
+                var q = queries[i];
+                if (!q) continue;
+                try {
+                    var anilistRes = await request("https://graphql.anilist.co", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", "Accept": "application/json", "User-Agent": COMMON_USER_AGENT },
+                        body: JSON.stringify({
+                            query: "query ($search: String) { Page(page: 1, perPage: 5) { media(search: $search, type: ANIME) { id title { romaji english } } } }",
+                            variables: { search: q }
+                        })
+                    });
+                    var anilistJson = parseJsonSafe(anilistRes.body, {});
+                    var list = anilistJson.data && anilistJson.data.Page && anilistJson.data.Page.media || [];
+                    if (list.length) {
+                        var ids = list.map(function(m) { return m.id; });
+                        var slugRes = await request(BASE_URL + "/api/media/anime/slugs/ensure", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json", "Accept": "application/json", "Referer": BASE_URL + "/" },
+                            body: JSON.stringify({ ids: ids })
+                        });
+                        var slugMap = parseJsonSafe(slugRes.body, {});
+                        slug = slugMap[ids[0]] || slugMap[String(ids[0])];
+                    }
+                } catch (_) {}
+                if (slug) break;
+            }
+
+            if (!slug) return [];
+            var epNum = Number(media.episode || 1);
+            var providers = ["koto", "kiwi", "uwu", "neko"];
+            var sourceRequests = providers.map(function(p) {
+                return {
+                    url: BASE_URL + "/api/media/anime/" + slug + "/episodes/" + epNum + "/sources?lang=sub&provider=" + p,
+                    headers: HEADERS
+                };
+            });
+
+            var responses = await httpParallelGet(sourceRequests);
+            var streams = [];
+            for (var r = 0; r < responses.length; r++) {
+                var resp = responses[r];
+                var data = parseJsonSafe(resp && resp.body, {});
+                var sources = Array.isArray(data.sources) ? data.sources : [];
+                for (var s = 0; s < sources.length; s++) {
+                    var src = sources[s];
+                    if (!src || !src.url) continue;
+                    var streamUrl = PROXY_URL + "/m3u8/" + base64EncodeBytes(utf8ToBytes(src.url));
+                    streams.push({
+                        url: streamUrl,
+                        source: withSimplifiedSource("Anikage [" + (providers[r] || "Stream") + "]", src.url),
+                        quality: qualityFromText(src.quality || src.url) || 1080,
+                        headers: { "Referer": BASE_URL + "/" }
+                    });
+                }
+            }
+            return dedupeStreams(streams);
+        }
+
+        return {
+            key: "p_anikage",
+            name: "Anikage",
+            isAnime: true,
+            resolve: resolve
+        };
+    })();
+
+    var HiAnimeSource = (function() {
+        var BASE_URL = "https://hianime.at";
+        var OBF_KEY = "otaku-embed-v1";
+
+        function deobfuscateZoko(blob) {
+            try {
+                var raw = base64Decode(blob);
+                var out = "";
+                for (var i = 0; i < raw.length; i++) {
+                    out += String.fromCharCode(raw.charCodeAt(i) ^ OBF_KEY.charCodeAt(i % OBF_KEY.length));
+                }
+                return JSON.parse(decodeURIComponent(escape(out)));
+            } catch (_) {
+                return null;
+            }
+        }
+
+        async function resolve(media) {
+            if (!media.anime) return [];
+            var title = media.title || "";
+            var episode = Number(media.episode || 1);
+            try {
+                var searchUrl = BASE_URL + "/browse?keyword=" + encodeURIComponent(title);
+                var searchRes = await getText(searchUrl, commonHeaders({ "Referer": BASE_URL + "/" }), true).catch(function() { return ""; });
+                if (!searchRes) return [];
+
+                var linkMatch = searchRes.match(/<h3\s+class=["']film-name["']>[\s\S]*?<a\b[^>]*href=["'](?:https?:\/\/[^\/]+)?\/([^"']*-\d+)["']/i) ||
+                               searchRes.match(/<a\b[^>]*href=["'](?:https?:\/\/[^\/]+)?\/([^"']*-\d+)["'][^>]*class=["'][^"']*film-poster-ahref/i) ||
+                               searchRes.match(/<a\b[^>]*href=["'](?:https?:\/\/[^\/]+)?\/([^"']*-\d+)["']/i);
+                if (!linkMatch) return [];
+                var slug = linkMatch[1].replace(/^\/+/, "").split("?")[0];
+                var idMatch = slug.match(/-(\d+)$/);
+                if (!idMatch) return [];
+                var animeId = idMatch[1];
+
+                var epListJson = await getJson(BASE_URL + "/api/theme/episode/list/" + animeId, commonHeaders({
+                    "Referer": BASE_URL + "/" + slug,
+                    "X-Requested-With": "XMLHttpRequest"
+                })).catch(function() { return null; });
+
+                var epHtml = epListJson && epListJson.html || "";
+                if (!epHtml) return [];
+
+                var epRegex = new RegExp('data-number=["\']' + episode + '["\'][^>]*data-id=["\'](\\d+)["\']', "i");
+                var epMatch = epHtml.match(epRegex);
+                if (!epMatch) {
+                    var epRegexRev = new RegExp('data-id=["\'](\\d+)["\'][^>]*data-number=["\']' + episode + '["\']', "i");
+                    epMatch = epHtml.match(epRegexRev);
+                }
+                if (!epMatch) return [];
+                var episodeId = epMatch[1];
+
+                var serversJson = await getJson(BASE_URL + "/api/theme/episode/servers?episodeId=" + episodeId, commonHeaders({
+                    "Referer": BASE_URL + "/watch/" + slug + "?ep=" + episodeId,
+                    "X-Requested-With": "XMLHttpRequest"
+                })).catch(function() { return null; });
+
+                var serversHtml = serversJson && serversJson.html || "";
+                if (!serversHtml) return [];
+
+                var serverRegex = /<div\s+class=["'][^"']*server-item[^"']*["'][^>]*data-type=["']([^"']+)["'][^>]*data-server-name=["']([^"']+)["'][^>]*data-hash=["']([^"']+)["']/gi;
+                var sm;
+                var servers = [];
+                while ((sm = serverRegex.exec(serversHtml)) !== null) {
+                    servers.push({
+                        type: sm[1].toLowerCase(),
+                        name: sm[2],
+                        embedUrl: base64Decode(sm[3])
+                    });
+                }
+
+                var streams = [];
+                for (var i = 0; i < servers.length; i++) {
+                    var srv = servers[i];
+                    if (!srv.embedUrl) continue;
+                    try {
+                        if (srv.embedUrl.indexOf("zokoanime.video") !== -1) {
+                            var embedHtml = await getText(srv.embedUrl, commonHeaders({
+                                "Referer": BASE_URL + "/"
+                            })).catch(function() { return ""; });
+                            if (embedHtml) {
+                                var pMatch = embedHtml.match(/window\.__P\s*=\s*["']([^"']+)["']/);
+                                if (pMatch) {
+                                    var zokoData = deobfuscateZoko(pMatch[1]);
+                                    if (zokoData && zokoData.src) {
+                                        streams.push({
+                                            url: zokoData.src,
+                                            source: "HiAnime [" + srv.name + " " + srv.type.toUpperCase() + "]",
+                                            quality: 1080,
+                                            type: "hls",
+                                            headers: { "Referer": "https://zokoanime.video/" }
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_) {}
+                }
+                return dedupeStreams(streams);
+            } catch (_) {
+                return [];
+            }
+        }
+
+        return {
+            key: "p_hianime",
+            name: "HiAnime",
+            isAnime: true,
+            resolve: resolve
+        };
+    })();
+
+    var AnimewaveSource = (function() {
+        var BASE_URL = "https://animewave.to";
+        var HEADERS = {
+            "User-Agent": COMMON_USER_AGENT,
+            "Referer": BASE_URL + "/",
+            "Cookie": "country_code=IN"
+        };
+
+        async function resolve(media) {
+            if (!media.anime) return [];
+            var title = media.title || "";
+            var episodeNum = Number(media.episode || 1);
+            try {
+                var searchRes = await getText(BASE_URL + "/filter?keyword=" + encodeURIComponent(title), HEADERS).catch(function() { return ""; });
+                if (!searchRes) return [];
+
+                var watchMatch = searchRes.match(/href=["'](https?:\/\/animewave\.to\/watch\/[^"']+)["']/i) ||
+                                searchRes.match(/href=["'](\/watch\/[^"']+)["']/i);
+                if (!watchMatch) return [];
+                var watchUrl = watchMatch[1].startsWith("http") ? watchMatch[1] : BASE_URL + watchMatch[1];
+
+                var watchHtml = await getText(watchUrl, HEADERS).catch(function() { return ""; });
+                var animeId = (watchHtml.match(/data-id=["'](\d+)["']/i) || [])[1];
+                if (!animeId) return [];
+
+                var ajaxHeaders = Object.assign({}, HEADERS, { "X-Requested-With": "XMLHttpRequest" });
+                var epJson = await getJson(BASE_URL + "/ajax/episode/list/" + animeId + "?style=&vrf=", ajaxHeaders).catch(function() { return null; });
+                var epResult = epJson && epJson.result || "";
+                if (!epResult) return [];
+
+                var epMatch = epResult.match(new RegExp('<a[^>]*data-num=["\']' + episodeNum + '["\'][^>]*data-ids=["\']([^"\']+)["\']', "i"));
+                if (!epMatch) return [];
+                var serverIds = epMatch[1];
+
+                var serverListJson = await getJson(BASE_URL + "/ajax/server/list?servers=" + encodeURIComponent(serverIds), ajaxHeaders).catch(function() { return null; });
+                var sListHtml = serverListJson && serverListJson.result || "";
+                if (!sListHtml) return [];
+
+                var linkIds = [];
+                var lidRegex = /data-link-id=["']([^"']+)["']/gi;
+                var lm;
+                while ((lm = lidRegex.exec(sListHtml)) !== null) {
+                    linkIds.push(lm[1]);
+                }
+
+                var streams = [];
+                for (var i = 0; i < Math.min(linkIds.length, 3); i++) {
+                    try {
+                        var serverInfo = await getJson(BASE_URL + "/ajax/server?get=" + encodeURIComponent(linkIds[i]), ajaxHeaders).catch(function() { return null; });
+                        var streamUrl = serverInfo && serverInfo.result && serverInfo.result.url || "";
+                        if (streamUrl && /\.(m3u8|mp4)(?:[?#]|$)/i.test(streamUrl)) {
+                            streams.push({
+                                url: streamUrl,
+                                source: "AnimeWave [HLS]",
+                                quality: 1080,
+                                type: "hls",
+                                headers: HEADERS
+                            });
+                        }
+                    } catch (_) {}
+                }
+                return dedupeStreams(streams);
+            } catch (_) {
+                return [];
+            }
+        }
+
+        return {
+            key: "p_animewave",
+            name: "AnimeWave",
+            isAnime: true,
+            resolve: resolve
+        };
+    })();
+
     var PROVIDERS = [
-        StreamvixSource,
-        NoTorrentSource,
-        VidRockSource,
-        FourKhdhubSource,
         VegaMoviesSource,
+        CinefreakSource,
+        CastleSource,
         Movies4uSource,
-        MoviesDriveExtraSource,
-        // BollyflixSource, // DISABLED: times out consistently
         HindmoviezSource,
-        HDMovie2Source,
+        AnilightSource,
+        AnikageSource,
+        HiAnimeSource,
+        AnimewaveSource,
         AnimePaheSource,
-        AnimetsuSource,
-        AnimeToshoSource,
-        TokyoInsiderSource,
-        PrimeSrcSource,
-        VidFastProSource,
-        CinemaOSSource,
-        MadplayCDNSource,
-        VidflixSource,
-        PlaysrcSource,
-        XpassSource,
-        PlayImdbSource,
-        VidlinkSource,
-        VicSrcWtfSource,
-        CinemacitySource,
-        LordflixSource
+        AnimetsuSource
     ];
 
+    function categorizeProviders(media, providerKeys) {
+        var isAnime = !!media.anime;
+        var all = PROVIDERS.slice();
+
+        if (providerKeys && providerKeys.length) {
+            return {
+                tier1: all.filter(function(p) {
+                    var k = trim(String(p && p.key || "").toLowerCase());
+                    var n = trim(String(p && p.name || "").toLowerCase());
+                    return providerKeys.indexOf(k) !== -1 || providerKeys.indexOf(n) !== -1;
+                }),
+                tier2: []
+            };
+        }
+
+        if (isAnime) {
+            return {
+                tier1: [AnilightSource, AnikageSource, HiAnimeSource],
+                tier2: [AnimetsuSource, AnimePaheSource, AnimewaveSource]
+            };
+        } else {
+            var t1 = [CinefreakSource, CastleSource, VegaMoviesSource];
+            var t2 = !media.isMovie
+                ? [Movies4uSource]
+                : [Movies4uSource, HindmoviezSource];
+            return { tier1: t1, tier2: t2 };
+        }
+    }
+
     async function loadStreams(url, cb) {
+        var hasCallbackFired = false;
+        function safeCallback(result) {
+            if (!hasCallbackFired) {
+                hasCallbackFired = true;
+                cb(result);
+            }
+        }
+
         try {
             var media = parsePayload(url);
-            var defaultProviders = PROVIDERS.slice();
             var providerKeys = [];
             if (Array.isArray(media.providerKeys)) providerKeys = media.providerKeys.slice();
             else if (Array.isArray(media.providers)) providerKeys = media.providers.slice();
@@ -6863,103 +7545,123 @@
             providerKeys = uniqueBy(providerKeys.map(function(item) {
                 return trim(String(item || "").toLowerCase());
             }).filter(Boolean), function(item) { return item; });
-            var selectedProviders = providerKeys.length ? PROVIDERS.slice() : defaultProviders.slice();
-            if (providerKeys.length) {
-                selectedProviders = selectedProviders.filter(function(provider) {
-                    var key = trim(String(provider && provider.key || "").toLowerCase());
-                    var name = trim(String(provider && provider.name || "").toLowerCase());
-                    return providerKeys.indexOf(key) !== -1 || providerKeys.indexOf(name) !== -1;
-                });
-            }
 
-            // OPTIMIZATION: Sort providers by health score
-            selectedProviders.sort(function(a, b) {
-                var healthA = PROVIDER_HEALTH[a && a.key || ""] || {};
-                var healthB = PROVIDER_HEALTH[b && b.key || ""] || {};
-                var scoreA = healthA.successCount || 0;
-                var scoreB = healthB.successCount || 0;
-                return scoreB - scoreA;
-            });
+            var categories = categorizeProviders(media, providerKeys);
+            var tier1 = categories.tier1.filter(Boolean);
+            var tier2 = categories.tier2.filter(Boolean);
 
             var streams = [];
             var streamsByProvider = [];
-            var earlyTerminationTriggered = false;
+            var seenUrls = {};
+            var completedProviders = 0;
+            var totalDispatched = 0;
+            var tier2Dispatched = false;
+            var graceTimer = null;
+            var masterTimer = null;
+            var tier2Timer = null;
 
-            // OPTIMIZATION: Simpler mapLimit with caching and early termination
-            async function optimizedResolve(list, limit, resolverFn) {
-                var items = Array.isArray(list) ? list : [];
-                var max = Math.max(1, Number(limit || 1));
-                var results = new Array(items.length);
-                var cursor = 0;
+            return new Promise(function(resolvePromise) {
+                function finish(reason) {
+                    if (graceTimer) clearTimeout(graceTimer);
+                    if (masterTimer) clearTimeout(masterTimer);
+                    if (tier2Timer) clearTimeout(tier2Timer);
 
-                async function worker() {
-                    while (cursor < items.length) {
-                        if (earlyTerminationTriggered) break; // EXIT IMMEDIATELY on early termination
-                        var idx = cursor++;
-                        var prov = items[idx];
-                        if (!prov) break;
-                        try {
-                            var cached = getProviderCache(prov, media);
-                            if (cached !== null) {
-                                console.log("[CACHE] " + prov.name + ": " + cached.length + " streams");
-                                results[idx] = { status: "fulfilled", value: cached };
-                                streams = streams.concat(cached);
-                                streamsByProvider.push({ prov: prov, cnt: cached.length, cached: true });
-                                updateProviderHealth(prov, cached.length > 0);
-                                if (EARLY_TERMINATION_ENABLED && streams.length >= MIN_REQUIRED_STREAMS) {
-                                    earlyTerminationTriggered = true;
-                                    break;
-                                }
-                                continue;
-                            }
-                            var st = Date.now();
-                            var to = providerTimeoutMs(prov);
-                            var res = await withTimeout(resolverFn(prov), to, prov && prov.name || "Provider");
-                            var el = Date.now() - st;
-                            results[idx] = { status: "fulfilled", value: res };
-                            updateProviderHealth(prov, res && res.length > 0);
-                            if (res && res.length > 0) {
-                                setProviderCache(prov, media, res);
-                                streams = streams.concat(res);
-                                streamsByProvider.push({ prov: prov, cnt: res.length, el: el });
-                                if (EARLY_TERMINATION_ENABLED && streams.length >= MIN_REQUIRED_STREAMS) {
-                                    earlyTerminationTriggered = true;
-                                    console.log("[EARLY] Got " + streams.length + " streams");
-                                    break;
-                                }
-                            }
-                        } catch (err) {
-                            updateProviderHealth(prov, false);
-                            results[idx] = { status: "rejected", reason: err };
-                        }
+                    var sorted = sortStreams(dedupeStreams(streams));
+                    Analytics.logEvent('cinestream_loadstreams', {
+                        stream_count: sorted.length,
+                        prov_count: streamsByProvider.length,
+                        reason: reason,
+                        media_type: media.anime ? "anime" : (media.isMovie ? "movie" : "series")
+                    });
+                    safeCallback({ success: true, data: sorted });
+                    resolvePromise();
+                }
+
+                // Master deadline
+                masterTimer = setTimeout(function() {
+                    finish("master_deadline");
+                }, 5200);
+
+                function dispatchTier2IfNeeded() {
+                    if (!tier2Dispatched && tier2.length > 0 && streams.length < MIN_REQUIRED_STREAMS && !hasCallbackFired) {
+                        tier2Dispatched = true;
+                        if (tier2Timer) clearTimeout(tier2Timer);
+                        tier2.forEach(dispatchProvider);
                     }
                 }
-                var wks = [];
-                for (var i = 0; i < Math.min(max, items.length); i++) wks.push(worker());
-                await Promise.all(wks);
-                return results;
-            }
 
-            var settled = await optimizedResolve(selectedProviders, SCRAPE_CONCURRENCY, function(provider) {
-                return provider.resolve(media);
-            });
-            
-            // Log all provider results
-            for (var i = 0; i < settled.length; i++) {
-                if (!selectedProviders[i] || !settled[i]) continue;
-                var provName = selectedProviders[i] && selectedProviders[i].name || "?";
-                if (settled[i].status === "fulfilled") {
-                    var vals = settled[i].value || [];
-                    if (vals.length) console.log("[OK] " + provName + ": " + vals.length + " streams");
+                function onProviderResult(res, prov, elapsed) {
+                    completedProviders++;
+                    if (Array.isArray(res) && res.length) {
+                        setProviderCache(prov, media, res);
+                        var added = 0;
+                        for (var i = 0; i < res.length; i++) {
+                            var s = res[i];
+                            if (s && s.url && !seenUrls[s.url]) {
+                                seenUrls[s.url] = true;
+                                streams.push(s);
+                                added++;
+                            }
+                        }
+                        if (added > 0) {
+                            streamsByProvider.push({ prov: prov, cnt: added, el: elapsed });
+                            console.log("[OK] " + prov.name + ": " + added + " streams in " + elapsed + "ms");
+                            if (streams.length >= MIN_REQUIRED_STREAMS && !graceTimer) {
+                                console.log("[EARLY-EXIT] Reached " + streams.length + " streams. Finishing in 350ms.");
+                                graceTimer = setTimeout(function() {
+                                    finish("early_exit_grace_completed");
+                                }, 350);
+                            }
+                        }
+                    }
+
+                    // If Tier 1 providers finished and yielded 0 streams, trigger Tier 2 immediately!
+                    if (!tier2Dispatched && completedProviders >= tier1.length && streams.length === 0) {
+                        dispatchTier2IfNeeded();
+                    }
+
+                    if (completedProviders >= totalDispatched && streams.length > 0 && !graceTimer) {
+                        finish("all_settled");
+                    }
                 }
-            }
 
-            streams = sortStreams(dedupeStreams(streams));
+                function dispatchProvider(prov) {
+                    totalDispatched++;
+                    var cached = getProviderCache(prov, media);
+                    if (cached !== null) {
+                        console.log("[CACHE] " + prov.name + ": " + cached.length + " streams");
+                        onProviderResult(cached, prov, 0);
+                        return;
+                    }
 
-            Analytics.logEvent('cinestream_loadstreams', { prov_count: streamsByProvider.length, stream_count: streams.length, early_term: earlyTerminationTriggered });
-            cb({ success: true, data: streams });
+                    var st = Date.now();
+                    var to = providerTimeoutMs(prov);
+                    withTimeout(prov.resolve(media), to, prov.name || "Provider")
+                        .then(function(res) {
+                            var el = Date.now() - st;
+                            updateProviderHealth(prov, res && res.length > 0);
+                            onProviderResult(res, prov, el);
+                        })
+                        .catch(function(err) {
+                            var el = Date.now() - st;
+                            updateProviderHealth(prov, false);
+                            onProviderResult([], prov, el);
+                        });
+                }
+
+                // 1. Dispatch Tier 1 immediately
+                tier1.forEach(dispatchProvider);
+
+                // 2. Schedule Tier 2 after 800ms if needed
+                if (tier2.length > 0) {
+                    tier2Timer = setTimeout(function() {
+                        dispatchTier2IfNeeded();
+                    }, 800);
+                }
+            });
+
         } catch (error) {
-            cb({ success: false, errorCode: "STREAM_ERROR", message: String(error && error.message || error) });
+            safeCallback({ success: false, errorCode: "STREAM_ERROR", message: String(error && error.message || error) });
         }
     }
 

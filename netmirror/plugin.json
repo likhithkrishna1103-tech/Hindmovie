@@ -1,57 +1,18 @@
 {
   "packageName": "com.igris.repo.netmirror",
-  "name": "NetMirror",
-  "version": 17,
+  "name": "Netmirror",
+  "version": 1,
   "baseUrl": "https://net52.cc",
-  "providers": [
-    {
-      "id": "netflix",
-      "name": "Netflix"
-    },
-    {
-      "id": "prime",
-      "name": "Prime Video"
-    },
-    {
-      "id": "hotstar",
-      "name": "Hotstar"
-    },
-    {
-      "id": "disney",
-      "name": "Disney"
-    },
-    {
-      "id": "marvel",
-      "name": "Marvel"
-    },
-    {
-      "id": "starwars",
-      "name": "Star Wars"
-    },
-    {
-      "id": "pixar",
-      "name": "Pixar"
-    }
-  ],
-  "description": "NetMirror providers ported from the CNCVerse Cloudstream extension with fast NewTV HLS stream resolution.",
+  "description": "Stream movies and series from Netflix, Prime Video, and Hotstar mirrors.",
   "authors": [
-    "IGRIS"
+    "Developer"
   ],
   "languages": [
     "en",
-    "hi",
-    "ta",
-    "te",
-    "ml",
-    "kn",
-    "bn",
-    "mr",
-    "pa",
-    "gu"
+    "hi"
   ],
   "categories": [
     "Movies",
-    "Series",
-    "Anime"
+    "TV Shows"
   ]
 }
