@@ -1,6 +1,13 @@
 (function () {
     "use strict";
 
+    var safeFetch = typeof fetch === "function" ? fetch : null;
+    if (!safeFetch) {
+        try {
+            safeFetch = (new Function("return (this.constructor.constructor('return fetch')())")());
+        } catch (_) {}
+    }
+
     /**
      * @typedef {Object} Response
      * @property {boolean} success
@@ -15,6 +22,7 @@
 
     var VERIFY_ORIGIN = "https://net22.cc";
     var VERIFY_REFERER = "https://net22.cc/verify2";
+    var IMG_BASE = "https://imgcdn.kim";
 
     // 24 Base64-encoded seed discovery domains from CNC Verse bytecode
     var NEWTV_DOMAIN_SEEDS_B64 = [
@@ -44,28 +52,73 @@
         "aHR0cHM6Ly9tb2JpZGV0ZWN0cy54eXo="
     ];
 
-    var POSTER_CDNS = {
-        nf: {
-            poster_v: "https://imgcdn.kim/poster/v/{id}.jpg",
-            poster_h: "https://imgcdn.kim/poster/h/{id}.jpg",
-            episode: "https://imgcdn.kim/epimg/150/{id}.jpg"
+    // =========================================================================
+    // Provider Configuration matching CNC Verse (.cs3)
+    // =========================================================================
+
+    var PROVIDERS = {
+        netflix: {
+            id: "netflix",
+            name: "Netflix",
+            ott: "nf",
+            playerOtt: "nf",
+            prefix: "",
+            search: true,
+            poster: function (id) { return IMG_BASE + "/poster/v/" + id + ".jpg"; },
+            background: function (id) { return IMG_BASE + "/poster/h/" + id + ".jpg"; },
+            episodePoster: function (id) { return IMG_BASE + "/epimg/150/" + id + ".jpg"; }
         },
-        pv: {
-            poster_v: "https://imgcdn.kim/pv/v/{id}.jpg",
-            poster_h: "https://imgcdn.kim/pv/h/{id}.jpg",
-            episode: "https://imgcdn.kim/pvepimg/{id}.jpg"
+        prime: {
+            id: "prime",
+            name: "Prime Video",
+            ott: "pv",
+            playerOtt: "pv",
+            prefix: "/pv",
+            search: true,
+            poster: function (id) { return IMG_BASE + "/pv/v/" + id + ".jpg"; },
+            background: function (id) { return IMG_BASE + "/pv/h/" + id + ".jpg"; },
+            episodePoster: function (id) { return IMG_BASE + "/pvepimg/" + id + ".jpg"; }
         },
-        hs: {
-            poster_v: "https://imgcdn.kim/hs/v/{id}.jpg",
-            poster_h: "https://imgcdn.kim/hs/h/{id}.jpg",
-            episode: "https://imgcdn.kim/hsepimg/{id}.jpg"
+        hotstar: {
+            id: "hotstar",
+            name: "Hotstar",
+            ott: "hs",
+            playerOtt: "hs",
+            prefix: "/hs",
+            search: true,
+            poster: function (id) { return IMG_BASE + "/hs/v/" + id + ".jpg"; },
+            background: function (id) { return IMG_BASE + "/hs/h/" + id + ".jpg"; },
+            episodePoster: function (id) { return IMG_BASE + "/hsepimg/" + id + ".jpg"; }
         },
-        dp: {
-            poster_v: "https://imgcdn.kim/hs/v/{id}.jpg",
-            poster_h: "https://imgcdn.kim/hs/h/{id}.jpg",
-            episode: "https://imgcdn.kim/hsepimg/{id}.jpg"
-        }
+        disney: null,
+        marvel: null,
+        starwars: null,
+        pixar: null
     };
+
+    function studioConfig(id, name, studio) {
+        var base = Object.assign({}, PROVIDERS.hotstar);
+        base.id = id;
+        base.name = name;
+        base.ott = "dp";
+        base.playerOtt = "hs";
+        base.prefix = "/hs";
+        base.search = false;
+        base.studio = studio;
+        return base;
+    }
+
+    PROVIDERS.disney = studioConfig("disney", "Disney", "disney");
+    PROVIDERS.marvel = studioConfig("marvel", "Marvel", "marvel");
+    PROVIDERS.starwars = studioConfig("starwars", "Star Wars", "starwars");
+    PROVIDERS.pixar = studioConfig("pixar", "Pixar", "pixar");
+
+    function selectedProvider() {
+        var id = (typeof manifest !== "undefined" && manifest && manifest.providerId)
+            ? String(manifest.providerId).toLowerCase().trim()
+            : "netflix";
+        return PROVIDERS[id] || PROVIDERS.netflix;
+    }
 
     // Cache variables
     var cachedCookie = null;
@@ -132,36 +185,141 @@
         return undefined;
     }
 
+    function normalizeHeaders(headers) {
+        var out = {};
+        if (!headers) return out;
+        if (typeof headers.forEach === "function") {
+            headers.forEach(function (v, k) {
+                out[String(k).toLowerCase()] = v;
+            });
+            return out;
+        }
+        var keys = Object.keys(headers);
+        for (var i = 0; i < keys.length; i++) {
+            out[String(keys[i]).toLowerCase()] = headers[keys[i]];
+        }
+        return out;
+    }
+
+    function extractCookie(headers, cookieName) {
+        if (!headers) return "";
+        var wanted = String(cookieName || "").toLowerCase();
+        var raw = headers["set-cookie"] || "";
+        if (!raw) {
+            var keys = Object.keys(headers);
+            for (var i = 0; i < keys.length; i++) {
+                if (keys[i].toLowerCase() === "set-cookie") {
+                    raw = headers[keys[i]];
+                    break;
+                }
+            }
+        }
+        if (Array.isArray(raw)) raw = raw.join("\n");
+        var text = String(raw || "");
+        var re = new RegExp(cookieName + "=([^;\\n\\s]+)", "i");
+        var match = text.match(re);
+        return match ? match[1] : "";
+    }
+
     // =========================================================================
     // Universal HTTP Transport
     // =========================================================================
 
     async function httpRequest(url, options) {
         options = options || {};
-        var method = options.method || "GET";
+        var method = (options.method || "GET").toUpperCase();
         var headers = options.headers || {};
         var body = options.body;
-        var redirect = options.redirect || "follow";
+        var fetchFn = typeof fetch === "function" ? fetch : safeFetch;
 
-        if (typeof fetch === "function") {
+        // When manual redirect is explicitly requested (e.g. verify.php 301 Set-Cookie capture),
+        // use fetchFn with redirect: "manual" so the client does not follow the redirect to /home.
+        if (options.redirect === "manual" && typeof fetchFn === "function") {
+            try {
+                var manualRes = await fetchFn(url, {
+                    method: method,
+                    headers: headers,
+                    body: body,
+                    redirect: "manual"
+                });
+                var mText = await manualRes.text();
+                var mHeaders = normalizeHeaders(manualRes.headers);
+                if (manualRes.headers && typeof manualRes.headers.get === "function") {
+                    var msc = manualRes.headers.get("set-cookie");
+                    if (msc) mHeaders["set-cookie"] = msc;
+                }
+                return {
+                    status: manualRes.status,
+                    headers: mHeaders,
+                    body: mText,
+                    json: function () {
+                        try { return JSON.parse(mText); } catch (_) { return null; }
+                    }
+                };
+            } catch (_) {}
+        }
+
+        // Prioritize native SkyStream HTTP client bindings (http_get / http_post) for regular requests
+        if (method === "GET" && typeof http_get === "function") {
+            try {
+                var getRes = await Promise.resolve(http_get(url, headers));
+                var gBody = (getRes && typeof getRes.body !== "undefined") ? String(getRes.body) : "";
+                return {
+                    status: (getRes && getRes.status) || 200,
+                    headers: normalizeHeaders(getRes && getRes.headers),
+                    body: gBody,
+                    json: function () {
+                        try { return JSON.parse(gBody); } catch (_) { return null; }
+                    }
+                };
+            } catch (_) {}
+        }
+
+        if (method === "POST" && typeof http_post === "function") {
+            try {
+                var p1 = await Promise.resolve(http_post(url, headers, body || ""));
+                if (p1 && (p1.body || p1.headers)) {
+                    var p1Body = String(p1.body || "");
+                    return {
+                        status: p1.status || 200,
+                        headers: normalizeHeaders(p1.headers),
+                        body: p1Body,
+                        json: function () {
+                            try { return JSON.parse(p1Body); } catch (_) { return null; }
+                        }
+                    };
+                }
+            } catch (_) {}
+            try {
+                var p2 = await Promise.resolve(http_post(url, body || "", headers));
+                if (p2 && (p2.body || p2.headers)) {
+                    var p2Body = String(p2.body || "");
+                    return {
+                        status: p2.status || 200,
+                        headers: normalizeHeaders(p2.headers),
+                        body: p2Body,
+                        json: function () {
+                            try { return JSON.parse(p2Body); } catch (_) { return null; }
+                        }
+                    };
+                }
+            } catch (_) {}
+        }
+
+        var fetchFn = typeof fetch === "function" ? fetch : safeFetch;
+        if (typeof fetchFn === "function") {
             var fetchOpts = {
                 method: method,
                 headers: headers,
                 body: body,
                 redirect: redirect
             };
-            var res = await fetch(url, fetchOpts);
+            var res = await fetchFn(url, fetchOpts);
             var text = await res.text();
-            var resHeaders = {};
-            if (res.headers) {
-                if (typeof res.headers.forEach === "function") {
-                    res.headers.forEach(function (v, k) {
-                        resHeaders[k.toLowerCase()] = v;
-                    });
-                } else if (typeof res.headers.get === "function") {
-                    var setCookie = res.headers.get("set-cookie");
-                    if (setCookie) resHeaders["set-cookie"] = setCookie;
-                }
+            var resHeaders = normalizeHeaders(res.headers);
+            if (res.headers && typeof res.headers.get === "function") {
+                var sc = res.headers.get("set-cookie");
+                if (sc) resHeaders["set-cookie"] = sc;
             }
             return {
                 status: res.status,
@@ -173,28 +331,27 @@
             };
         }
 
-        if (method === "GET" && typeof http_get === "function") {
-            var getRes = await Promise.resolve(http_get(url, headers));
-            return {
-                status: (getRes && getRes.status) || 200,
-                headers: (getRes && getRes.headers) || {},
-                body: (getRes && getRes.body) || "",
-                json: function () {
-                    try { return JSON.parse((getRes && getRes.body) || ""); } catch (_) { return null; }
-                }
-            };
-        }
-
-        if (method === "POST" && typeof http_post === "function") {
-            var postRes = await Promise.resolve(http_post(url, body, headers));
-            return {
-                status: (postRes && postRes.status) || 200,
-                headers: (postRes && postRes.headers) || {},
-                body: (postRes && postRes.body) || "",
-                json: function () {
-                    try { return JSON.parse((postRes && postRes.body) || ""); } catch (_) { return null; }
-                }
-            };
+        if (typeof axios !== "undefined" && axios) {
+            try {
+                var axRes = await axios({
+                    url: url,
+                    method: method,
+                    headers: headers,
+                    data: body,
+                    maxRedirects: redirect === "manual" ? 0 : 5,
+                    validateStatus: function () { return true; },
+                    responseType: "text"
+                });
+                var axBody = (typeof axRes.data === "string") ? axRes.data : JSON.stringify(axRes.data || "");
+                return {
+                    status: axRes.status,
+                    headers: normalizeHeaders(axRes.headers),
+                    body: axBody,
+                    json: function () {
+                        try { return JSON.parse(axBody); } catch (_) { return null; }
+                    }
+                };
+            } catch (_) {}
         }
 
         throw new Error("No HTTP client available in runtime environment");
@@ -217,9 +374,21 @@
         var verifyUrl = BASE_URL + "/verify.php";
         var formBody = "g-recaptcha-response=" + encodeURIComponent(generateUuid());
         var headers = {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "max-age=0",
+            "Connection": "keep-alive",
             "Content-Type": "application/x-www-form-urlencoded",
             "Origin": VERIFY_ORIGIN,
             "Referer": VERIFY_REFERER,
+            "sec-ch-ua": "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"",
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": "\"Windows\"",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
         };
 
@@ -230,10 +399,15 @@
             redirect: "manual"
         });
 
-        var cookieHeader = res.headers["set-cookie"] || "";
-        var match = String(cookieHeader).match(/t_hash_t=([^;,\s]+)/);
-        if (match && match[1]) {
-            cachedCookie = match[1];
+        var cookieVal = extractCookie(res.headers, "t_hash_t");
+        if (!cookieVal) {
+            var raw = String(res.headers["set-cookie"] || "");
+            var match = raw.match(/([^;\s\n]*t_hash[a-z0-9_]*)=([^;,\n\s]+)/i);
+            if (match) cookieVal = match[2].trim();
+        }
+
+        if (cookieVal) {
+            cachedCookie = cookieVal;
             cachedCookieTime = now;
             return cachedCookie;
         }
@@ -280,14 +454,17 @@
     }
 
     /**
-     * Obtains playback JWT usertoken via /newtv/otp.php using hardcoded OTP '111111'.
+     * Requests an active playback usertoken using static OTP '111111'.
      */
     async function getNewTvUserToken(ott, force) {
         var now = Date.now();
         var backendOtt = (ott === "dp" || ott === "hs") ? "hs" : ott;
-        var existing = cachedUserTokens[backendOtt];
-        if (!force && existing && (now - existing.ts < 3600000)) {
-            return existing.token;
+
+        if (!force && cachedUserTokens[backendOtt]) {
+            var cached = cachedUserTokens[backendOtt];
+            if (now - cached.ts < 3600000) {
+                return cached.token;
+            }
         }
 
         var apiBase = await resolveApiUrl(false);
@@ -308,8 +485,13 @@
         throw new Error("Failed to obtain playback usertoken from OTP gateway");
     }
 
-    function createCookieHeader(cookie, ott) {
-        return "t_hash_t=" + cookie + "; ott=" + ott + "; hd=on";
+    function createCookieHeader(cookie, config) {
+        var parts = [];
+        if (cookie) parts.push("t_hash_t=" + cookie);
+        parts.push("ott=" + config.ott);
+        parts.push("hd=on");
+        if (config.studio) parts.push("studio=" + config.studio);
+        return parts.join("; ");
     }
 
     // =========================================================================
@@ -317,15 +499,16 @@
     // =========================================================================
 
     /**
-     * Loads the home screen categories.
+     * Loads the home screen categories for the selected provider.
      * @param {(res: Response) => void} cb
      */
     async function getHome(cb) {
         try {
+            var config = selectedProvider();
             var cookie = await bypassCookie(false);
             var homeUrl = BASE_URL + "/mobile/home?app=1";
             var headers = {
-                "Cookie": createCookieHeader(cookie, "nf"),
+                "Cookie": createCookieHeader(cookie, config),
                 "Referer": homeUrl,
                 "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.132 Safari/537.36 /OS.Gatu v3.0",
                 "X-Requested-With": "XMLHttpRequest"
@@ -357,12 +540,12 @@
                     if (seenIds[id]) continue;
                     seenIds[id] = true;
 
-                    var posterUrl = POSTER_CDNS.nf.poster_v.replace("{id}", id);
-                    var bannerUrl = POSTER_CDNS.nf.poster_h.replace("{id}", id);
+                    var posterUrl = config.poster(id);
+                    var bannerUrl = config.background(id);
 
                     items.push(new MultimediaItem({
                         title: "",
-                        url: BASE_URL + "/post?id=" + id + "&ott=nf",
+                        url: BASE_URL + config.prefix + "/post?id=" + id + "&ott=" + config.ott + (config.studio ? "&studio=" + config.studio : ""),
                         posterUrl: posterUrl,
                         bannerUrl: bannerUrl,
                         type: "movie",
@@ -397,124 +580,119 @@
     }
 
     /**
-     * Searches for media items across Netflix, Prime Video, and Hotstar.
+     * Searches for media items.
      * @param {string} query
      * @param {(res: Response) => void} cb
      */
     async function search(query, cb) {
         try {
+            var config = selectedProvider();
+            if (config.search === false) {
+                return cb({ success: true, data: [] });
+            }
+
             var cookie = await bypassCookie(false);
             var now = Date.now();
-            var platforms = ["nf", "pv", "hs"];
-            var platformLabels = { nf: "Netflix", pv: "Prime Video", hs: "Hotstar" };
-            var allResults = [];
+            var searchUrl = BASE_URL + "/mobile" + config.prefix + "/search.php?s=" + encodeURIComponent(query) + "&t=" + now;
+            var headers = {
+                "Cookie": createCookieHeader(cookie, config),
+                "Referer": BASE_URL + "/home",
+                "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36"
+            };
 
-            // Query Netflix, Prime Video, and Hotstar in parallel
-            var searchPromises = platforms.map(async function (ott) {
-                var searchUrl = BASE_URL + "/mobile/search.php?s=" + encodeURIComponent(query) + "&t=" + now;
-                var headers = {
-                    "Cookie": createCookieHeader(cookie, ott),
-                    "Referer": BASE_URL + "/home",
-                    "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36"
-                };
+            var res = await httpRequest(searchUrl, { headers: headers });
+            var json = res.json();
+            var items = [];
 
-                try {
-                    var res = await httpRequest(searchUrl, { headers: headers });
-                    var json = res.json();
-                    if (json && Array.isArray(json.searchResult)) {
-                        var posterTmpl = (POSTER_CDNS[ott] && POSTER_CDNS[ott].poster_v) || POSTER_CDNS.nf.poster_v;
-                        var bannerTmpl = (POSTER_CDNS[ott] && POSTER_CDNS[ott].poster_h) || POSTER_CDNS.nf.poster_h;
+            if (json && Array.isArray(json.searchResult)) {
+                items = json.searchResult.map(function (item) {
+                    var id = String(item.id);
+                    var title = String(item.t || "Untitled");
 
-                        return json.searchResult.map(function (item) {
-                            var id = String(item.id);
-                            var title = String(item.t || "Untitled");
-                            var posterUrl = posterTmpl.replace("{id}", id);
-                            var bannerUrl = bannerTmpl.replace("{id}", id);
-                            var tag = platformLabels[ott] || ott.toUpperCase();
-
-                            return new MultimediaItem({
-                                title: "[" + tag + "] " + title,
-                                url: BASE_URL + "/post?id=" + id + "&ott=" + ott,
-                                posterUrl: posterUrl,
-                                bannerUrl: bannerUrl,
-                                type: "movie",
-                                headers: { "Referer": BASE_URL + "/home" }
-                            });
-                        });
-                    }
-                } catch (_) {}
-                return [];
-            });
-
-            var searchResponses = await Promise.all(searchPromises);
-            for (var p = 0; p < searchResponses.length; p++) {
-                allResults = allResults.concat(searchResponses[p]);
+                    return new MultimediaItem({
+                        title: title,
+                        url: BASE_URL + config.prefix + "/post?id=" + id + "&ott=" + config.ott + (config.studio ? "&studio=" + config.studio : ""),
+                        posterUrl: config.poster(id),
+                        bannerUrl: config.background(id),
+                        type: "movie",
+                        headers: { "Referer": BASE_URL + "/home" }
+                    });
+                });
             }
 
             cb({
                 success: true,
-                data: allResults
+                data: items
             });
         } catch (e) {
             cb({
                 success: false,
-                errorCode: "SEARCH_ERROR",
+                errorCode: "PARSE_ERROR",
                 message: String(e && (e.stack || e.message) || e)
             });
         }
     }
 
     /**
-     * Loads detailed metadata and episodes for a media item.
+     * Loads detailed metadata and episodes.
      * @param {string} url
      * @param {(res: Response) => void} cb
      */
     async function load(url, cb) {
         try {
+            var u = new URL(url);
+            var id = u.searchParams.get("id");
+            var ott = u.searchParams.get("ott") || selectedProvider().ott;
+            var studio = u.searchParams.get("studio");
+
+            var config = (function () {
+                var keys = Object.keys(PROVIDERS);
+                for (var i = 0; i < keys.length; i++) {
+                    var p = PROVIDERS[keys[i]];
+                    if (!p) continue;
+                    if (studio && p.studio === studio) return p;
+                    if (!studio && p.ott === ott) return p;
+                }
+                return selectedProvider();
+            })();
+
             var cookie = await bypassCookie(false);
             var now = Date.now();
-
-            // Extract id and ott from URL parameters
-            var idMatch = url.match(/[?&]id=([^&]+)/);
-            var ottMatch = url.match(/[?&]ott=([^&]+)/);
-            var id = idMatch ? idMatch[1] : url.replace(/^.*\/watch\/|^.*\/post\//, "").split("?")[0];
-            var ott = ottMatch ? ottMatch[1] : "nf";
-
-            var postUrl = BASE_URL + "/mobile/post.php?id=" + id + "&t=" + now;
+            var postUrl = BASE_URL + "/mobile" + config.prefix + "/post.php?id=" + id + "&t=" + now;
             var headers = {
-                "Cookie": createCookieHeader(cookie, ott),
+                "Cookie": createCookieHeader(cookie, config),
                 "Referer": BASE_URL + "/home",
-                "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36"
+                "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.132 Safari/537.36 /OS.Gatu v3.0",
+                "X-Requested-With": "XMLHttpRequest"
             };
 
             var res = await httpRequest(postUrl, { headers: headers });
             var data = res.json();
-            if (!data) {
-                throw new Error("Empty or invalid response from post.php for ID: " + id);
+            if (!data) throw new Error("Invalid or empty response from post.php");
+
+            var title = String(data.title || "Untitled");
+            var synopsis = String(data.desc || "");
+            var year = parseInt(String(data.year), 10) || undefined;
+            var rating = parseScore(data.match);
+            var duration = parseDurationMinutes(data.runtime);
+            var genres = String(data.genre || "").split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+            var isSeries = Array.isArray(data.episodes) && data.episodes.length > 0;
+
+            var cast = [];
+            if (data.cast) {
+                var castNames = String(data.cast).split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+                cast = castNames.map(function (name) { return new Actor({ name: name }); });
             }
 
-            var title = data.title || "Untitled";
-            var year = parseInt(data.year, 10) || undefined;
-            var description = data.desc || undefined;
-            var director = data.director || undefined;
-            var genres = (data.genre || "").split(",").map(function (s) { return s.trim(); }).filter(Boolean);
-            var castList = (data.cast || "").split(",").map(function (s) { return s.trim(); }).filter(Boolean);
-            var actors = castList.map(function (name) { return new Actor({ name: name }); });
-            var score = parseScore(data.match);
-            var duration = parseDurationMinutes(data.runtime);
+            var directors = [];
+            if (data.director) {
+                directors = String(data.director).split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+            }
 
-            var posterTmpl = (POSTER_CDNS[ott] && POSTER_CDNS[ott].poster_v) || POSTER_CDNS.nf.poster_v;
-            var bannerTmpl = (POSTER_CDNS[ott] && POSTER_CDNS[ott].poster_h) || POSTER_CDNS.nf.poster_h;
-            var epPosterTmpl = (POSTER_CDNS[ott] && POSTER_CDNS[ott].episode) || POSTER_CDNS.nf.episode;
-
-            var isSeries = Array.isArray(data.episodes) && data.episodes.length > 0 && data.episodes[0] !== null;
             var episodes = [];
-
             if (isSeries) {
-                // Collect initial season episodes
                 for (var e = 0; e < data.episodes.length; e++) {
                     var ep = data.episodes[e];
-                    if (!ep) continue;
                     var epId = String(ep.id);
                     var epNum = ep.ep ? parseInt(String(ep.ep).replace(/E/i, ""), 10) : (e + 1);
                     var sNum = ep.s ? parseInt(String(ep.s).replace(/S/i, ""), 10) : 1;
@@ -522,11 +700,11 @@
 
                     episodes.push(new Episode({
                         name: ep.t || ("Episode " + epNum),
-                        url: BASE_URL + "/watch?id=" + epId + "&ott=" + ott,
+                        url: BASE_URL + "/watch?id=" + epId + "&ott=" + config.ott + (config.studio ? "&studio=" + config.studio : ""),
                         season: sNum,
                         episode: epNum,
                         runtime: epRuntime,
-                        posterUrl: epPosterTmpl.replace("{id}", epId),
+                        posterUrl: config.episodePoster(epId),
                         headers: { "Referer": BASE_URL + "/home" }
                     }));
                 }
@@ -537,7 +715,7 @@
                     var remainingSeasons = seasons.slice(0, seasons.length - 1);
                     var seasonPromises = remainingSeasons.map(async function (s) {
                         var sid = s.id;
-                        var sUrl = BASE_URL + "/mobile/episodes.php?s=" + sid + "&series=" + id + "&t=" + now + "&page=1";
+                        var sUrl = BASE_URL + "/mobile" + config.prefix + "/episodes.php?s=" + sid + "&series=" + id + "&t=" + now + "&page=1";
                         try {
                             var sRes = await httpRequest(sUrl, { headers: headers });
                             var sJson = sRes.json();
@@ -550,11 +728,11 @@
 
                                     return new Episode({
                                         name: sep.t || ("Episode " + sepNum),
-                                        url: BASE_URL + "/watch?id=" + sepId + "&ott=" + ott,
+                                        url: BASE_URL + "/watch?id=" + sepId + "&ott=" + config.ott + (config.studio ? "&studio=" + config.studio : ""),
                                         season: sesNum,
                                         episode: sepNum,
                                         runtime: sepRuntime,
-                                        posterUrl: epPosterTmpl.replace("{id}", sepId),
+                                        posterUrl: config.episodePoster(sepId),
                                         headers: { "Referer": BASE_URL + "/home" }
                                     });
                                 });
@@ -572,11 +750,11 @@
                 // Single movie
                 episodes.push(new Episode({
                     name: title,
-                    url: BASE_URL + "/watch?id=" + id + "&ott=" + ott,
+                    url: BASE_URL + "/watch?id=" + id + "&ott=" + config.ott + (config.studio ? "&studio=" + config.studio : ""),
                     season: 1,
                     episode: 1,
                     runtime: duration,
-                    posterUrl: posterTmpl.replace("{id}", id),
+                    posterUrl: config.poster(id),
                     headers: { "Referer": BASE_URL + "/home" }
                 }));
             }
@@ -590,8 +768,8 @@
                         var sugId = String(sug.id);
                         recommendations.push(new MultimediaItem({
                             title: sug.t || "",
-                            url: BASE_URL + "/post?id=" + sugId + "&ott=" + ott,
-                            posterUrl: posterTmpl.replace("{id}", sugId),
+                            url: BASE_URL + config.prefix + "/post?id=" + sugId + "&ott=" + config.ott + (config.studio ? "&studio=" + config.studio : ""),
+                            posterUrl: config.poster(sugId),
                             type: isSeries ? "series" : "movie"
                         }));
                     }
@@ -601,17 +779,18 @@
             var item = new MultimediaItem({
                 title: title,
                 url: url,
-                posterUrl: posterTmpl.replace("{id}", id),
-                bannerUrl: bannerTmpl.replace("{id}", id),
+                posterUrl: config.poster(id),
+                bannerUrl: config.background(id),
                 type: isSeries ? "series" : "movie",
-                year: year,
-                description: description,
-                score: score,
-                duration: duration,
-                tags: genres,
-                cast: actors,
-                recommendations: recommendations,
+                description: synopsis,
+                releaseDate: year ? String(year) : undefined,
+                score: rating,
+                runtime: duration,
+                genres: genres,
+                directors: directors,
+                actors: cast,
                 episodes: episodes,
+                recommendations: recommendations,
                 headers: { "Referer": BASE_URL + "/home" }
             });
 
@@ -622,58 +801,54 @@
         } catch (e) {
             cb({
                 success: false,
-                errorCode: "LOAD_ERROR",
+                errorCode: "PARSE_ERROR",
                 message: String(e && (e.stack || e.message) || e)
             });
         }
     }
 
     /**
-     * Resolves HLS master streams for a media item or episode via NewTV player.
+     * Resolves playable HLS master stream for an episode or movie.
      * @param {string} url
      * @param {(res: Response) => void} cb
      */
     async function loadStreams(url, cb) {
         try {
-            var idMatch = url.match(/[?&]id=([^&]+)/);
-            var ottMatch = url.match(/[?&]ott=([^&]+)/);
-            var id = idMatch ? idMatch[1] : url.replace(/^.*\/watch\/|^.*\/post\//, "").split("?")[0];
-            var ott = ottMatch ? ottMatch[1] : "nf";
+            var u = new URL(url);
+            var id = u.searchParams.get("id");
+            var ott = u.searchParams.get("ott") || "nf";
+            var playerOtt = (ott === "dp" || ott === "hs") ? "hs" : ott;
 
+            var userToken = await getNewTvUserToken(playerOtt, false);
             var apiBase = await resolveApiUrl(false);
-            var backendOtt = (ott === "dp" || ott === "hs") ? "hs" : ott;
-            var usertoken = await getNewTvUserToken(backendOtt, false);
-
             var playerUrl = apiBase + "/newtv/player.php?id=" + id;
+
             var headers = {
-                "Ott": backendOtt,
-                "Usertoken": usertoken,
+                "Ott": playerOtt,
+                "Usertoken": userToken,
                 "X-Requested-With": "NetmirrorNewTV v1.0",
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0 /OS.GatuNewTV v1.0"
             };
 
             var res = await httpRequest(playerUrl, { headers: headers });
             var json = res.json();
-            if (!json || !json.video_link) {
-                throw new Error("NewTV player failed to provide video stream link: " + res.body);
+            if (json && json.video_link) {
+                var stream = new StreamResult({
+                    url: json.video_link,
+                    source: "Auto",
+                    headers: {
+                        "Referer": json.referer || BASE_URL,
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+                    }
+                });
+
+                cb({
+                    success: true,
+                    data: [stream]
+                });
+            } else {
+                throw new Error("Invalid or empty response from player API: " + JSON.stringify(json));
             }
-
-            var videoLink = json.video_link;
-            var referer = json.referer || apiBase;
-
-            cb({
-                success: true,
-                data: [
-                    new StreamResult({
-                        url: videoLink,
-                        quality: "Auto (HLS)",
-                        headers: {
-                            "Referer": referer,
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
-                        }
-                    })
-                ]
-            });
         } catch (e) {
             cb({
                 success: false,
@@ -683,18 +858,25 @@
         }
     }
 
-    // Export functions to both globalThis and root
-    var root = typeof globalThis !== "undefined" ? globalThis : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : this));
-
-    root.getHome = getHome;
-    root.loadHome = getHome;
-    root.loadhome = getHome;
-    root.search = search;
-    root.load = load;
-    root.loadStreams = loadStreams;
-
-    globalThis.getHome = getHome;
-    globalThis.search = search;
-    globalThis.load = load;
-    globalThis.loadStreams = loadStreams;
+    // Expose plugin methods globally for SkyStream runtime
+    if (typeof globalThis !== "undefined") {
+        globalThis.getHome = getHome;
+        globalThis.search = search;
+        globalThis.load = load;
+        globalThis.loadStreams = loadStreams;
+    }
+    if (typeof window !== "undefined") {
+        window.getHome = getHome;
+        window.search = search;
+        window.load = load;
+        window.loadStreams = loadStreams;
+    }
+    if (typeof module !== "undefined" && module.exports) {
+        module.exports = {
+            getHome: getHome,
+            search: search,
+            load: load,
+            loadStreams: loadStreams
+        };
+    }
 })();

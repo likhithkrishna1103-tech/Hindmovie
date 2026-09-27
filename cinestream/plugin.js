@@ -159,6 +159,33 @@
         var body = options.body;
         var allowRedirects = options.allowRedirects !== false;
 
+        if (typeof http_parallel === "function" && (method === "HEAD" || !allowRedirects)) {
+            return Promise.resolve(http_parallel([{ method: method, url: url, headers: headers }])).then(function(results) {
+                var res = results && results[0];
+                return {
+                    status: responseStatus(res) || 200,
+                    body: res && typeof res.body !== "undefined" ? res.body : "",
+                    headers: parseHeaders(res && res.headers),
+                    finalUrl: (res && (res.url || res.finalUrl)) || url
+                };
+            }).catch(function() {
+                if (method === "GET" && typeof http_get === "function") {
+                    return Promise.resolve(http_get(url, headers)).then(function(res) {
+                        return {
+                            status: responseStatus(res) || 200,
+                            body: res && typeof res.body !== "undefined" ? res.body : "",
+                            headers: parseHeaders(res && res.headers),
+                            finalUrl: (res && (res.url || res.finalUrl)) || url
+                        };
+                    });
+                }
+                if (typeof fetch === "function") {
+                    return requestWithFetch(url, method, headers, body, allowRedirects);
+                }
+                throw new Error("HTTP request failed: " + url);
+            });
+        }
+
         if (method === "GET" && typeof http_get === "function") {
             return Promise.resolve(http_get(url, headers)).then(function(res) {
                 var normalized = {
@@ -5244,22 +5271,38 @@
                         headers: vmHeaders({ "Referer": referer || baseOrigin(currentUrl) + "/" }),
                         allowRedirects: false
                     });
-                    var location = res.headers.location || res.headers.Location || "";
-                    if (!location) return currentUrl;
+                    var location = (res && res.headers && (res.headers.location || res.headers.Location)) || "";
+                    var finalU = (res && (res.finalUrl || res.url)) || "";
+                    if (!location && finalU && finalU !== currentUrl) {
+                        currentUrl = finalU;
+                        if (/link=/i.test(currentUrl)) break;
+                    }
+                    if (!location) break;
                     currentUrl = absoluteUrl(currentUrl, location);
+                    if (/link=/i.test(currentUrl)) break;
                 } catch (_) {
-                    return currentUrl;
+                    break;
                 }
             }
             return currentUrl;
         }
 
         function vmVcloudJump(html, baseUrl) {
-            var link = firstMatch(html, [
-                /var\s+url\s*=\s*'([^']+)'/i,
-                /var\s+url\s*=\s*"([^"]+)"/i,
-                /<div\b[^>]*class=["'][^"']*\bvd\b[^"']*["'][^>]*>[\s\S]*?<center>[\s\S]*?<a\b[^>]+href=["']([^"']+)["']/i
-            ]);
+            var script = (html.match(/<script\b[^>]*>[\s\S]*?<\/script>/gi) || []).find(function(s) { return /\burl\b/.test(s); }) || "";
+            var enc = (script.match(/atob\s*\(\s*atob\s*\(\s*["']([^"']+)/i) || [])[1];
+            var link = "";
+            if (enc) {
+                try {
+                    link = (typeof atob === "function") ? atob(atob(enc)) : base64Decode(base64Decode(enc));
+                } catch (_) {}
+            }
+            if (!link) {
+                link = firstMatch(html, [
+                    /var\s+url\s*=\s*'([^']+)'/i,
+                    /var\s+url\s*=\s*"([^"]+)"/i,
+                    /<div\b[^>]*class=["'][^"']*\bvd\b[^"']*["'][^>]*>[\s\S]*?<center>[\s\S]*?<a\b[^>]+href=["']([^"']+)["']/i
+                ]);
+            }
             return link ? absoluteUrl(baseUrl, link) : "";
         }
 
@@ -5340,6 +5383,7 @@
             if (/vcloud|gamerxyt\.com\/hubcloud\.php|hubcloud\./i.test(sourceUrl)) {
                 var vcloud = await vmResolveVcloud(source, context);
                 if (vcloud.length) return vcloud;
+                return [];
             }
             if (isCommonDirectMediaUrl(sourceUrl)) return [buildResolvedStream(sourceUrl, sourceName, quality, headers, context.title || source.title || sourceUrl)];
             return [buildResolvedStream(sourceUrl, sourceName, quality, headers, context.title || source.title || sourceUrl)];
@@ -5400,105 +5444,136 @@
                 pageUrl = res.finalUrl || pageUrl;
                 var html = res.body || "";
                 var title = vmCleanTitle(firstMatch(html, [/<h1\b[^>]*>([\s\S]*?)<\/h1>/i, /<title\b[^>]*>([\s\S]*?)<\/title>/i])) || match.title || media.title;
-                var imdbUrl = vmExtractImdbUrl(html);
                 var type = /Series-SYNOPSIS\/PLOT|Series Info|Series synopsis\/PLOT/i.test(html) || vmMediaType(title) === "series" ? "series" : "movie";
-                var meta = await vmFetchCinemeta(type, imdbUrl);
 
                 if (type === "movie" && media.isMovie) {
                     var groups = vmQualityGroups(html, pageUrl);
-                    var sources = [];
+                    var linkPromises = [];
                     for (var i = 0; i < groups.length; i++) {
-                        for (var j = 0; j < groups[i].anchors.length; j++) {
-                            var anchor = groups[i].anchors[j];
+                        var grp = groups[i];
+                        for (var j = 0; j < grp.anchors.length; j++) {
+                            var anchor = grp.anchors[j];
                             if (!/dwd-button|Download/i.test(anchor.html + " " + anchor.text)) continue;
-                            try {
-                                var linkPage = await vmGetDocument(anchor.href, vmHeaders({ "Referer": pageUrl }), true);
-                                if (!linkPage) continue;
-                                sources = sources.concat(vmExtractNexdriveSources(linkPage.body, linkPage.finalUrl || anchor.href, {
-                                    title: groups[i].title,
-                                    quality: groups[i].quality
-                                }));
-                            } catch (_) { }
+                            (function(g, a) {
+                                linkPromises.push(
+                                    vmGetDocument(a.href, vmHeaders({ "Referer": pageUrl }), true)
+                                        .then(function(linkPage) {
+                                            if (!linkPage || !linkPage.body) return [];
+                                            return vmExtractNexdriveSources(linkPage.body, linkPage.finalUrl || a.href, {
+                                                title: g.title,
+                                                quality: g.quality
+                                            });
+                                        })
+                                        .catch(function() { return []; })
+                                );
+                            })(grp, anchor);
                         }
                     }
-                    sources = uniqueBy(sources, function(item) { return item.source; });
-                    var streams = [];
-                    for (var x = 0; x < sources.length; x++) {
-                        streams = streams.concat(await vmResolveGeneric(sources[x], {
+                    var linkResults = await Promise.all(linkPromises);
+                    var sources = [];
+                    for (var lr = 0; lr < linkResults.length; lr++) {
+                        sources = sources.concat(linkResults[lr]);
+                    }
+                    sources = uniqueBy(sources, function(item) { return item.source; }).slice(0, 4);
+                    var streamResults = await Promise.all(sources.map(function(src) {
+                        return vmResolveGeneric(src, {
                             sourceUrl: pageUrl,
-                            title: meta && meta.name || title,
+                            title: title,
                             type: "movie",
                             season: 1,
                             episode: 1
-                        }));
+                        }).catch(function() { return []; });
+                    }));
+                    var streams = [];
+                    for (var sr = 0; sr < streamResults.length; sr++) {
+                        streams = streams.concat(streamResults[sr]);
                     }
                     var deduped = dedupeStreams(streams);
                     if (deduped.length) return deduped;
                 }
                 if (type === "series" && !media.isMovie) {
                     var seriesGroups = vmQualityGroups(html, pageUrl);
-                    var seriesSources = [];
+                    var groupPromises = [];
                     for (var y = 0; y < seriesGroups.length; y++) {
-                        var group = seriesGroups[y];
-                        if (media.season && Number(group.season || 1) !== Number(media.season)) continue;
-                        var anchor = vmSelectSeriesIntermediateAnchor(group);
-                        if (!anchor || !anchor.href) continue;
-                        try {
-                            var seriesPage = await vmGetDocument(anchor.href, vmHeaders({ "Referer": pageUrl }), true);
-                            if (!seriesPage) continue;
-                            var episodeSources = vmExtractEpisodeVcloudSources(seriesPage.body, seriesPage.finalUrl || anchor.href, {
-                                title: group.title,
-                                quality: group.quality
-                            });
-                            for (var z = 0; z < episodeSources.length; z++) {
-                                if (media.episode && Number(episodeSources[z].episode) !== Number(media.episode)) continue;
-                                seriesSources.push(episodeSources[z]);
-                            }
-                        } catch (_) { }
+                        var sGroup = seriesGroups[y];
+                        if (media.season && Number(sGroup.season || 1) !== Number(media.season)) continue;
+                        var sAnchor = vmSelectSeriesIntermediateAnchor(sGroup);
+                        if (!sAnchor || !sAnchor.href) continue;
+                        (function(sg, sa) {
+                            groupPromises.push(
+                                vmGetDocument(sa.href, vmHeaders({ "Referer": pageUrl }), true)
+                                    .then(function(seriesPage) {
+                                        if (!seriesPage || !seriesPage.body) return [];
+                                        var epSources = vmExtractEpisodeVcloudSources(seriesPage.body, seriesPage.finalUrl || sa.href, {
+                                            title: sg.title,
+                                            quality: sg.quality
+                                        });
+                                        return epSources.filter(function(s) {
+                                            return !media.episode || Number(s.episode) === Number(media.episode);
+                                        });
+                                    })
+                                    .catch(function() { return []; })
+                            );
+                        })(sGroup, sAnchor);
+                    }
+                    var groupResults = await Promise.all(groupPromises);
+                    var seriesSources = [];
+                    for (var gr = 0; gr < groupResults.length; gr++) {
+                        seriesSources = seriesSources.concat(groupResults[gr]);
                     }
 
                     if (!seriesSources.length) {
                         var nexDirs = vmParseAnchors(html, pageUrl).filter(function(a) {
                             return /nexdrive\.fit/i.test(a.href);
                         });
-                        for (var nd = 0; nd < nexDirs.length; nd++) {
-                            try {
-                                var nexDoc = await vmGetDocument(nexDirs[nd].href, vmHeaders({ "Referer": pageUrl }), true);
-                                if (!nexDoc || !nexDoc.body) continue;
-                                var nre = /<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]\s*>([\s\S]*?)(?=<h[1-6]\b|$)/gi;
-                                var nmatch;
-                                while ((nmatch = nre.exec(nexDoc.body))) {
-                                    var epNum = Number(firstMatch(stripTags(nmatch[1]), [/Episodes?\s*:?\s*(\d+)/i]));
-                                    if (epNum && media.episode && epNum === Number(media.episode)) {
-                                        var nanchors = vmParseAnchors(nmatch[2], nexDoc.finalUrl || nexDirs[nd].href).filter(function(a) {
-                                            return /vcloud|fastdl|hubcloud/i.test(a.href);
-                                        });
-                                        for (var na = 0; na < nanchors.length; na++) {
-                                            seriesSources.push({
-                                                episode: epNum,
-                                                source: nanchors[na].href,
-                                                sourceName: "V-Cloud",
-                                                title: stripTags(nmatch[1]),
-                                                quality: qualityFromText(nmatch[1] + " " + nanchors[na].href) || 720,
-                                                referer: nexDoc.finalUrl || nexDirs[nd].href
+                        var nexPromises = nexDirs.map(function(nd) {
+                            return vmGetDocument(nd.href, vmHeaders({ "Referer": pageUrl }), true)
+                                .then(function(nexDoc) {
+                                    if (!nexDoc || !nexDoc.body) return [];
+                                    var found = [];
+                                    var nre = /<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]\s*>([\s\S]*?)(?=<h[1-6]\b|$)/gi;
+                                    var nmatch;
+                                    while ((nmatch = nre.exec(nexDoc.body))) {
+                                        var epNum = Number(firstMatch(stripTags(nmatch[1]), [/Episodes?\s*:?\s*(\d+)/i]));
+                                        if (epNum && media.episode && epNum === Number(media.episode)) {
+                                            var nanchors = vmParseAnchors(nmatch[2], nexDoc.finalUrl || nd.href).filter(function(a) {
+                                                return /vcloud|fastdl|hubcloud/i.test(a.href);
                                             });
+                                            for (var na = 0; na < nanchors.length; na++) {
+                                                found.push({
+                                                    episode: epNum,
+                                                    source: nanchors[na].href,
+                                                    sourceName: "V-Cloud",
+                                                    title: stripTags(nmatch[1]),
+                                                    quality: qualityFromText(nmatch[1] + " " + nanchors[na].href) || 720,
+                                                    referer: nexDoc.finalUrl || nd.href
+                                                });
+                                            }
                                         }
                                     }
-                                }
-                            } catch (_) {}
+                                    return found;
+                                })
+                                .catch(function() { return []; });
+                        });
+                        var nexResults = await Promise.all(nexPromises);
+                        for (var nr = 0; nr < nexResults.length; nr++) {
+                            seriesSources = seriesSources.concat(nexResults[nr]);
                         }
                     }
 
-                    seriesSources = uniqueBy(seriesSources, function(item) { return item.source; });
-                    var seriesStreams = [];
-                    for (var q = 0; q < seriesSources.length; q++) {
-                        seriesStreams = seriesStreams.concat(await vmResolveGeneric(seriesSources[q], {
+                    seriesSources = uniqueBy(seriesSources, function(item) { return item.source; }).slice(0, 4);
+                    var sStreamResults = await Promise.all(seriesSources.map(function(ss) {
+                        return vmResolveGeneric(ss, {
                             sourceUrl: pageUrl,
-                            title: meta && meta.name || title,
+                            title: title,
                             type: "series",
                             season: media.season || 1,
                             episode: media.episode || 1
-                        }));
+                        }).catch(function() { return []; });
+                    }));
+                    var seriesStreams = [];
+                    for (var ssr = 0; ssr < sStreamResults.length; ssr++) {
+                        seriesStreams = seriesStreams.concat(sStreamResults[ssr]);
                     }
                     var sDeduped = dedupeStreams(seriesStreams);
                     if (sDeduped.length) return sDeduped;
@@ -7009,7 +7084,7 @@
                             title: trim(rawTitle.replace(/\s*\(?\d{4}\)?.*$/i, "")) || rawTitle,
                             rawTitle: rawTitle,
                             year: yearMatch ? Number(yearMatch[1]) : undefined,
-                            url: absoluteUrl(mainUrl, itemSlug),
+                            url: absoluteUrl(mainUrl, itemSlug.replace(/\/+$/, "") + "/"),
                             type: /season|series|episode/i.test(rawTitle) ? "series" : "movie"
                         });
                     }
