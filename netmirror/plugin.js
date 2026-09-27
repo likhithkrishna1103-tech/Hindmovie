@@ -774,8 +774,11 @@
                         season: Number(sNum),
                         episode: Number(epNum),
                         runtime: epRuntime ? Number(epRuntime) : undefined,
+                        description: ep.desc ? String(ep.desc).trim() : (ep.d ? String(ep.d).trim() : undefined),
+                        posterUrl: config.episodePoster(epId),
                         dubStatus: "none",
-                        playbackPolicy: "none"
+                        playbackPolicy: "none",
+                        headers: { "Referer": BASE_URL + "/home" }
                     }));
                 }
 
@@ -804,8 +807,11 @@
                                         season: Number(sesNum),
                                         episode: Number(sepNum),
                                         runtime: sepRuntime ? Number(sepRuntime) : undefined,
+                                        description: sep.desc ? String(sep.desc).trim() : (sep.d ? String(sep.d).trim() : undefined),
+                                        posterUrl: config.episodePoster(sepId),
                                         dubStatus: "none",
-                                        playbackPolicy: "none"
+                                        playbackPolicy: "none",
+                                        headers: { "Referer": BASE_URL + "/home" }
                                     });
                                 }).filter(Boolean);
                             }
@@ -826,8 +832,11 @@
                     season: 1,
                     episode: 1,
                     runtime: duration ? Number(duration) : undefined,
+                    description: synopsis || undefined,
+                    posterUrl: config.poster(id),
                     dubStatus: "none",
-                    playbackPolicy: "none"
+                    playbackPolicy: "none",
+                    headers: { "Referer": BASE_URL + "/home" }
                 }));
             }
 
@@ -852,6 +861,9 @@
                 title: title,
                 url: url,
                 posterUrl: config.poster(id),
+                bannerUrl: config.background(id),
+                logoUrl: (data.logo || data.logourl || data.logo_url) ? String(data.logo || data.logourl || data.logo_url).trim() : undefined,
+                description: synopsis || undefined,
                 type: isSeries ? "series" : "movie",
                 year: year ? Number(year) : undefined,
                 score: rating ? Number(rating) : undefined,
