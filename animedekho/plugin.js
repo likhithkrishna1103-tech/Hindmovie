@@ -1051,6 +1051,16 @@
 
       // Case 1: MOVIE (No seasons list found)
       if (!hasSeasonsList) {
+        var movieEpisode = new Episode({
+          name: title,
+          url: cleanUrl,
+          season: 0,
+          episode: 0,
+          posterUrl: posterUrl,
+          description: description,
+          headers: { Referer: baseUrl + "/" },
+        });
+
         cb({
           success: true,
           data: new MultimediaItem({
@@ -1062,6 +1072,7 @@
             description: description,
             year: year,
             tags: tags,
+            episodes: [movieEpisode],
             recommendations: recommendations,
             headers: { Referer: baseUrl + "/" },
           }),
@@ -1251,11 +1262,13 @@
       var termMatch = bodyClass.match(/(?:term|postid)-(\d+)/i);
       var termId = termMatch ? termMatch[1] : "";
 
-      // 3) Concurrently query server endpoints: /?trdekho=${i}&trid=${termId}&trtype=2 (and trtype=1)
+      // 3) Concurrently query server endpoints: /?trdekho=${i}&trid=${termId}&trtype=2 (or trtype=1 for movies)
       if (termId) {
+        var isMovie = /movie/i.test(cleanUrl) || /single-movies/i.test(bodyClass);
+        var primaryTrType = isMovie ? 1 : 2;
         var iterations = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         var queryPromises = iterations.map(function (i) {
-          var trUrl = baseUrl + "/?trdekho=" + i + "&trid=" + termId + "&trtype=2";
+          var trUrl = baseUrl + "/?trdekho=" + i + "&trid=" + termId + "&trtype=" + primaryTrType;
           return getText(trUrl, { Referer: cleanUrl, Cookie: "toronites_server=vidstream" })
             .then(function (trHtml) {
               var sIframeMatch = trHtml.match(/<iframe\b[^>]*src=["']([^"']+)["']/i);
@@ -1272,6 +1285,28 @@
             serverUrls.push(sUrl);
           }
         });
+
+        // Fallback: If no servers were found with primary trtype, try secondary trtype
+        if (serverUrls.length === 0) {
+          var secondaryTrType = isMovie ? 2 : 1;
+          var fallbackPromises = iterations.map(function (i) {
+            var trUrl = baseUrl + "/?trdekho=" + i + "&trid=" + termId + "&trtype=" + secondaryTrType;
+            return getText(trUrl, { Referer: cleanUrl, Cookie: "toronites_server=vidstream" })
+              .then(function (trHtml) {
+                var sIframeMatch = trHtml.match(/<iframe\b[^>]*src=["']([^"']+)["']/i);
+                return sIframeMatch ? sIframeMatch[1] : null;
+              })
+              .catch(function () {
+                return null;
+              });
+          });
+          var fallbackResults = await Promise.all(fallbackPromises);
+          fallbackResults.forEach(function (sUrl) {
+            if (sUrl && serverUrls.indexOf(sUrl) === -1) {
+              serverUrls.push(sUrl);
+            }
+          });
+        }
       }
 
       // Deduplicate server URLs
