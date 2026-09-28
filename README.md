@@ -17,7 +17,7 @@ If you find this project helpful, consider supporting its development!
 | :--- | :--- | :--- | :--- | :--- |
 | Anikage | 11 | Working ✅️ | Anime | en, ja |
 | Anilight | 1 | Working ✅️ | Anime | en, ja |
-| Animedekho | 1 | Working ✅️ | Anime | hi, ta, te, en |
+| Animedekho | 2 | Working ✅️ | Anime | hi, ta, te, en |
 | AnimeDubHindi | 5 | Working ✅️ | Anime | hi, en, ja, ta, te, ml, bn, kn |
 | AnimeWave + AniKoto | 10 | Working ✅️ | Anime | en, ja |
 | AniSuge | 4 | Working ✅️ | Anime | en, ja |
@@ -28,6 +28,7 @@ If you find this project helpful, consider supporting its development!
 | HindMoviez | 17 | Working ✅️ | Movies, Series | hi, en, ta, te, ml, kn |
 | Live Sports 🏏 | 11 | Working ✅️ | LiveTv | en, hi |
 | Movies4U | 52 | Working ✅️ | Movies | hi, en, ta, te, ml, kn |
+| Mplayer | 1 | Working ✅️ | Movies, Series | hi, en, te |
 | Netmirror | 5 | Working ✅️ | Movies, TV Shows | en, hi |
 | NetMirrorMobile | 17 | Working ✅️ | Movies, Series, Anime | en, hi, ta, te, ml, kn, bn, mr, pa, gu |
 | PlayZTV | 13 | Working ✅️ | Livestream | en, hi, ta, te, ml, kn, bn, mr, pa |
