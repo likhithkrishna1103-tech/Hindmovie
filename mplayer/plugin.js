@@ -95,7 +95,7 @@
     Referer: BASE_URL + "/",
   };
 
-  var cachedUserId = null;
+  var cachedUserId = SessionTracker.generateUuid();
 
   // ========== Utility Functions ==========
   function toErrorMessage(error) {
@@ -134,43 +134,76 @@
     return headers;
   }
 
-  function request(url, options) {
+  function extractResponseBody(res) {
+    if (res == null) return "";
+    if (typeof res === "string") return res;
+    if (typeof res.body === "string") return res.body;
+    if (res.body && typeof res.body === "object") return res.body;
+    if (typeof res.text === "string") return res.text;
+    if (res.text && typeof res.text === "object") return res.text;
+    if (typeof res.data === "string") return res.data;
+    if (res.data && typeof res.data === "object") return res.data;
+    return res;
+  }
+
+  async function request(url, options) {
     url = String(url || "").trim();
     options = options || {};
     var method = options.method || "GET";
     var headers = Object.assign({}, HEADERS, options.headers || {});
-    var body = options.body;
+    var body = options.body !== undefined ? options.body : "";
     var allowRedirects = options.allowRedirects !== false;
     var timeout = options.timeout || 20000;
 
-    if (
-      method === "GET" &&
-      (allowRedirects || typeof fetch !== "function") &&
-      typeof http_get === "function"
-    ) {
-      return Promise.resolve(http_get(url, headers)).then(function (res) {
-        return {
-          status: res && typeof res.status !== "undefined" ? res.status : 200,
-          body: res && typeof res.body !== "undefined" ? res.body : (res && res.text) || "",
-          headers: parseHeaders(res && res.headers),
-          finalUrl: (res && (res.url || res.finalUrl)) || url,
-        };
-      });
+    if (method === "GET" && typeof http_get === "function") {
+      try {
+        var res = await Promise.resolve(http_get(url, headers));
+        if (
+          res &&
+          (res.body || res.text || res.data || res.status || res.statusCode)
+        ) {
+          return {
+            status: res.status || res.statusCode || 200,
+            body: extractResponseBody(res),
+            headers: parseHeaders(res.headers),
+            finalUrl: res.url || res.finalUrl || url,
+          };
+        }
+      } catch (_) {}
     }
 
-    if (
-      method === "POST" &&
-      (allowRedirects || typeof fetch !== "function") &&
-      typeof http_post === "function"
-    ) {
-      return Promise.resolve(http_post(url, body, headers)).then(function (res) {
-        return {
-          status: res && typeof res.status !== "undefined" ? res.status : 200,
-          body: res && typeof res.body !== "undefined" ? res.body : (res && res.text) || "",
-          headers: parseHeaders(res && res.headers),
-          finalUrl: (res && (res.url || res.finalUrl)) || url,
-        };
-      });
+    if (method === "POST" && typeof http_post === "function") {
+      // 1. Try standard Flutter bridge order: http_post(url, headers, body)
+      try {
+        var p1 = await Promise.resolve(http_post(url, headers, body));
+        if (
+          p1 &&
+          (p1.body || p1.text || p1.data || p1.status || p1.statusCode)
+        ) {
+          return {
+            status: p1.status || p1.statusCode || 200,
+            body: extractResponseBody(p1),
+            headers: parseHeaders(p1.headers),
+            finalUrl: p1.url || p1.finalUrl || url,
+          };
+        }
+      } catch (_) {}
+
+      // 2. Try alternative order: http_post(url, body, headers)
+      try {
+        var p2 = await Promise.resolve(http_post(url, body, headers));
+        if (
+          p2 &&
+          (p2.body || p2.text || p2.data || p2.status || p2.statusCode)
+        ) {
+          return {
+            status: p2.status || p2.statusCode || 200,
+            body: extractResponseBody(p2),
+            headers: parseHeaders(p2.headers),
+            finalUrl: p2.url || p2.finalUrl || url,
+          };
+        }
+      } catch (_) {}
     }
 
     if (typeof fetch === "function") {
@@ -180,9 +213,15 @@
       var fetchOptions = {
         method: method,
         headers: headers,
-        body: body,
         redirect: allowRedirects ? "follow" : "manual",
       };
+      if (
+        body &&
+        (method === "POST" || method === "PUT" || method === "PATCH")
+      ) {
+        fetchOptions.body =
+          typeof body === "string" ? body : JSON.stringify(body);
+      }
       if (controller) fetchOptions.signal = controller.signal;
 
       var fetchPromise = fetch(url, fetchOptions).then(function (res) {
@@ -227,27 +266,6 @@
 
   async function ensureUserId() {
     if (cachedUserId) return cachedUserId;
-    try {
-      var res = await request(BASE_URL + "/", {
-        headers: HEADERS,
-      });
-      var setCookie =
-        res.headers["set-cookie"] ||
-        res.headers["Set-Cookie"] ||
-        res.headers["set_cookie"];
-      if (setCookie) {
-        var cookieStr = Array.isArray(setCookie)
-          ? setCookie.join("; ")
-          : String(setCookie);
-        var match = cookieStr.match(/UserID=([^;,\s]+)/i);
-        if (match && match[1]) {
-          cachedUserId = match[1].trim();
-          return cachedUserId;
-        }
-      }
-    } catch (_) {}
-
-    // Fallback: generate a persistent session UUID if cookie retrieval is restricted
     cachedUserId = SessionTracker.generateUuid();
     return cachedUserId;
   }
@@ -497,122 +515,145 @@
    */
   async function search(query, cb) {
     try {
+      var cleanQuery = String(query || "").trim();
+      if (!cleanQuery) {
+        if (typeof cb === "function") cb({ success: true, data: [] });
+        return { success: true, data: [] };
+      }
+
       var userId = await ensureUserId();
       var searchUrl =
         WEB_API +
         "/search/resultv2?query=" +
-        encodeURIComponent(query) +
+        encodeURIComponent(cleanQuery) +
         getEndParam(userId);
 
       var res = await request(searchUrl, {
         method: "POST",
-        headers: Object.assign({}, HEADERS, {
+        headers: {
           "Content-Type": "application/json",
-        }),
+          Accept: "application/json, text/plain, */*",
+          "User-Agent": DEFAULT_USER_AGENT,
+          Referer: "https://www.mxplayer.in/",
+          Origin: "https://www.mxplayer.in",
+        },
         body: "{}",
       });
 
-      var data = parseJsonSafe(res.body, {});
-      var sections = Array.isArray(data.sections) ? data.sections : [];
-      var results = [];
+      var rawBody = res ? res.body || res.data || res.text || res : {};
+      var data = parseJsonSafe(rawBody, {});
 
-      for (var i = 0; i < sections.length; i++) {
-        var section = sections[i];
-        var items = Array.isArray(section.items) ? section.items : [];
-        for (var j = 0; j < items.length; j++) {
-          var item = items[j];
-          var title = item.title || "";
-          var description = item.description || "";
-          var type = item.type || "";
-          var shareUrl = item.shareUrl || "";
-          var languages = Array.isArray(item.languages) ? item.languages : [];
-
-          var portraitLargeImageUrl = "";
-          if (Array.isArray(item.imageInfo)) {
-            for (var k = 0; k < item.imageInfo.length; k++) {
-              var img = item.imageInfo[k];
-              if (img && img.type === "portrait_large" && img.url) {
-                portraitLargeImageUrl = normalizeUrl(img.url);
-                break;
-              }
-            }
-            if (
-              !portraitLargeImageUrl &&
-              item.imageInfo.length > 0 &&
-              item.imageInfo[0].url
-            ) {
-              portraitLargeImageUrl = normalizeUrl(item.imageInfo[0].url);
-            }
+      var allItems = [];
+      if (Array.isArray(data.sections)) {
+        for (var s = 0; s < data.sections.length; s++) {
+          var section = data.sections[s];
+          if (section && Array.isArray(section.items)) {
+            allItems = allItems.concat(section.items);
           }
-
-          var alternativeStream = null;
-          if (item.stream && typeof item.stream === "object") {
-            var streamObj = item.stream;
-            var thirdParty = streamObj.thirdParty;
-            var mxplay = streamObj.mxplay;
-            var hlsObj = streamObj.hls || (mxplay ? mxplay.hls : null);
-            var dashObj = streamObj.dash || (mxplay ? mxplay.dash : null);
-
-            var hlsRaw =
-              bestVariant(hlsObj) ||
-              (thirdParty && thirdParty.hlsUrl ? thirdParty.hlsUrl : null);
-            var dashRaw =
-              bestVariant(dashObj) ||
-              (thirdParty && thirdParty.dashUrl ? thirdParty.dashUrl : null);
-
-            var hlsUrl = normalizeUrl(hlsRaw);
-            var dashUrl = normalizeUrl(dashRaw);
-
-            var urls = [];
-            if (hlsUrl && urls.indexOf(hlsUrl) === -1) urls.push(hlsUrl);
-            if (dashUrl && urls.indexOf(dashUrl) === -1) urls.push(dashUrl);
-
-            if (urls.length === 1) {
-              alternativeStream = urls[0];
-            } else if (urls.length > 1) {
-              alternativeStream = JSON.stringify(urls);
-            }
-          }
-
-          var isMovie =
-            type && String(type).toLowerCase().indexOf("movie") !== -1;
-          var mediaType = isMovie ? "movie" : "series";
-
-          var loadData = {
-            title: title,
-            titleContentImageInfo: item.titleContentImageInfo || null,
-            bigpic: null,
-            tvType: type,
-            stream: null,
-            description: description,
-            shareUrl: shareUrl,
-            alternativestream: alternativeStream,
-            alternativeposter: portraitLargeImageUrl,
-            languages: languages,
-          };
-
-          results.push(
-            new MultimediaItem({
-              title: title,
-              url: JSON.stringify(loadData),
-              posterUrl: portraitLargeImageUrl || "",
-              bannerUrl: portraitLargeImageUrl || "",
-              type: mediaType,
-              description: description,
-              headers: { Referer: BASE_URL + "/" },
-            }),
-          );
         }
+      } else if (Array.isArray(data.items)) {
+        allItems = data.items;
       }
 
-      Analytics.logEvent("mplayer_search", { query: query, count: results.length });
-      cb({ success: true, data: results });
+      var results = [];
+      for (var j = 0; j < allItems.length; j++) {
+        var item = allItems[j];
+        if (!item || !item.title) continue;
+
+        var title = item.title || "";
+        var description = item.description || "";
+        var type = item.type || "";
+        var shareUrl = item.shareUrl || "";
+        var languages = Array.isArray(item.languages) ? item.languages : [];
+
+        var portraitLargeImageUrl = "";
+        if (Array.isArray(item.imageInfo)) {
+          for (var k = 0; k < item.imageInfo.length; k++) {
+            var img = item.imageInfo[k];
+            if (img && img.type === "portrait_large" && img.url) {
+              portraitLargeImageUrl = normalizeUrl(img.url);
+              break;
+            }
+          }
+          if (
+            !portraitLargeImageUrl &&
+            item.imageInfo.length > 0 &&
+            item.imageInfo[0].url
+          ) {
+            portraitLargeImageUrl = normalizeUrl(item.imageInfo[0].url);
+          }
+        }
+
+        var alternativeStream = null;
+        if (item.stream && typeof item.stream === "object") {
+          var streamObj = item.stream;
+          var thirdParty = streamObj.thirdParty;
+          var mxplay = streamObj.mxplay;
+          var hlsObj = streamObj.hls || (mxplay ? mxplay.hls : null);
+          var dashObj = streamObj.dash || (mxplay ? mxplay.dash : null);
+
+          var hlsRaw =
+            bestVariant(hlsObj) ||
+            (thirdParty && thirdParty.hlsUrl ? thirdParty.hlsUrl : null);
+          var dashRaw =
+            bestVariant(dashObj) ||
+            (thirdParty && thirdParty.dashUrl ? thirdParty.dashUrl : null);
+
+          var hlsUrl = normalizeUrl(hlsRaw);
+          var dashUrl = normalizeUrl(dashRaw);
+
+          var urls = [];
+          if (hlsUrl && urls.indexOf(hlsUrl) === -1) urls.push(hlsUrl);
+          if (dashUrl && urls.indexOf(dashUrl) === -1) urls.push(dashUrl);
+
+          if (urls.length === 1) {
+            alternativeStream = urls[0];
+          } else if (urls.length > 1) {
+            alternativeStream = JSON.stringify(urls);
+          }
+        }
+
+        var isMovie =
+          type && String(type).toLowerCase().indexOf("movie") !== -1;
+        var mediaType = isMovie ? "movie" : "series";
+
+        var loadData = {
+          title: title,
+          titleContentImageInfo: item.titleContentImageInfo || null,
+          bigpic: null,
+          tvType: type,
+          stream: null,
+          description: description,
+          shareUrl: shareUrl,
+          alternativestream: alternativeStream,
+          alternativeposter: portraitLargeImageUrl,
+          languages: languages,
+        };
+
+        results.push(
+          new MultimediaItem({
+            title: title,
+            url: JSON.stringify(loadData),
+            posterUrl: portraitLargeImageUrl || "",
+            bannerUrl: portraitLargeImageUrl || "",
+            type: mediaType,
+            description: description,
+            headers: { Referer: BASE_URL + "/" },
+          }),
+        );
+      }
+
+      Analytics.logEvent("mplayer_search", { query: cleanQuery, count: results.length });
+      if (typeof cb === "function") cb({ success: true, data: results });
+      return { success: true, data: results };
     } catch (e) {
-      cb({
+      var errRes = {
         success: false,
         errorCode: "SEARCH_ERROR",
         message: toErrorMessage(e),
-      });
+      };
+      if (typeof cb === "function") cb(errRes);
+      return errRes;
     }
   }
 
