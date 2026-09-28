@@ -23,17 +23,17 @@ If you find this project helpful, consider supporting its development!
 | AniSuge | 4 | Working ✅️ | Anime | en, ja |
 | Castle TV | 9 | Working ✅️ | Movies, Series | en, hi |
 | Cinefreak | 12 | Working ✅️ | Others | en, hi, ta, te, ml, kn, bn |
-| CineStream | 28 | Working ✅️ | Movies, Series, Anime | en, hi, ja |
+| CineStream | 28 | 🛠️ plugin is under Maintenance and will be fixed soon | Movies, Series, Anime | en, hi, ja |
 | HiAnime | 3 | Working ✅️ | Anime | en, ja |
 | HindMoviez | 17 | Working ✅️ | Movies, Series | hi, en, ta, te, ml, kn |
 | Live Sports 🏏 | 11 | Working ✅️ | LiveTv | en, hi |
 | Movies4U | 52 | Working ✅️ | Movies | hi, en, ta, te, ml, kn |
 | Mplayer | 1 | Working ✅️ | Movies, Series | hi, en, te |
 | Netmirror | 5 | Working ✅️ | Movies, TV Shows | en, hi |
-| NetMirrorMobile | 17 | Working ✅️ | Movies, Series, Anime | en, hi, ta, te, ml, kn, bn, mr, pa, gu |
+| NetMirrorMobile | 17 | Working ✅️ but you may face few errors based on your isp provider or geo-blocking in that case using a vpn is recommended | Movies, Series, Anime | en, hi, ta, te, ml, kn, bn, mr, pa, gu |
 | PlayZTV | 13 | Working ✅️ | Livestream | en, hi, ta, te, ml, kn, bn, mr, pa |
 | VegaMovies & RogMovies | 4 | Working ✅️ | Movies, series | hi, en, te, ta, ma |
-| YouTube | 34 | Working ✅️ | Others | te, ta, hi, ml, kn, en |
+| YouTube | 34 | you can watch only upto 360p | Others | te, ta, hi, ml, kn, en |
 <!-- PLUGINS_TABLE_END -->
 
 ---
