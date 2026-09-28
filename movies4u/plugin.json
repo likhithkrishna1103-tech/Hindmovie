@@ -1,7 +1,7 @@
 {
   "packageName": "com.igris.repo.movies4u",
   "name": "Movies4U",
-  "version": 52,
+  "version": 53,
   "baseUrl": "https://new1.movies4u.garden",
   "description": "Movie picks with straightforward stream links.",
   "authors": ["IGRIS"],
