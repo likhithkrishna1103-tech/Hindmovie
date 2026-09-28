@@ -237,8 +237,8 @@
   {
     "packageName": "com.igris.repo.movies4u",
     "name": "Movies4U",
-    "version": 51,
-    "baseUrl": "https://new7.movies4u.clinic",
+    "version": 52,
+    "baseUrl": "https://new1.movies4u.garden",
     "description": "Movie picks with straightforward stream links.",
     "authors": [
       "IGRIS"
@@ -257,7 +257,7 @@
     "domains": [
       {
         "name": "movies4u.clinic (Primary)",
-        "url": "https://new6.movies4u.clinic"
+        "url": "https://new1.movies4u.garden"
       }
     ],
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.movies4u.sky"
