@@ -57,6 +57,36 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.anilight.sky"
   },
   {
+    "packageName": "com.igris.repo.animedekho",
+    "name": "Animedekho",
+    "version": 1,
+    "baseUrl": "https://animedekho.app",
+    "description": "Anime Dekho - Stream anime in Hindi, Tamil, Telugu, and English.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "hi",
+      "ta",
+      "te",
+      "en"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "domains": [
+      {
+        "name": "animedekho.app (Primary)",
+        "url": "https://animedekho.app"
+      },
+      {
+        "name": "animedekho.cc (Mirror)",
+        "url": "https://animedekho.cc"
+      }
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animedekho.sky"
+  },
+  {
     "packageName": "com.igris.repo.animedubhindi",
     "name": "AnimeDubHindi",
     "version": 5,
