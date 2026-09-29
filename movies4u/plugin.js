@@ -1041,46 +1041,110 @@
       var title = stripTags(match[1]);
       var seasonMatch = title.match(/Season\s*(\d+)/i);
       if (!seasonMatch) continue;
-      out.push({
-        season: Number(seasonMatch[1]),
-        links: parseAnchors(match[2], base)
-          .filter(function (item) {
-            return !/zip/i.test(String((item && item.text) || ""));
-          })
-          .map(function (item) {
-            return item.href;
-          })
-          .filter(Boolean),
-      });
+      var qMatch = title.match(/(\d{3,4})[pP]/);
+      var quality = qMatch ? Number(qMatch[1]) : getQualityFromText(title);
+      var links = parseAnchors(match[2], base)
+        .filter(function (item) {
+          var text = String((item && item.text) || "");
+          var href = String((item && item.href) || "");
+          if (/zip/i.test(text) || /zip/i.test(href)) return false;
+          if (/gdflix/i.test(href) || /gdflix/i.test(text)) return false;
+          if (/t\.me|telegram/i.test(href)) return false;
+          return true;
+        })
+        .map(function (item) {
+          return item.href;
+        })
+        .filter(Boolean);
+      if (links.length) {
+        out.push({
+          season: Number(seasonMatch[1]),
+          quality: quality,
+          title: title,
+          links: links,
+        });
+      }
     }
 
     return out;
   }
 
-  function getEpisodeBlocks(html, base) {
+  function getEpisodeBlocks(html, base, defaultQuality) {
     var blocks = [];
-    var regex = /<h5\b[^>]*>([\s\S]*?)<\/h5>([\s\S]*?)(?=<h5\b|$)/gi;
+    var regex =
+      /<(h[1-6]|div|p|strong|b)\b[^>]*>([^<]*?episodes?[^<]*?)<\/\1>\s*(?:[\s\S]*?)<div\b[^>]*class=["'][^"']*downloads-btns-div[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi;
     var match;
     while ((match = regex.exec(String(html || "")))) {
-      var title = stripTags(match[1]);
-      var episodeMatch = title.match(/Episodes:\s*(\d+)/i);
-      if (!episodeMatch) continue;
-      blocks.push({
-        episode: Number(episodeMatch[1]),
-        links: parseAnchors(match[2], base)
+      var title = stripTags(match[2]);
+      var epMatch = title.match(/episodes?:\s*(\d+)(?:\s*(?:-|to)\s*(\d+))?/i);
+      if (!epMatch) continue;
+
+      var startEp = Number(epMatch[1]);
+      var endEp = epMatch[2] ? Number(epMatch[2]) : startEp;
+
+      var links = parseAnchors(match[3], base)
+        .filter(function (item) {
+          var href = String((item && item.href) || "");
+          var text = String((item && item.text) || "");
+          if (!href || isIgnoredAnchorLink(href)) return false;
+          if (/zip/i.test(text)) return false;
+          if (/gdflix/i.test(href) || /gdflix/i.test(text)) return false;
+          return true;
+        })
+        .map(function (item) {
+          return item.href;
+        })
+        .filter(Boolean);
+
+      if (links.length) {
+        for (var ep = startEp; ep <= endEp; ep++) {
+          blocks.push({
+            episode: ep,
+            quality: defaultQuality || 0,
+            links: links,
+          });
+        }
+      }
+    }
+
+    if (!blocks.length) {
+      var fallbackRegex =
+        /<h[45]\b[^>]*>([\s\S]*?)<\/h[45]>([\s\S]*?)(?=<h[45]\b|$)/gi;
+      while ((match = fallbackRegex.exec(String(html || "")))) {
+        var fallbackTitle = stripTags(match[1]);
+        var fallbackEpMatch = fallbackTitle.match(
+          /episodes?:\s*(\d+)(?:\s*(?:-|to)\s*(\d+))?/i,
+        );
+        if (!fallbackEpMatch) continue;
+        var fStart = Number(fallbackEpMatch[1]);
+        var fEnd = fallbackEpMatch[2] ? Number(fallbackEpMatch[2]) : fStart;
+
+        var fLinks = parseAnchors(match[2], base)
           .filter(function (item) {
             var href = String((item && item.href) || "");
             var text = String((item && item.text) || "");
             if (!href || isIgnoredAnchorLink(href)) return false;
             if (/zip/i.test(text)) return false;
+            if (/gdflix/i.test(href) || /gdflix/i.test(text)) return false;
             return true;
           })
           .map(function (item) {
             return item.href;
           })
-          .filter(Boolean),
-      });
+          .filter(Boolean);
+
+        if (fLinks.length) {
+          for (var fEp = fStart; fEp <= fEnd; fEp++) {
+            blocks.push({
+              episode: fEp,
+              quality: defaultQuality || 0,
+              links: fLinks,
+            });
+          }
+        }
+      }
     }
+
     return blocks;
   }
 
@@ -1994,7 +2058,8 @@
       var section = blocks.length ? blocks.join("\n") : html;
       var anchors = parseAnchors(section, base).filter(function (anchor) {
         var href = String((anchor && anchor.href) || "");
-        if (!href || isIgnoredAnchorLink(href)) return false;
+        if (!href || isIgnoredAnchorLink(href) || /gdflix/i.test(href))
+          return false;
         return true;
       });
 
@@ -2298,7 +2363,7 @@
     return resolveExtractorUrl(href, "");
   }
 
-  function resolveHubCloud(url, refererLabel) {
+  function resolveHubCloud(url, refererLabel, knownQuality) {
     var ref = refererLabel || "HubCloud";
     var refHeaders = defaultHeaders({ Referer: baseOrigin(url) + "/" });
     var hrefPromise = /hubcloud\.php/i.test(url)
@@ -2325,11 +2390,12 @@
           ]),
         );
         var quality =
+          knownQuality ||
           getQualityFromText(header) ||
           (header.match(/(\d{3,4})[pP]/)
             ? Number(header.match(/(\d{3,4})[pP]/)[1])
             : 0) ||
-          2160;
+          (knownQuality ? 0 : 2160);
         var extras = [];
         var clean = cleanHubTitle(header);
         if (clean) extras.push("[" + clean + "]");
@@ -2340,23 +2406,54 @@
           isRelevantHubCloudAnchor,
         );
 
-        return safeAll(
-          anchors.map(function (anchor) {
-            try {
-              return resolveHubCloudAnchor(
-                anchor,
-                ref,
-                suffix,
-                quality,
-                jsHrefs,
-              ).catch(function () {
-                return [];
-              });
-            } catch (_) {
-              return Promise.resolve([]);
-            }
-          }),
-        );
+        var fastAnchors = [];
+        var slowAnchors = [];
+        anchors.forEach(function (anchor) {
+          var label = String(anchor.text || "").toLowerCase();
+          var href = String(
+            (anchor.id && jsHrefs && jsHrefs[anchor.id]) || anchor.href || "",
+          );
+          if (
+            /fsl|pixeldra|pixelserver|pixel server/i.test(label) ||
+            /\.r2\.cloudflarestorage\.com|\.r2\.dev/i.test(href)
+          ) {
+            fastAnchors.push(anchor);
+          } else {
+            slowAnchors.push(anchor);
+          }
+        });
+
+        var fastPromises = fastAnchors.map(function (anchor) {
+          try {
+            return resolveHubCloudAnchor(
+              anchor,
+              ref,
+              suffix,
+              quality,
+              jsHrefs,
+            ).catch(function () {
+              return [];
+            });
+          } catch (_) {
+            return Promise.resolve([]);
+          }
+        });
+
+        var slowPromises = slowAnchors.map(function (anchor) {
+          try {
+            return withTimeout(
+              resolveHubCloudAnchor(anchor, ref, suffix, quality, jsHrefs),
+              4000,
+              "HubCloudSlowAnchor",
+            ).catch(function () {
+              return [];
+            });
+          } catch (_) {
+            return Promise.resolve([]);
+          }
+        });
+
+        return safeAll(fastPromises.concat(slowPromises));
       });
     });
   }
@@ -2800,8 +2897,8 @@
 
   // GDFlix extractor removed by request
 
-  function resolveHubCloudWithFallback(url, refererLabel) {
-    return resolveHubCloud(url, refererLabel)
+  function resolveHubCloudWithFallback(url, refererLabel, knownQuality) {
+    return resolveHubCloud(url, refererLabel, knownQuality)
       .then(function (results) {
         return results && results.length ? results : [];
       })
@@ -3066,7 +3163,7 @@
       });
   }
 
-  function resolveExtractorUrl(url, refererLabel) {
+  function resolveExtractorUrl(url, refererLabel, knownQuality) {
     if (!url) return Promise.resolve([]);
     if (isDirectMediaUrl(url))
       return Promise.resolve([
@@ -3074,7 +3171,7 @@
           url,
           refererLabel || "Direct",
           {},
-          getQualityFromText(url),
+          knownQuality || getQualityFromText(url),
         ),
       ]);
     if (looksLikeGoogleDriveUrl(url)) return resolveGoogleDrive(url);
@@ -3084,7 +3181,7 @@
       return withTimeout(resolveFilesdl(url), 20000, "FilesDL");
     if (/hubcloud\.|hubcloud\.php|shikshakdaak/i.test(url))
       return withTimeout(
-        resolveHubCloudWithFallback(url, refererLabel || "HubCloud"),
+        resolveHubCloudWithFallback(url, refererLabel || "HubCloud", knownQuality),
         25000,
         "HubCloud",
       );
@@ -3093,7 +3190,7 @@
     if (/buzzserver|fuckingfast/i.test(url))
       return withTimeout(
         resolveBuzzserver(url, refererLabel || "BuzzServer"),
-        25000,
+        15000,
         "BuzzServer",
       );
     if (/filepress\.|filebee|fpgo\./i.test(url))
@@ -3101,7 +3198,12 @@
     // GDFlix route removed
     if (/validate\.multiup2\.workers\.dev|multiup/i.test(url))
       return withTimeout(
-        resolveMultiupMirror(url, "", "", getQualityFromText(url)),
+        resolveMultiupMirror(
+          url,
+          "",
+          "",
+          knownQuality || getQualityFromText(url),
+        ),
         25000,
         "MultiUp",
       );
@@ -3118,8 +3220,8 @@
 
   function sortStreams(streams) {
     return streams.slice().sort(function (a, b) {
-      var qa = getQualityFromText((a && a.source) || "");
-      var qb = getQualityFromText((b && b.source) || "");
+      var qa = (a && a.quality) || getQualityFromText((a && a.source) || "");
+      var qb = (b && b.quality) || getQualityFromText((b && b.source) || "");
       return qb - qa;
     });
   }
@@ -3469,6 +3571,7 @@
                       episodeBlocks: getEpisodeBlocks(
                         seasonHtml,
                         baseOrigin(qualityLink),
+                        section.quality,
                       ),
                     };
                   })
@@ -3512,9 +3615,12 @@
                 var key =
                   String(section.season) + "_" + String(epBlock.episode);
                 if (!episodeLinksMap[key]) episodeLinksMap[key] = [];
-                episodeLinksMap[key] = episodeLinksMap[key].concat(
-                  epBlock.links,
-                );
+                for (var lIdx = 0; lIdx < epBlock.links.length; lIdx++) {
+                  episodeLinksMap[key].push({
+                    url: epBlock.links[lIdx],
+                    quality: epBlock.quality || section.quality || 0,
+                  });
+                }
               }
             } else {
               var fallbackEpisodes = seasonResult.seasonEpisodeNumbers.length
@@ -3530,7 +3636,10 @@
                   String(section.season) + "_" + String(fallbackEpisode);
                 if (!episodeLinksMap[fallbackKey])
                   episodeLinksMap[fallbackKey] = [];
-                episodeLinksMap[fallbackKey].push(resolvedBlock.qualityLink);
+                episodeLinksMap[fallbackKey].push({
+                  url: resolvedBlock.qualityLink,
+                  quality: section.quality || 0,
+                });
               }
             }
           }
@@ -3641,7 +3750,9 @@
             url: buildLoadPayload(
               sourceUrl,
               uniqueBy(episodeLinksMap[key], function (item) {
-                return item;
+                var u = typeof item === "string" ? item : (item && item.url);
+                var q = (item && item.quality) || 0;
+                return String(u || "") + "|" + q;
               }),
               {
                 title: title,
@@ -3722,10 +3833,16 @@
       }
 
       var resolved = await safeAll(
-        (payload.links || []).map(function (link) {
-          var quality = getQualityFromText(
-            String(link || "") + " " + String(payload.title || ""),
-          );
+        (payload.links || []).map(function (linkItem) {
+          var link =
+            typeof linkItem === "string" ? linkItem : (linkItem && linkItem.url);
+          var itemQuality =
+            (linkItem && typeof linkItem === "object" && linkItem.quality) || 0;
+          var quality =
+            itemQuality ||
+            getQualityFromText(
+              String(link || "") + " " + String(payload.title || ""),
+            );
           var rawFallback = [
             buildStreamResult(
               link,
@@ -3739,7 +3856,7 @@
           if (isDirectMediaUrl(link) || looksLikeGoogleDriveUrl(link)) {
             return Promise.resolve(rawFallback);
           }
-          return resolveExtractorUrl(link, "Movies4u")
+          return resolveExtractorUrl(link, "Movies4u", quality)
             .then(function (results) {
               if (results && results.length) return results;
               if (isRawExtractorCandidate(link)) return rawFallback;
