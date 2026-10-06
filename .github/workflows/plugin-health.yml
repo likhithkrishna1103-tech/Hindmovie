@@ -1,0 +1,86 @@
+name: Manual Plugin Health Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      search_query:
+        description: 'Optional search query; blank uses plugin config or a home item title'
+        default: ''
+        type: string
+      max_items:
+        description: 'Home samples per type: 1 tests one movie and one series'
+        default: '1'
+        type: choice
+        options: ['1', '2', '3', '4', '5']
+      max_streams:
+        description: 'Streams checked per sampled title: 0 means every returned stream'
+        default: '0'
+        type: string
+      decode_seconds:
+        description: 'Seconds of media decoded per stream; 0 checks tracks only'
+        default: '3'
+        type: choice
+        options: ['3', '5', '10', '0']
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    name: Select plugins
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      plugins: ${{ steps.select.outputs.plugins }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: select
+        name: Validate selection
+        env:
+          HEALTH_PLUGINS: all
+        run: python3 scripts/plugin_health.py --list --github-output
+
+  test:
+    name: Test ${{ matrix.plugin }}
+    needs: select
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        plugin: ${{ fromJSON(needs.select.outputs.plugins) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test tools
+        run: |
+          npm install -g skystream-cli@1.9.3
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Verify runner
+        run: python3 -m unittest discover -s tests -p 'test_plugin_health.py' -v
+      - name: Test plugin functions and streams
+        env:
+          HEALTH_PLUGINS: ${{ matrix.plugin }}
+          HEALTH_QUERY: ${{ inputs.search_query }}
+          HEALTH_MAX_ITEMS: ${{ inputs.max_items }}
+          HEALTH_MAX_STREAMS: ${{ inputs.max_streams }}
+          HEALTH_DECODE_SECONDS: ${{ inputs.decode_seconds }}
+        run: python3 scripts/plugin_health.py
+      - name: Upload results and CLI responses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-health-${{ matrix.plugin }}-${{ github.run_id }}
+          path: test-results/plugin-health/
+          if-no-files-found: warn
+          retention-days: 7

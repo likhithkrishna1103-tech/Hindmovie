@@ -1,2 +1,6 @@
 docs/
 .env
+
+# Local plugin health reports and Python bytecode
+test-results/
+__pycache__/
