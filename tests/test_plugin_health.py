@@ -132,6 +132,12 @@ class MediaTests(unittest.TestCase):
                         str(cls.root / 'silent.mp4')], check=True, timeout=30)
         subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-i', str(cls.root / 'av.mp4'), '-c', 'copy',
                         '-f', 'hls', '-hls_time', '1', str(cls.root / 'media.m3u8')], check=True, timeout=30)
+        disguised = (cls.root / 'media.m3u8').read_text()
+        for segment in cls.root.glob('*.ts'):
+            disguised_name = segment.with_suffix('.jpg')
+            disguised_name.write_bytes(segment.read_bytes())
+            disguised = disguised.replace(segment.name, disguised_name.name)
+        (cls.root / 'disguised.m3u8').write_text(disguised)
         cls.requests = []
         requests = cls.requests
 
@@ -189,6 +195,11 @@ class MediaTests(unittest.TestCase):
     def test_inline_hls_plays_as_a_single_url(self):
         master = f'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=100000,CODECS="avc1.64001f,mp4a.40.2"\n{self.base}/media.m3u8\n'
         result = health.check_stream({'url': 'magic_m3u8:' + base64.b64encode(master.encode()).decode()}, self.options, self.inline)
+        self.assertEqual(result['status'], 'OK', result)
+        self.assertTrue(result['decoded'])
+
+    def test_hls_with_image_segment_names_decodes_actual_video_and_audio(self):
+        result = self.check('/disguised.m3u8')
         self.assertEqual(result['status'], 'OK', result)
         self.assertTrue(result['decoded'])
 

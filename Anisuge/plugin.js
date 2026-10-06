@@ -242,6 +242,8 @@
         TEXT_INFLIGHT[key] = (async function () {
             try {
                 var res = await http_get(url, headers || PAGE_HEADERS);
+                var status = Number(res && (res.statusCode || res.status) || 0);
+                if (status >= 400) throw new Error("HTTP " + status + " from " + url.split("?")[0]);
                 var body = res && (typeof res.body !== "undefined" ? res.body : res.text) || "";
                 return cacheSet(TEXT_CACHE, key, String(body || ""));
             } finally {
@@ -449,7 +451,7 @@
 
     function typeFromText(text) {
         text = String(text || "").toLowerCase();
-        var typeMatch = text.match(/<span\b[^>]*class=["'][^"']*\bdot\b[^"']*["'][^>]*>\s*(movie|tv|ona|ova|special|music)\s*<\/span>/i);
+        var typeMatch = text.match(/<span\b[^>]*class=["'][^"']*\b(?:dot|type)\b[^"']*["'][^>]*>\s*(movie|tv|ona|ova|special|music)\s*<\/span>/i);
         if (typeMatch && /movie/i.test(typeMatch[1])) return "movie";
         return "anime";
     }
@@ -510,7 +512,7 @@
 
     function cardFromWatchAnchor(anchorHtml, attrs, pageUrl, contextHtml) {
         var href = attrs.href || "";
-        if (!/\/watch\//i.test(href)) return null;
+        if (!/\/(?:anime|watch)\//i.test(href)) return null;
         var title = cleanCardTitle(anchorHtml);
         if (/^\d+$/.test(title)) title = "";
         if (!title) title = cleanText(attrs.title || attrs["data-title"] || attrs["aria-label"] || attrs["data-jp"] || "");
@@ -525,7 +527,7 @@
 
     function parseAnchorItemCards(html, pageUrl) {
         var cards = [];
-        var re = /<a\b([^>]*class=["'][^"']*\bitem\b[^"']*["'][^>]*href=["'][^"']*\/watch\/[^"']+["'][^>]*)>([\s\S]*?)<\/a>/gi;
+        var re = /<a\b([^>]*class=["'][^"']*\bitem\b[^"']*["'][^>]*href=["'][^"']*\/(?:anime|watch)\/[^"']+["'][^>]*)>([\s\S]*?)<\/a>/gi;
         var match;
         while ((match = re.exec(html || "")) !== null) {
             var attrs = parseAttrs(match[1]);
@@ -546,7 +548,7 @@
 
     function parsePosterNameCards(html, pageUrl) {
         var cards = [];
-        var re = /<a\b([^>]*class=["'][^"']*\bposter\b[^"']*["'][^>]*href=["'][^"']*\/watch\/[^"']+["'][^>]*)>([\s\S]*?)<\/a>[\s\S]{0,1800}?<div\b[^>]*class=["'][^"']*\bname\b[^"']*["'][^>]*>\s*<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+        var re = /<a\b([^>]*class=["'][^"']*\bposter\b[^"']*["'][^>]*href=["'][^"']*\/(?:anime|watch)\/[^"']+["'][^>]*)>([\s\S]*?)<\/a>[\s\S]{0,1800}?<div\b[^>]*class=["'][^"']*\bname\b[^"']*["'][^>]*>\s*<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
         var match;
         while ((match = re.exec(html || "")) !== null) {
             var posterAttrs = parseAttrs(match[1]);
@@ -567,7 +569,7 @@
     function parseWatchCards(html, pageUrl) {
         var cards = [];
         var text = String(html || "");
-        var re = /<a\b([^>]*href=["'][^"']*\/watch\/[^"']+["'][^>]*)>([\s\S]*?)<\/a>/gi;
+        var re = /<a\b([^>]*href=["'][^"']*\/(?:anime|watch)\/[^"']+["'][^>]*)>([\s\S]*?)<\/a>/gi;
         var match;
         while ((match = re.exec(text)) !== null) {
             var attrs = parseAttrs(match[1]);
@@ -606,7 +608,7 @@
         var match;
         while ((match = re.exec(source)) !== null) {
             var attrs = parseAttrs(match[1]);
-            if (!/\bswiper-slide\b/i.test(attrs.class || "") || !/\/watch\//i.test(attrs.href || "")) continue;
+            if (!/\bswiper-slide\b/i.test(attrs.class || "") || !/\/(?:anime|watch)\//i.test(attrs.href || "")) continue;
             var image = backgroundImageUrl(match[1]);
             var title = cleanText(attrs.title || attrs["aria-label"] || "");
             if (!title || !attrs.href) continue;
@@ -628,6 +630,7 @@
         while ((match = re.exec(html || "")) !== null) {
             var section = match[0];
             var title = cleanText((section.match(/<(?:h2|h3)\b[^>]*class=["'][^"']*(?:title|heading)[^"']*["'][^>]*>([\s\S]*?)<\/(?:h2|h3)>/i) || [])[1] || "");
+            if (!title) title = cleanText((section.match(/<h[23]\b[^>]*>([\s\S]*?)<\/h[23]>/i) || [])[1] || "");
             if (!title) title = cleanText((section.match(/<a\b[^>]*class=["'][^"']*\bheading\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/i) || [])[1] || "");
             var items = parseCards(section, BASE_URL + "/home");
             if (title && items.length) sections.push({ title: title, items: items.slice(0, 24) });
@@ -687,6 +690,7 @@
                 return section && section.items && section.items.length;
             }), function (section) { return section.title; });
 
+            if (!sections.length) throw new Error("No anime cards found on AniSuge homepage");
             var homeData = {};
             sections.forEach(function (section) {
                 homeData[section.title] = section.items;
@@ -796,9 +800,9 @@
         var match;
         while ((match = re.exec(html || "")) !== null) {
             var attrs = parseAttrs(match[1]);
-            var epNum = Number(attrs["data-num"] || attrs["data-ep"] || 0) || (episodes.length + 1);
+            var epNum = Number(attrs["data-slug"]) || Number(attrs["data-num"]) || Number(attrs["data-ep"]) || (episodes.length + 1);
             var slug = attrs["data-slug"] || epNum;
-            var name = cleanText(match[2]).replace(/\s+/g, " ") || ("Episode " + epNum);
+            var name = cleanText(attrs.title || match[2]).replace(/\s+/g, " ") || ("Episode " + epNum);
             var watchUrl = meta.cleanUrl.replace(/\/+$/, "") + "/ep-" + slug;
             var epMeta = getAniZipEpisodeMeta(aniZipMeta, epNum);
             var epPoster = (epMeta && epMeta.image) || meta.posterUrl;
@@ -831,8 +835,9 @@
             var cleanUrl = absoluteUrl(BASE_URL, unpackPayload(url).url || url).replace(/\/ep-\d+.*$/i, "");
             var html = await getText(cleanUrl, PAGE_HEADERS);
             var meta = parseWatchPage(html, cleanUrl);
-            if (!meta.animeId) throw new Error("AnimeWave anime id missing");
+            if (!meta.animeId) throw new Error("AniSuge anime id missing");
             var episodeJson = await getJson(BASE_URL + "/ajax/episode/list/" + encodeURIComponent(meta.animeId) + "?style=&vrf=", ajaxHeaders(cleanUrl), 2 * 60 * 1000);
+            if (episodeJson && episodeJson.status && Number(episodeJson.status) !== 200) throw new Error(episodeJson.message || "Episode list unavailable");
             var episodeHtml = episodeJson && episodeJson.result || "";
 
             var aniZipMeta = null;
@@ -854,6 +859,7 @@
             }
 
             var episodes = parseEpisodes(episodeHtml, meta, aniZipMeta);
+            if (!episodes.length) throw new Error("No episodes found for " + meta.title);
             var nextAiring = parseNextAiring(html, episodes);
             var item = new MultimediaItem({
                 title: meta.title,
@@ -937,6 +943,7 @@
             headers: headers || {},
             referer: headers && headers.Referer || BASE_URL + "/"
         });
+        stream.quality = quality || undefined;
         stream.language = language || "SUB";
         if (subtitles && subtitles.length) stream.subtitles = subtitles;
         return stream;
@@ -977,6 +984,28 @@
         return uniqueBy(rows, function (item) { return item.url; });
     }
 
+    // MegaPlay e1-player v1.8 uses AES-256-CBC for the public source response.
+    // Use the app bridge; no browser/player script execution is required.
+    async function decodeMegaSources(json) {
+        if (!json || !json.enc) return json && json.sources;
+        var data = String(json.enc).replace(/-/g, "+").replace(/_/g, "/");
+        while (data.length % 4) data += "=";
+        var key = base64Encode("i?LMTAx0Q6,:}50U" + "\0".repeat(16));
+        var iv = base64Encode("W0;27ToaUpl_P%'c");
+        var plain = "";
+        if (typeof crypto !== "undefined" && typeof crypto.decryptAES === "function") {
+            try { plain = await crypto.decryptAES(data, key, iv, { mode: "cbc" }); } catch (_) {}
+        }
+        if (!plain && typeof sendMessage === "function") {
+            plain = await sendMessage("crypto_decrypt_aes", JSON.stringify({ data: data, key: key, iv: iv }));
+        }
+        try {
+            var decoded = JSON.parse(plain || "{}");
+            if (decoded.file) return decoded;
+        } catch (_) {}
+        throw new Error("MegaPlay source decryption failed");
+    }
+
     async function resolveMegaFamily(embedUrl, source, language, referer) {
         var origin = (new URL(embedUrl)).origin;
         var pageHtml = await getText(embedUrl, {
@@ -995,14 +1024,20 @@
             || "";
         if (!id) return [];
 
-        var json = await getJson(origin + "/stream/getSources?id=" + encodeURIComponent(id), {
+        var cdn = (embedUrl.match(/[?&]s=([a-z0-9_-]+)/i) || [])[1] || "";
+        // The tcdn route wraps TS segments in PNG bytes and needs browser JS
+        // to strip them. Request the same video's normal, muxed CDN for VLC.
+        if (cdn.toLowerCase() === "tcdn") cdn = "";
+        var endpoint = /megaplay\.buzz$/i.test((new URL(embedUrl)).hostname) ? "getSourcesNew" : "getSources";
+        var json = await getJson(origin + "/stream/" + endpoint + "?id=" + encodeURIComponent(id) + "&platform=OTHER" + (cdn ? "&s=" + encodeURIComponent(cdn) : ""), {
             "User-Agent": USER_AGENT,
             "Accept": "application/json, text/javascript, */*; q=0.01",
             "X-Requested-With": "XMLHttpRequest",
-            "Referer": origin + "/"
-        }, 30 * 1000);
-        var file = json && json.sources && (json.sources.file || (json.sources[0] && json.sources[0].file)) || "";
-        if (!file) return [];
+            "Referer": embedUrl
+        }, 15 * 1000);
+        var sources = await decodeMegaSources(json);
+        var file = sources && (sources.file || (sources[0] && sources[0].file)) || "";
+        if (!file) throw new Error("No media URL returned by " + origin);
         file = file.replace(/\\\//g, "/");
         var subtitles = uniqueBy((json.tracks || []).map(normalizeSubtitleTrack).filter(Boolean), function (item) {
             return item.url;
@@ -1041,11 +1076,7 @@
         var rows = [];
 
         if (/megaplay\.buzz|megacloud\.bloggy\.click|vidwish\.live|kwik\.(?:cx|si)|kiwi\./i.test(host)) {
-            try {
-                rows = await resolveHost(resultUrl, source, lang, referer);
-            } catch (_) {
-                rows = [];
-            }
+            rows = await resolveHost(resultUrl, source, lang, referer);
         }
 
         if (!rows.length && /\.(?:m3u8|mp4|mkv|webm|mpd)(?:$|[?#])/i.test(resultUrl)) {
@@ -1075,20 +1106,25 @@
                     referer = trim(payload.watchUrl || payload.cleanUrl || referer);
                 }
             }
-            if (!serverIds) throw new Error("AnimeWave server id missing");
+            if (!serverIds) throw new Error("AniSuge server id missing");
 
             var listJson = await getJson(BASE_URL + "/ajax/server/list?servers=" + encodeURIComponent(serverIds), ajaxHeaders(referer), 60 * 1000);
             var servers = parseServers(listJson && listJson.result || "");
-            if (!servers.length) return cb({ success: true, data: [] });
+            if (!servers.length) throw new Error("No streaming servers found for this episode");
 
+            var failures = [];
             var batches = await Promise.all(servers.map(function (server) {
-                return resolveServer(server, referer).catch(function () { return []; });
+                return resolveServer(server, referer).catch(function (error) {
+                    failures.push(server.name + ": " + String(error && error.message || error));
+                    return [];
+                });
             }));
             var streams = uniqueBy([].concat.apply([], batches).filter(Boolean), function (item) {
                 return item && item.url;
             }).sort(function (a, b) {
                 return Number(b.quality || 0) - Number(a.quality || 0);
             });
+            if (!streams.length) throw new Error("No playable streams found" + (failures.length ? ": " + failures.join("; ") : " (unsupported or unavailable player)"));
             Analytics.logEvent('anisuge_loadstreams', {});
             cb({ success: true, data: streams });
         } catch (error) {

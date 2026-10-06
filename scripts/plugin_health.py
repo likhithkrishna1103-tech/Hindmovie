@@ -4,6 +4,7 @@ import argparse
 import base64
 import concurrent.futures
 import datetime as dt
+import functools
 import hashlib
 import http.server
 import json
@@ -194,6 +195,19 @@ def playlist_links(text, base):
     return links
 
 
+@functools.lru_cache(maxsize=2)
+def hls_demuxer_args(binary):
+    """Judge remote HLS by decoded media, not the CDN's segment suffixes."""
+    help_result = run_process([binary, '-hide_banner', '-h', 'demuxer=hls'], 10)
+    help_text = help_result['stdout'] + help_result['stderr']
+    args = ['-allowed_extensions', 'ALL']
+    if '-allowed_segment_extensions ' in help_text:
+        args += ['-allowed_segment_extensions', 'ALL']
+    if '-extension_picky ' in help_text:
+        args += ['-extension_picky', '0']
+    return args
+
+
 def check_stream(stream, options, inline):
     result = {'source': str(stream.get('source', stream.get('quality', 'Auto'))),
               'quality': stream.get('quality'), 'status': 'INVALID_URL', 'decoded': False}
@@ -257,7 +271,9 @@ def check_stream(stream, options, inline):
         ff_headers = ''.join(f'{key}: {value}\r\n' for key, value in headers.items())
         network_args = ['-protocol_whitelist', 'http,https,tcp,tls,crypto',
                         '-rw_timeout', str(options.stream_timeout * 1000000), '-headers', ff_headers]
-        probe = run_process(['ffprobe', '-v', 'error', *network_args, '-show_entries',
+        is_hls = prefix.lstrip().startswith(b'#EXTM3U')
+        probe_hls_args = hls_demuxer_args('ffprobe') if is_hls else []
+        probe = run_process(['ffprobe', '-v', 'error', *network_args, *probe_hls_args, '-show_entries',
                              'stream=codec_type,codec_name,width,height', '-of', 'json', url], options.stream_timeout)
         if probe['timed_out']:
             return {**result, 'status': 'PROBE_TIMEOUT'}
@@ -272,7 +288,8 @@ def check_stream(stream, options, inline):
             return {**result, 'status': 'VIDEO_ONLY', 'detail': 'The single URL contains no audio; separate audioTracks cannot establish playback'}
         if options.decode_seconds:
             maps = ['-map', '0:v:0'] + (['-map', '0:a:0'] if 'audio' in types else [])
-            decoded = run_process(['ffmpeg', '-nostdin', '-v', 'error', '-xerror', *network_args, '-i', url,
+            decode_hls_args = hls_demuxer_args('ffmpeg') if is_hls else []
+            decoded = run_process(['ffmpeg', '-nostdin', '-v', 'error', '-xerror', *network_args, *decode_hls_args, '-i', url,
                                    '-t', str(options.decode_seconds), *maps, '-progress', 'pipe:1',
                                    '-f', 'null', '-'], options.stream_timeout)
             if decoded['timed_out']:
