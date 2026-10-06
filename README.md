@@ -20,7 +20,7 @@ If you find this project helpful, consider supporting its development!
 | Animedekho | 2 | Working ✅️ | Anime | hi, ta, te, en |
 | AnimeDubHindi | 5 | Working ✅️ | Anime | hi, en, ja, ta, te, ml, bn, kn |
 | AnimeWave + AniKoto | 10 | Working ✅️ | Anime | en, ja |
-| AniSuge | 4 | Working ✅️ | Anime | en, ja |
+| AniSuge | 5 | Working ✅️ | Anime | en, ja |
 | Castle TV | 9 | Working ✅️ | Movies, Series | en, hi |
 | Cinefreak | 12 | Working ✅️ | Others | en, hi, ta, te, ml, kn, bn |
 | CineStream | 28 | 🛠️ plugin is under Maintenance and will be fixed soon | Movies, Series, Anime | en, hi, ja |
