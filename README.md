@@ -16,13 +16,13 @@ If you find this project helpful, consider supporting its development!
 | Plugin | Version | Status | Categories | Languages |
 | :--- | :--- | :--- | :--- | :--- |
 | Anikage | 11 | Working ✅️ | Anime | en, ja |
-| Anilight | 1 | Working ✅️ | Anime | en, ja |
-| Animedekho | 2 | Working ✅️ | Anime | hi, ta, te, en |
+| Anilight | 2 | Working ✅️ | Anime | en, ja |
+| Animedekho | 3 | Working ✅️ | Anime | hi, ta, te, en |
 | AnimeDubHindi | 5 | Working ✅️ | Anime | hi, en, ja, ta, te, ml, bn, kn |
-| AnimeWave + AniKoto | 10 | Working ✅️ | Anime | en, ja |
+| AnimeWave + AniKoto | 11 | Working ✅️ | Anime | en, ja |
 | AniSuge | 5 | Working ✅️ | Anime | en, ja |
 | Castle TV | 9 | Working ✅️ | Movies, Series | en, hi |
-| Cinefreak | 12 | Working ✅️ | Others | en, hi, ta, te, ml, kn, bn |
+| Cinefreak | 13 | Working ✅️ | Others | en, hi, ta, te, ml, kn, bn |
 | CineStream | 28 | 🛠️ plugin is under Maintenance and will be fixed soon | Movies, Series, Anime | en, hi, ja |
 | HiAnime | 3 | Working ✅️ | Anime | en, ja |
 | HindMoviez | 17 | Working ✅️ | Movies, Series | hi, en, ta, te, ml, kn |
