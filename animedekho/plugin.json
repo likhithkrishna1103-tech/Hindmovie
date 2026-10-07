@@ -1,15 +1,28 @@
 {
   "packageName": "com.igris.repo.animedekho",
   "name": "Animedekho",
-  "version": 2,
-  "baseUrl": "https://animedekho.app",
+  "version": 3,
+  "baseUrl": "https://animedekho.tv",
   "description": "Anime Dekho - Stream anime in Hindi, Tamil, Telugu, and English.",
-  "authors": ["IGRIS"],
-  "languages": ["hi", "ta", "te", "en"],
-  "categories": ["Anime"],
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "hi",
+    "ta",
+    "te",
+    "en"
+  ],
+  "categories": [
+    "Anime"
+  ],
   "domains": [
     {
-      "name": "animedekho.app (Primary)",
+      "name": "animedekho.tv (Primary)",
+      "url": "https://animedekho.tv"
+    },
+    {
+      "name": "animedekho.app (Mirror)",
       "url": "https://animedekho.app"
     },
     {

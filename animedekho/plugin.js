@@ -9,7 +9,7 @@
    * @property {string} [message]
    */
 
-  var DEFAULT_BASE_URL = "https://animedekho.app";
+  var DEFAULT_BASE_URL = "https://animedekho.tv";
   var TMDB_API_KEY = "1865f43a0549ca50d341dd9ab8b29f49";
   var TMDB_API_BASE = "https://api.themoviedb.org/3";
   var TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
@@ -143,15 +143,30 @@
     var body = options.body;
     var allowRedirects = options.allowRedirects !== false;
     var timeout = options.timeout || 20000;
+    function nativeDeadline(promise) {
+      if (typeof setTimeout !== "function") return promise;
+      var timer;
+      var deadline = new Promise(function (_, reject) {
+        timer = setTimeout(function () { reject(new Error("Request timeout after " + timeout + "ms for " + url)); }, timeout);
+      });
+      return Promise.race([promise, deadline]).then(function (result) {
+        clearTimeout(timer);
+        return result;
+      }, function (error) {
+        clearTimeout(timer);
+        throw error;
+      });
+    }
+
 
     if (
       method === "GET" &&
       (allowRedirects || typeof fetch !== "function") &&
       typeof http_get === "function"
     ) {
-      return Promise.resolve(http_get(url, headers)).then(function (res) {
+      return nativeDeadline(Promise.resolve(http_get(url, headers))).then(function (res) {
         return {
-          status: res && typeof res.status !== "undefined" ? res.status : 200,
+          status: res && typeof res.status !== "undefined" ? res.status : (res && res.statusCode || 200),
           body: res && typeof res.body !== "undefined" ? res.body : (typeof res === "string" ? res : ""),
           headers: parseHeaders(res && res.headers),
           finalUrl: (res && (res.url || res.finalUrl)) || url,
@@ -164,9 +179,9 @@
       (allowRedirects || typeof fetch !== "function") &&
       typeof http_post === "function"
     ) {
-      return Promise.resolve(http_post(url, headers, body)).then(function (res) {
+      return nativeDeadline(Promise.resolve(http_post(url, headers, body))).then(function (res) {
         return {
-          status: res && typeof res.status !== "undefined" ? res.status : 200,
+          status: res && typeof res.status !== "undefined" ? res.status : (res && res.statusCode || 200),
           body: res && typeof res.body !== "undefined" ? res.body : (typeof res === "string" ? res : ""),
           headers: parseHeaders(res && res.headers),
           finalUrl: (res && (res.url || res.finalUrl)) || url,
@@ -238,16 +253,21 @@
 
   function getText(url, headers, allowRedirects) {
     var now = Date.now();
-    if (urlCache[url] && now - urlCache[url].time < CACHE_TTL) {
-      return Promise.resolve(urlCache[url].body);
+    // The same episode changes with the server cookie and Referer. Keep those
+    // responses separate, and never cache an HTTP error as a valid page.
+    var cacheKey = url + "|" + JSON.stringify(headers || {}) + "|" + String(allowRedirects);
+    if (urlCache[cacheKey] && now - urlCache[cacheKey].time < CACHE_TTL) {
+      return Promise.resolve(urlCache[cacheKey].body);
     }
     return request(url, {
       headers: headers,
       allowRedirects: allowRedirects,
       timeout: 15000,
     }).then(function (res) {
+      if (res.status >= 400) throw new Error("HTTP " + res.status + " for " + url);
       var body = res.body || "";
-      urlCache[url] = { body: body, time: now };
+      if (!body) throw new Error("Empty HTTP response for " + url);
+      urlCache[cacheKey] = { body: body, time: now };
       return body;
     });
   }
@@ -386,13 +406,22 @@
           title: title,
           url: href,
           posterUrl: posterUrl,
-          type: "anime",
+          type: /\/movie(?:s|-hindi)?\//i.test(href) || /Watch Movie/i.test(block) ? "movie" : "anime",
           headers: { Referer: baseUrl + "/" },
         })
       );
     }
 
     return items;
+  }
+
+  function makeStream(options) {
+    var stream = new StreamResult(options);
+    var qualityText = String(options.quality || "");
+    var quality = /^\d{3,4}p?$/.test(qualityText) ? parseInt(qualityText, 10) : 0;
+    if (quality) stream.quality = quality;
+    if (options.language) stream.language = options.language;
+    return stream;
   }
 
   /* ========================================================================= */
@@ -425,14 +454,14 @@
       if (decData && decData.result && Array.isArray(decData.result.sources)) {
         decData.result.sources.forEach(function (source) {
           if (source.status === true || typeof source.status === "undefined") {
-            var qual = source.type || "720";
+            var qual = source.type || "";
             var codec = source.codec ? " [" + String(source.codec).toUpperCase() + "]" : "";
             streams.push(
-              new StreamResult({
+              makeStream({
                 url: source.url,
                 source: "AbyssPlayer" + codec,
-                quality: String(qual).endsWith("p") ? qual : qual + "p",
-                headers: { Referer: "https://playhydrax.com/" },
+                quality: qual ? (String(qual).endsWith("p") ? qual : qual + "p") : undefined,
+                headers: abyssHeaders,
               })
             );
           }
@@ -440,45 +469,6 @@
       }
     } catch (e) {
       console.log("[ExtractAbyss Error]", String(e));
-    }
-    return streams;
-  }
-
-  /**
-   * StreamRuby Extractor (rubystm.com / streamruby.com)
-   */
-  async function extractStreamRuby(url) {
-    var streams = [];
-    try {
-      var cleanedUrl = url.replace(/\/e(?:\/|$)/, "/");
-      var rubyHeaders = {
-        "User-Agent": USER_AGENT,
-        "X-Requested-With": "XMLHttpRequest",
-        Referer: cleanedUrl,
-      };
-      var body = await getText(cleanedUrl, rubyHeaders);
-      var unpacked = unpackJs(body) || body;
-      var fileMatch = unpacked.match(/file:\s*["']([^"']+)["']/i) || unpacked.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
-      if (fileMatch && fileMatch[1]) {
-        streams.push(
-          new StreamResult({
-            url: fileMatch[1],
-            source: "StreamRuby",
-            quality: "HD",
-            headers: {
-              Accept: "*/*",
-              Connection: "keep-alive",
-              "Sec-Fetch-Dest": "empty",
-              "Sec-Fetch-Mode": "cors",
-              "Sec-Fetch-Site": "cross-site",
-              Origin: cleanedUrl,
-              Referer: cleanedUrl,
-            },
-          })
-        );
-      }
-    } catch (e) {
-      console.log("[ExtractStreamRuby Error]", String(e));
     }
     return streams;
   }
@@ -507,7 +497,7 @@
       var resJson = parseJsonSafe(formRes.body, {});
       if (resJson && resJson.videoSource) {
         streams.push(
-          new StreamResult({
+          makeStream({
             url: resJson.videoSource,
             source: serverName,
             quality: "HD",
@@ -539,7 +529,7 @@
         var format = data.format || "MP4";
         var streamUrl = origin + "/stream/" + data.dataId + "." + format;
         streams.push(
-          new StreamResult({
+          makeStream({
             url: streamUrl,
             source: "Blakiteapi",
             quality: data.quality || "480p",
@@ -568,7 +558,7 @@
       }
       if (m3u8Match && m3u8Match[1]) {
         streams.push(
-          new StreamResult({
+          makeStream({
             url: m3u8Match[1],
             source: serverName,
             quality: "Auto",
@@ -597,7 +587,7 @@
       }
       if (match && match[1]) {
         streams.push(
-          new StreamResult({
+          makeStream({
             url: match[1],
             source: serverName,
             quality: "Auto",
@@ -626,7 +616,7 @@
       }
       if (match && match[1]) {
         streams.push(
-          new StreamResult({
+          makeStream({
             url: match[1],
             source: serverName,
             quality: "Auto",
@@ -655,7 +645,7 @@
       }
       if (match && match[1]) {
         streams.push(
-          new StreamResult({
+          makeStream({
             url: match[1],
             source: serverName,
             quality: "Auto",
@@ -672,23 +662,76 @@
   /**
    * Vidmoly Extractor (vidmoly.net)
    */
-  async function extractVidmoly(url) {
+  // Ported from phisher98/cloudstream-extensions-phisher's
+  // AnimeDekhoProvider.cs3 v71 (builds branch), NeoCDN and loadLinks.
+  async function extractNeoCDN(url, referer) {
+    try {
+      var body = await getText(url, { Referer: referer || absoluteUrl(url, "/") });
+      var fetchMatch = body.match(/fetch\s*\(\s*["']([^"']*fetch\.php[^"']*)["']/i);
+      if (!fetchMatch) return [];
+      var workerMatch = body.match(/const\s+worker\s*=\s*["']([^"']*)["']/i);
+      var worker = workerMatch ? decodeHtmlEntities(workerMatch[1]) : "";
+      // The provider resolves fetch.php from the SITE origin, not play.php's folder.
+      var origin = absoluteUrl(url, "/");
+      var fetchUrl = absoluteUrl(origin, decodeHtmlEntities(fetchMatch[1]));
+      var data = await getJson(fetchUrl, { Referer: url });
+      if (!Array.isArray(data.sources)) return [];
+      return data.sources.filter(function (source) { return source && /^https?:\/\//i.test(source.url || ""); }).map(function (source) {
+        return makeStream({ url: worker ? worker + encodeURIComponent(source.url) : source.url, source: "NeoCDN", quality: source.type });
+      });
+    } catch (error) {
+      console.log("[NeoCDN] " + String(error));
+      return [];
+    }
+  }
+
+  function decodeServerValue(value) {
+    var raw = decodeHtmlEntities(value).trim();
+    if (/^(?:https?:\/\/|\/|\[)/i.test(raw)) return raw;
+    try { return atob(raw).trim(); } catch (_) { return raw; }
+  }
+
+  async function extractVidmoly(url, referer) {
     var streams = [];
     try {
-      var body = await getText(url, { Referer: url });
-      var match = body.match(/sources\s*:\s*\[\s*\{\s*file\s*:\s*["']([^"']+)["']/i);
-      if (match && match[1]) {
-        streams.push(
-          new StreamResult({
-            url: match[1],
-            source: "Vidmoly",
-            quality: "Auto",
-            headers: { Referer: url },
-          })
-        );
+      var embed = url.replace(/\/w\/([^/?#]+)/, "/embed-$1.html");
+      var body = await getText(embed, {
+        "User-Agent": USER_AGENT,
+        "Sec-Fetch-Dest": "iframe",
+        Referer: referer || absoluteUrl(embed, "/"),
+      });
+      // The packed script may be an advert; keep the plain JW sources first.
+      var decodedScript = unpackJs(body);
+      var unpacked = (body + (decodedScript !== body ? "\n" + decodedScript : "")).replace(/\\\//g, "/");
+      var match = unpacked.match(/["']?sources["']?\s*:\s*\[\s*\{\s*["']?file["']?\s*:\s*["']([^"']+)["']/i)
+        || unpacked.match(/["']?file["']?\s*:\s*["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i)
+        || unpacked.match(/[:=]\s*["']([^"'\s]+(?:\.m3u8|master\.txt)[^"'\s]*)["']/i);
+      if (!match) return streams;
+      var streamUrl = absoluteUrl(embed, decodeHtmlEntities(match[1]));
+      // Vidmolynet -> JWPlayerHelper uses mainUrl as the playback Referer.
+      var headers = { Referer: "https://vidmoly.net" };
+      if (/(?:\.m3u8|master\.txt)(?:$|\?)/i.test(streamUrl)) {
+        try {
+          var master = await getText(streamUrl);
+          var lines = String(master).split(/\r?\n/);
+          lines.forEach(function (line, index) {
+            if (!/^#EXT-X-STREAM-INF:/.test(line)) return;
+            var next = (lines[index + 1] || "").trim();
+            if (!next || next.charAt(0) === "#") return;
+            var resolution = line.match(/RESOLUTION=\d+x(\d+)/i);
+            streams.push(makeStream({
+              url: absoluteUrl(streamUrl, next),
+              source: "Vidmoly",
+              quality: resolution ? resolution[1] : undefined,
+              headers: headers,
+            }));
+          });
+        } catch (_) {}
       }
-    } catch (e) {
-      console.log("[ExtractVidmoly Error]", String(e));
+      // These are actual advertised, server-muxed variants. No guessed audio IDs.
+      if (!streams.length) streams.push(makeStream({ url: streamUrl, source: "Vidmoly", headers: headers }));
+    } catch (error) {
+      console.log("[ExtractVidmoly] " + String(error));
     }
     return streams;
   }
@@ -704,7 +747,7 @@
       var fileMatch = body.match(/file\s*:\s*["']([^"']+)["']/i);
       if (fileMatch && fileMatch[1]) {
         streams.push(
-          new StreamResult({
+          makeStream({
             url: fileMatch[1],
             source: "AnimeDekho Server",
             quality: "HD",
@@ -733,21 +776,49 @@
    * Universal Extractor Router
    * Maps server/iframe URLs to appropriate specialized extractors
    */
-  async function dispatchExtractor(url, nameHint) {
+  async function dispatchExtractor(url, nameHint, depth, visited, referer) {
+    depth = depth || 0;
+    visited = visited || {};
+    if (depth > 4) return [];
     if (!url || typeof url !== "string") return [];
     var clean = url.trim();
-    if (!/^https?:\/\//i.test(clean)) return [];
+    if (!/^https?:\/\//i.test(clean) && clean.charAt(0) !== "[") return [];
 
+    if (/\/down\/v\//i.test(clean)) return [];
+    if (visited[clean]) return [];
+    visited[clean] = true;
     var lower = clean.toLowerCase();
+
+    // The provider supports base64 JSON language/link arrays in data= wrappers.
+    var encodedData = clean.match(/[?&]data=([^&]+)/);
+    var entries = null;
+    try {
+      entries = parseJsonSafe(clean.charAt(0) === "[" ? clean : encodedData ? atob(decodeURIComponent(encodedData[1])) : "", null);
+    } catch (_) {}
+    if (Array.isArray(entries) && entries.length && typeof entries[0].language !== "undefined" && typeof entries[0].link === "string") {
+      var encodedStreams = await Promise.all(entries.map(async function (entry) {
+        var link = String(entry.link || "").replace(/\\\//g, "/");
+        if (!link) return [];
+        var batch = await dispatchExtractor(absoluteUrl(clean, link), nameHint, depth + 1, Object.assign({}, visited), referer);
+        batch.forEach(function (stream) {
+          stream.source += " [" + entry.language + "]";
+          stream.language = entry.language;
+        });
+        return batch;
+      }));
+      return [].concat.apply([], encodedStreams);
+    }
+    if (lower.indexOf("/aaa/myth/play.php") !== -1) return await extractNeoCDN(clean, referer);
 
     // AbyssPlayer / Abyss
     if (lower.indexOf("abyssplayer") !== -1 || lower.indexOf("abyss.to") !== -1) {
       return await extractAbyss(clean);
     }
 
-    // StreamRuby / Rubystm
+    // StreamRuby currently times out without returning a source. Skip it before
+    // making a request so it cannot hold up working Abyss/NeoCDN/Vidmoly links.
     if (lower.indexOf("rubystm") !== -1 || lower.indexOf("streamruby") !== -1 || lower.indexOf("rubystream") !== -1) {
-      return await extractStreamRuby(clean);
+      return [];
     }
 
     // AWSStream / Zephyrflick / as-cdn21
@@ -783,7 +854,7 @@
 
     // Vidmoly
     if (lower.indexOf("vidmoly") !== -1) {
-      return await extractVidmoly(clean);
+      return await extractVidmoly(clean, referer);
     }
 
     // Animedekho.co
@@ -794,7 +865,7 @@
     // Fallback: check if direct stream
     if (/\.(m3u8|mp4)(?:$|\?)/i.test(clean)) {
       return [
-        new StreamResult({
+        makeStream({
           url: clean,
           source: nameHint || "Direct Stream",
           quality: "Auto",
@@ -803,21 +874,28 @@
       ];
     }
 
-    // Generic iframe content scan
+    // Current AnimeDekho selector URLs are wrapper pages, sometimes several
+    // layers deep. Resolve their real player instead of returning an HTML URL.
     try {
-      var body = await getText(clean, { Referer: clean });
-      var unpacked = unpackJs(body);
-      var m3u8 = (unpacked || body).match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
-      if (m3u8 && m3u8[1]) {
-        return [
-          new StreamResult({
-            url: m3u8[1],
-            source: nameHint || "HLS Stream",
-            quality: "Auto",
-            headers: { Referer: clean },
-          }),
-        ];
+      var body = await getText(clean, { Referer: referer || clean });
+      // An unpacked advertising script must not hide plain player sources.
+      var decodedScript = unpackJs(body);
+      var unpacked = (body + (decodedScript !== body ? "\n" + decodedScript : "")).replace(/\\\//g, "/");
+      var file = unpacked.match(/["']?(?:file|src)["']?\s*:\s*["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i)
+        || unpacked.match(/["'](https?:\/\/[^"']+\.(?:m3u8|mp4)(?:\?[^"']*)?)["']/i);
+      if (file) {
+        return [makeStream({ url: decodeHtmlEntities(file[1]), source: nameHint || "AnimeDekho", headers: { Referer: clean } })];
       }
+      var frames = /<iframe\b[^>]*src=["']([^"']+)["']/gi;
+      var frame;
+      var nested = [];
+      while ((frame = frames.exec(body)) !== null) {
+        var embed = absoluteUrl(clean, decodeHtmlEntities(frame[1]));
+        if (/youtube\.com|vimeo\.com|googletag|about:blank/i.test(embed)) continue;
+        var batch = await dispatchExtractor(embed, nameHint, depth + 1, visited, clean);
+        nested.push.apply(nested, batch);
+      }
+      return nested;
     } catch (_) {}
 
     return [];
@@ -840,6 +918,24 @@
    * Loads the home screen categories.
    * @param {(res: Response) => void} cb
    */
+  function parseListing(html, baseUrl) {
+    // Cards themselves contain genre lists. Match balanced UL tags rather than
+    // stop at the first nested closing tag; never include sidebar/recent cards.
+    var text = String(html || "");
+    var opening = /<ul\b[^>]*\bdata-results(?:=["'][^"']*["'])?[^>]*>/i.exec(text);
+    if (!opening) return [];
+    var start = opening.index + opening[0].length;
+    var tags = /<\/?ul\b[^>]*>/gi;
+    tags.lastIndex = start;
+    var depth = 1;
+    var match;
+    while ((match = tags.exec(text)) !== null) {
+      depth += /^<\//.test(match[0]) ? -1 : 1;
+      if (depth === 0) return parsePostArticles(text.slice(start, match.index), baseUrl);
+    }
+    return [];
+  }
+
   async function getHome(cb) {
     try {
       var baseUrl = runtimeManifest.baseUrl || DEFAULT_BASE_URL;
@@ -849,7 +945,7 @@
         var catUrl = absoluteUrl(baseUrl, cat.path);
         return getText(catUrl, { Referer: baseUrl + "/" })
           .then(function (html) {
-            var items = parsePostArticles(html, baseUrl);
+            var items = parseListing(html, baseUrl);
             return { title: cat.title, items: items };
           })
           .catch(function () {
@@ -859,16 +955,6 @@
 
       var results = await Promise.all(promises);
 
-      // Hero Carousel: Trending (populated from Anime category)
-      var animeResults = results.find(function (r) {
-        return r.title === "Anime";
-      });
-      if (animeResults && animeResults.items.length > 0) {
-        data["Trending"] = animeResults.items.slice(0, 10);
-      } else if (results.length > 0 && results[0].items.length > 0) {
-        data["Trending"] = results[0].items.slice(0, 10);
-      }
-
       // Add each category row
       results.forEach(function (res) {
         if (res.items.length > 0) {
@@ -876,6 +962,7 @@
         }
       });
 
+      if (Object.keys(data).length === 0) throw new Error("No category listings found");
       cb({ success: true, data: data });
     } catch (e) {
       cb({ success: false, errorCode: "GET_HOME_ERROR", message: String(e && e.stack ? e.stack : e) });
@@ -896,7 +983,7 @@
       var baseUrl = runtimeManifest.baseUrl || DEFAULT_BASE_URL;
       var searchUrl = baseUrl + "/?s=" + encodeURIComponent(query);
       var html = await getText(searchUrl, { Referer: baseUrl + "/" });
-      var items = parsePostArticles(html, baseUrl);
+      var items = parseListing(html, baseUrl);
 
       cb({ success: true, data: items });
     } catch (e) {
@@ -944,7 +1031,8 @@
           rawTitle = ogTitle[1].replace(/^Watch\s+Online\s+/i, "").replace(/\s+Movie\s+in\s+Hindi\s+Dubbed\s+Free.*$/i, "");
         }
       }
-      var title = trim(rawTitle) || "Unknown Title";
+      var title = trim(rawTitle);
+      if (!title) throw new Error("Media title missing from detail page");
 
       // Poster
       var posterMatch = html.match(/<div\b[^>]*class=["'][^"']*post-thumbnail[^"']*["'][\s\S]*?<img\b[^>]*data-lazy-src=["']([^"']+)["']/i);
@@ -1150,6 +1238,8 @@
         await Promise.all(tmdbPromises);
       }
 
+      if (!episodesRaw.length) throw new Error("No episodes found in series page");
+
       // Assemble final Episodes
       var episodes = episodesRaw.map(function (item) {
         var finalName = item.name;
@@ -1226,130 +1316,88 @@
   async function loadStreams(url, cb) {
     try {
       var baseUrl = runtimeManifest.baseUrl || DEFAULT_BASE_URL;
-      var cleanUrl = url;
-
-      // Handle JSON-serialized Media string
-      if (typeof cleanUrl === "string" && cleanUrl.trim().charAt(0) === "{") {
-        var parsedMedia = parseJsonSafe(cleanUrl, null);
-        if (parsedMedia && parsedMedia.url) {
-          cleanUrl = parsedMedia.url;
-        }
-      }
-
-      cleanUrl = absoluteUrl(baseUrl, cleanUrl);
-
-      // Fetch the episode / movie page with vidstream cookie
-      var pageHtml = await getText(cleanUrl, {
-        Referer: baseUrl + "/",
-        Cookie: "toronites_server=vidstream",
-      });
-
-      var serverUrls = [];
-
-      // 1) Direct iframes present in the page HTML
-      var iframeRegex = /<iframe\b[^>]*src=["']([^"']+)["']/gi;
-      var ifMatch;
-      while ((ifMatch = iframeRegex.exec(pageHtml)) !== null) {
-        var src = ifMatch[1];
-        if (src && !/about:blank|googletag/i.test(src)) {
-          serverUrls.push(src);
-        }
-      }
-
-      // 2) Extract postid/term ID from <body> class
-      var bodyClassMatch = pageHtml.match(/<body\b[^>]*class=["']([^"']+)["']/i);
-      var bodyClass = bodyClassMatch ? bodyClassMatch[1] : "";
-      var termMatch = bodyClass.match(/(?:term|postid)-(\d+)/i);
-      var termId = termMatch ? termMatch[1] : "";
-
-      // 3) Concurrently query server endpoints: /?trdekho=${i}&trid=${termId}&trtype=2 (or trtype=1 for movies)
+      var media = parseJsonSafe(url, null);
+      var cleanUrl = absoluteUrl(baseUrl, media && media.url ? media.url : url);
+      // Cookie belongs only on the entry page: sending it to trembed/trdekho
+      // overrides their explicit server index and returns the same host each time.
+      var pageHeaders = { Referer: baseUrl + "/", Cookie: "toronites_server=vidstream" };
+      var pageHtml = await getText(cleanUrl, pageHeaders);
+      var origin = absoluteUrl(cleanUrl, "/").replace(/\/+$/, "");
+      var bodyMatch = pageHtml.match(/<body\b[^>]*class=["']([^"']+)["']/i);
+      var bodyClass = bodyMatch ? bodyMatch[1] : "";
+      var idMatch = bodyClass.match(/(?:term|postid)-(\d+)/i);
+      var termId = idMatch ? idMatch[1] : "";
+      var type = /\/movie|single-movies/i.test(cleanUrl + " " + bodyClass) ? 1 : 2;
+      var batches = [];
+      // The linked provider resolves NeoCDN directly before legacy iframe fallbacks.
       if (termId) {
-        var isMovie = /movie/i.test(cleanUrl) || /single-movies/i.test(bodyClass);
-        var primaryTrType = isMovie ? 1 : 2;
-        var iterations = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        var queryPromises = iterations.map(function (i) {
-          var trUrl = baseUrl + "/?trdekho=" + i + "&trid=" + termId + "&trtype=" + primaryTrType;
-          return getText(trUrl, { Referer: cleanUrl, Cookie: "toronites_server=vidstream" })
-            .then(function (trHtml) {
-              var sIframeMatch = trHtml.match(/<iframe\b[^>]*src=["']([^"']+)["']/i);
-              return sIframeMatch ? sIframeMatch[1] : null;
-            })
-            .catch(function () {
-              return null;
-            });
-        });
-
-        var results = await Promise.all(queryPromises);
-        results.forEach(function (sUrl) {
-          if (sUrl && serverUrls.indexOf(sUrl) === -1) {
-            serverUrls.push(sUrl);
-          }
-        });
-
-        // Fallback: If no servers were found with primary trtype, try secondary trtype
-        if (serverUrls.length === 0) {
-          var secondaryTrType = isMovie ? 2 : 1;
-          var fallbackPromises = iterations.map(function (i) {
-            var trUrl = baseUrl + "/?trdekho=" + i + "&trid=" + termId + "&trtype=" + secondaryTrType;
-            return getText(trUrl, { Referer: cleanUrl, Cookie: "toronites_server=vidstream" })
-              .then(function (trHtml) {
-                var sIframeMatch = trHtml.match(/<iframe\b[^>]*src=["']([^"']+)["']/i);
-                return sIframeMatch ? sIframeMatch[1] : null;
-              })
-              .catch(function () {
-                return null;
-              });
-          });
-          var fallbackResults = await Promise.all(fallbackPromises);
-          fallbackResults.forEach(function (sUrl) {
-            if (sUrl && serverUrls.indexOf(sUrl) === -1) {
-              serverUrls.push(sUrl);
-            }
-          });
-        }
+        var neoUrl = origin + "/aaa/myth/play.php?id=" + encodeURIComponent(origin + "/?trembed=1&trid=" + termId + "&trtype=" + type);
+        batches.push(await extractNeoCDN(neoUrl, cleanUrl));
+      }
+      var servers = [];
+      var seenServers = {};
+      function addServer(value, referer) {
+        var raw = decodeServerValue(value);
+        if (!raw || (!/^https?:\/\//i.test(raw) && raw.charAt(0) !== "/" && raw.charAt(0) !== "[")) return;
+        var target = raw.charAt(0) === "[" ? raw : absoluteUrl(referer || cleanUrl, raw);
+        if (/\/down\/v\/|youtube\.com|vimeo\.com|about:blank|googletag/i.test(target) || seenServers[target]) return;
+        seenServers[target] = true;
+        servers.push({ url: target, referer: referer || cleanUrl });
+      }
+      // [data-src] may hold a plain URL, base64 URL, or encoded language/link data.
+      var selector = /\bdata-src=["']([^"']+)["']/gi;
+      var match;
+      while ((match = selector.exec(pageHtml)) !== null) addServer(match[1], cleanUrl);
+      var playerBlock = pageHtml.match(/<div\b[^>]*class=["'][^"']*\bvideo\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+      if (playerBlock) {
+        var frames = /<iframe\b[^>]*src=["']([^"']+)["']/gi;
+        while ((match = frames.exec(playerBlock[1])) !== null) addServer(match[1], cleanUrl);
+      }
+      if (termId) {
+        await Promise.all([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(async function (index) {
+          var serverUrl = origin + "/?trembed=" + index + "&trid=" + termId + "&trtype=" + type;
+          try {
+            var html = await getText(serverUrl, { Referer: cleanUrl });
+            var iframe = html.match(/<iframe\b[^>]*src=["']([^"']+)["']/i);
+            if (iframe) addServer(iframe[1], serverUrl);
+          } catch (_) {}
+        }));
+      }
+      var extracted = await Promise.all(servers.map(function (server) {
+        return dispatchExtractor(server.url, null, 0, {}, server.referer).catch(function () { return []; });
+      }));
+      batches = batches.concat(extracted);
+      // Some current pages still expose their playable hosts through trdekho.
+      // Keep this proven route as a fallback to the linked provider's trembed.
+      if (!batches.some(function (batch) { return batch.length; }) && termId) {
+        var legacy = await Promise.all([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(async function (index) {
+          var serverUrl = origin + "/?trdekho=" + index + "&trid=" + termId + "&trtype=" + type;
+          try {
+            var html = await getText(serverUrl, { Referer: cleanUrl });
+            var iframe = html.match(/<iframe\b[^>]*src=["']([^"']+)["']/i);
+            if (!iframe) return [];
+            return await dispatchExtractor(absoluteUrl(serverUrl, decodeHtmlEntities(iframe[1])), null, 0, {}, serverUrl);
+          } catch (_) { return []; }
+        }));
+        batches = batches.concat(legacy);
       }
 
-      // Deduplicate server URLs
-      var uniqueServers = [];
-      var seenServers = {};
-      serverUrls.forEach(function (sUrl) {
-        var norm = sUrl.trim();
-        if (norm && !seenServers[norm]) {
-          seenServers[norm] = true;
-          uniqueServers.push(norm);
-        }
-      });
-
-      // Extract streams from each server URL
-      var streamPromises = uniqueServers.map(function (sUrl) {
-        return dispatchExtractor(sUrl).catch(function () {
-          return [];
-        });
-      });
-
-      var streamBatches = await Promise.all(streamPromises);
-      var allStreams = [];
-      var seenStreamUrls = {};
-
-      streamBatches.forEach(function (batch) {
+      var streams = [];
+      var seenStreams = {};
+      batches.forEach(function (batch) {
         batch.forEach(function (stream) {
-          if (stream && stream.url && !seenStreamUrls[stream.url]) {
-            seenStreamUrls[stream.url] = true;
-            allStreams.push(stream);
+          var key = stream && stream.url + "|" + (stream.language || "");
+          if (stream && stream.url && !seenStreams[key]) {
+            seenStreams[key] = true;
+            streams.push(stream);
           }
         });
       });
-
-      // Sort streams by quality descending
-      allStreams.sort(function (a, b) {
-        var qa = getQualityFromText(a.quality || a.source);
-        var qb = getQualityFromText(b.quality || b.source);
-        return qb - qa;
-      });
-
-      cb({ success: true, data: allStreams });
-    } catch (e) {
-      cb({ success: false, errorCode: "STREAM_ERROR", message: String(e && e.stack ? e.stack : e) });
+      streams.sort(function (a, b) { return (Number(b.quality) || 0) - (Number(a.quality) || 0); });
+      if (!streams.length) throw new Error("No playable streams resolved from " + servers.length + " server(s)");
+      cb({ success: true, data: streams });
+    } catch (error) {
+      cb({ success: false, errorCode: "STREAM_ERROR", message: String(error && error.stack || error) });
     }
   }
 
