@@ -261,6 +261,8 @@
         TEXT_INFLIGHT[key] = (async function () {
             try {
                 var res = await http_get(url, headers || PAGE_HEADERS);
+                var status = Number(res && (res.statusCode || res.status) || 0);
+                if (status >= 400) throw new Error("HTTP " + status + " fetching " + url);
                 var body = res && (typeof res.body !== "undefined" ? res.body : res.text) || "";
                 return cacheSet(TEXT_CACHE, key, String(body || ""));
             } finally {
@@ -470,6 +472,7 @@
         text = String(text || "").toLowerCase();
         var typeMatch = text.match(/<span\b[^>]*class=["'][^"']*\bdot\b[^"']*["'][^>]*>\s*(movie|tv|ona|ova|special|music)\s*<\/span>/i);
         if (typeMatch && /movie/i.test(typeMatch[1])) return "movie";
+        if (/<div\b[^>]*class=["'][^"']*\bright\b[^"']*["'][^>]*>\s*movie\s*<\/div>/i.test(text)) return "movie";
         return "anime";
     }
 
@@ -510,6 +513,17 @@
             var item = cardFromHtml(match[0], pageUrl);
             if (item) cards.push(item);
         }
+        // Compact home tables use the anchor itself as the card.
+        var anchorRe = /<a\b([^>]*class=["'][^"']*\bitem\b[^"']*["'][^>]*)>([\s\S]*?)<\/a>/gi;
+        while ((match = anchorRe.exec(html || "")) !== null) {
+            var attrs = parseAttrs(match[1]);
+            if (!/\/watch\//i.test(attrs.href || "")) continue;
+            var body = match[2];
+            var name = (body.match(/<(?:div|span|p)\b[^>]*class=["'][^"']*\bname\b[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|span|p)>/i) || [])[1];
+            var img = (body.match(/<img\b[^>]*(?:data-src|src)=["']([^"']+)["']/i) || [])[1];
+            if (!name) continue;
+            cards.push(safeMultimediaItem({title: cleanText(name), url: absoluteUrl(pageUrl, attrs.href), posterUrl: absoluteUrl(pageUrl, img), type: typeFromText(body)}));
+        }
         return uniqueBy(cards, function (item) { return item.url; });
     }
 
@@ -537,6 +551,7 @@
             var section = match[0];
             var title = cleanText((section.match(/<(?:h2|h3)\b[^>]*class=["'][^"']*(?:title|heading)[^"']*["'][^>]*>([\s\S]*?)<\/(?:h2|h3)>/i) || [])[1] || "");
             if (!title) title = cleanText((section.match(/<div\b[^>]*class=["'][^"']*\bheading\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1] || "");
+            if (!title) title = cleanText((section.match(/<(?:div|a)\b[^>]*class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|a)>/i) || [])[1] || "");
             var items = parseCards(section, BASE_URL + "/home");
             if (title && items.length) sections.push({ title: title, items: items.slice(0, 24) });
         }
@@ -590,6 +605,7 @@
             sections.forEach(function (section) {
                 homeData[section.title] = section.items;
             });
+            if (!Object.keys(homeData).length) throw new Error("No anime cards found in the upstream home response");
             HOME_CACHE = { value: homeData, time: Date.now() };
             Analytics.logEvent('animewave_home', {});
             cb({ success: true, data: homeData });
@@ -637,6 +653,7 @@
         });
         return {
             animeId: watchAttrs["data-id"] || "",
+            type: /Type:\s*<span[^>]*>\s*Movie\s*<\/span>/i.test(infoHtml) ? "movie" : "anime",
             cleanUrl: absoluteUrl(BASE_URL, watchAttrs["data-url"] || url).replace(/\/ep-\d+.*$/i, ""),
             title: title || "AnimeWave",
             posterUrl: absoluteUrl(BASE_URL, poster),
@@ -678,9 +695,9 @@
         var match;
         while ((match = re.exec(html || "")) !== null) {
             var attrs = parseAttrs(match[1]);
-            var epNum = Number(attrs["data-num"] || attrs["data-ep"] || 0) || (episodes.length + 1);
+            var epNum = Number(attrs["data-slug"]) || Number(attrs["data-ep"]) || Number(attrs["data-num"]) || (episodes.length + 1);
             var slug = attrs["data-slug"] || epNum;
-            var name = cleanText(match[2]).replace(/\s+/g, " ") || ("Episode " + epNum);
+            var name = cleanText(attrs.title || (/^[\d.]+$/.test(attrs["data-num"] || "") ? "" : attrs["data-num"]) || match[2]).replace(/\s+/g, " ") || ("Episode " + epNum);
             var watchUrl = meta.cleanUrl.replace(/\/+$/, "") + "/ep-" + slug;
             var epMeta = getAniZipEpisodeMeta(aniZipMeta, epNum);
             var epPoster = (epMeta && epMeta.image) || meta.posterUrl;
@@ -715,6 +732,9 @@
             var meta = parseWatchPage(html, cleanUrl);
             if (!meta.animeId) throw new Error("AnimeWave anime id missing");
             var episodeJson = await getJson(BASE_URL + "/ajax/episode/list/" + encodeURIComponent(meta.animeId) + "?style=&vrf=", ajaxHeaders(cleanUrl), 2 * 60 * 1000);
+            if (episodeJson && typeof episodeJson.status !== "undefined" && Number(episodeJson.status) !== 200) {
+                throw new Error("Episode API " + episodeJson.status + ": " + (episodeJson.message || "upstream request failed"));
+            }
             var episodeHtml = episodeJson && episodeJson.result || "";
 
             var aniZipMeta = null;
@@ -736,6 +756,7 @@
             }
 
             var episodes = parseEpisodes(episodeHtml, meta, aniZipMeta);
+            if (!episodes.length) throw new Error("No episodes returned for " + meta.title);
             var nextAiring = parseNextAiring(html, episodes);
             var item = new MultimediaItem({
                 title: meta.title,
@@ -743,7 +764,7 @@
                 posterUrl: meta.posterUrl,
                 bannerUrl: fanartUrl || meta.bannerUrl,
                 description: meta.description,
-                type: episodes.length === 1 ? "movie" : "anime",
+                type: meta.type,
                 year: meta.year,
                 genres: meta.genres,
                 nextAiring: nextAiring,
@@ -802,33 +823,29 @@
             headers: headers || {},
             referer: headers && headers.Referer || BASE_URL + "/"
         });
+        stream.quality = quality || undefined;
         stream.language = language || "SUB";
         if (subtitles && subtitles.length) stream.subtitles = subtitles;
         return stream;
     }
 
     async function expandM3u8(url, source, language, headers, subtitles) {
-        var rows = [];
-        try {
-            var playlist = await getText(url, headers, 30 * 1000);
-            if (!/#EXTM3U/i.test(playlist || "")) return [];
-
-            var variantRe = /#EXT-X-STREAM-INF:([^\n\r]*)[\r\n]+([^\r\n]+)/gi;
-            var match;
-            var foundVariants = false;
-            while ((match = variantRe.exec(playlist || "")) !== null) {
-                foundVariants = true;
-                var q = getQuality(match[1]);
-                var variantUrl = absoluteUrl(url, trim(match[2]));
-                if (!variantUrl) continue;
-                rows.push(buildStream(variantUrl, source, language, headers, subtitles, q));
-            }
-
-            if (!foundVariants) {
-                var q = getQuality(url);
-                rows.push(buildStream(url, source, language, headers, subtitles, q));
-            }
-        } catch (_) {}
+        var playlist = await getText(url, headers, 15 * 1000);
+        if (!/^#EXTM3U/m.test(playlist)) throw new Error("Player returned a non-HLS response");
+        var rows = [buildStream(url, source, language, headers, subtitles)];
+        // VLC resolves audio renditions from the master. A bare video variant
+        // cannot carry an external audio group, so retain only the master there.
+        if (playlist.split(/\r?\n/).some(function (line) {
+            return /^#EXT-X-MEDIA:/i.test(line) && /(?:[:,])\s*TYPE=AUDIO(?:,|$)/i.test(line) && /(?:[:,])\s*URI=/i.test(line);
+        })) return rows;
+        var variantRe = /#EXT-X-STREAM-INF:([^\n\r]*)[\r\n]+([^\r\n]+)/gi;
+        var match;
+        while ((match = variantRe.exec(playlist)) !== null) {
+            var resolution = match[1].match(/RESOLUTION=\d+x(\d+)/i);
+            var q = resolution ? Number(resolution[1]) : getQuality(match[1]);
+            var variantUrl = absoluteUrl(url, trim(match[2]));
+            if (variantUrl) rows.push(buildStream(variantUrl, source, language, headers, subtitles, q));
+        }
         return uniqueBy(rows, function (item) { return item.url; });
     }
 
@@ -844,6 +861,28 @@
         return expandM3u8(streamUrl, source + " [Direct]", language, headers, []);
     }
 
+    // MegaPlay e1-player v1.8 uses AES-256-CBC for the public source response.
+    // Use the app bridge; no browser/player script execution is required.
+    async function decodeMegaSources(json) {
+        if (!json || !json.enc) return json && json.sources;
+        var data = String(json.enc).replace(/-/g, "+").replace(/_/g, "/");
+        while (data.length % 4) data += "=";
+        var key = base64Encode("i?LMTAx0Q6,:}50U" + "\0".repeat(16));
+        var iv = base64Encode("W0;27ToaUpl_P%'c");
+        var plain = "";
+        if (typeof crypto !== "undefined" && typeof crypto.decryptAES === "function") {
+            try { plain = await crypto.decryptAES(data, key, iv, { mode: "cbc" }); } catch (_) {}
+        }
+        if (!plain && typeof sendMessage === "function") {
+            plain = await sendMessage("crypto_decrypt_aes", JSON.stringify({ data: data, key: key, iv: iv }));
+        }
+        try {
+            var decoded = JSON.parse(plain || "{}");
+            if (decoded.file) return decoded;
+        } catch (_) {}
+        throw new Error("MegaPlay source decryption failed");
+    }
+
     async function resolveMegaFamily(embedUrl, source, language, referer) {
         var origin = (new URL(embedUrl)).origin;
         var pageHtml = await getText(embedUrl, {
@@ -853,7 +892,7 @@
         }, 30 * 1000);
 
         var iframe = (pageHtml.match(/<iframe\b[^>]*src=["']([^"']+)["']/i) || [])[1] || "";
-        if (iframe && /(?:megaplay|vidwish|vidtube|megacloud|bloggy|kwik|kiwi)/i.test(iframe)) {
+        if (iframe && /(?:megaplay|vidwish|vidtube|megacloud|bloggy|kwik|kiwi|kotocdn)/i.test(iframe)) {
             return resolveHost(absoluteUrl(embedUrl, iframe), source, language, embedUrl);
         }
 
@@ -862,14 +901,20 @@
             || "";
         if (!id) return [];
 
-        var json = await getJson(origin + "/stream/getSources?id=" + encodeURIComponent(id), {
+        var cdn = (embedUrl.match(/[?&]s=([a-z0-9_-]+)/i) || [])[1] || "";
+        // The tcdn route wraps TS segments in PNG bytes and needs browser JS
+        // to strip them. Request the same video's normal, muxed CDN for VLC.
+        if (cdn.toLowerCase() === "tcdn") cdn = "";
+        var endpoint = /megaplay\.buzz$/i.test((new URL(embedUrl)).hostname) ? "getSourcesNew" : "getSources";
+        var json = await getJson(origin + "/stream/" + endpoint + "?id=" + encodeURIComponent(id) + "&platform=OTHER" + (cdn ? "&s=" + encodeURIComponent(cdn) : ""), {
             "User-Agent": USER_AGENT,
             "Accept": "application/json, text/javascript, */*; q=0.01",
             "X-Requested-With": "XMLHttpRequest",
-            "Referer": embedUrl || (origin + "/")
-        }, 30 * 1000);
-        var file = json && json.sources && (json.sources.file || (json.sources[0] && json.sources[0].file)) || "";
-        if (!file) return [];
+            "Referer": embedUrl
+        }, 15 * 1000);
+        var sources = await decodeMegaSources(json);
+        var file = sources && (sources.file || (sources[0] && sources[0].file)) || "";
+        if (!file) throw new Error("No media URL returned by " + origin);
         file = file.replace(/\\\//g, "/");
         var subtitles = uniqueBy((json.tracks || []).map(normalizeSubtitleTrack).filter(Boolean), function (item) {
             return item.url;
@@ -906,14 +951,11 @@
         };
 
         if (/\.(?:m3u8|mp4|mkv|webm|mpd)(?:$|[?#])/i.test(resultUrl)) {
-            return expandM3u8(resultUrl, source, lang, headers, []);
+            if (/\.m3u8(?:$|[?#])/i.test(resultUrl)) return expandM3u8(resultUrl, source, lang, headers, []);
+            return [buildStream(resultUrl, source, lang, headers, [])];
         }
 
-        try {
-            return await resolveHost(resultUrl, source, lang, referer);
-        } catch (_) {
-            return [];
-        }
+        return resolveHost(resultUrl, source, lang, referer);
     }
 
     async function loadStreams(url, cb) {
@@ -942,6 +984,9 @@
                     var meta = parseWatchPage(html, targetWatchUrl);
                     if (meta && meta.animeId) {
                         var episodeJson = await getJson(BASE_URL + "/ajax/episode/list/" + encodeURIComponent(meta.animeId) + "?style=&vrf=", ajaxHeaders(targetWatchUrl), 2 * 60 * 1000);
+                        if (episodeJson && typeof episodeJson.status !== "undefined" && Number(episodeJson.status) !== 200) {
+                            throw new Error("Episode API " + episodeJson.status + ": " + (episodeJson.message || "upstream request failed"));
+                        }
                         var epHtml = episodeJson && episodeJson.result || "";
                         var targetEp = payload.episode || 1;
                         var targetSlug = payload.slug || targetEp;
@@ -959,16 +1004,21 @@
                 }
             }
 
-            if (!servers.length) return cb({ success: true, data: [] });
+            if (!servers.length) throw new Error("No streaming servers found for this episode");
 
+            var failures = [];
             var batches = await Promise.all(servers.map(function (server) {
-                return resolveServer(server, referer).catch(function () { return []; });
+                return resolveServer(server, referer).catch(function (error) {
+                    failures.push(server.name + ": " + String(error && error.message || error));
+                    return [];
+                });
             }));
             var streams = uniqueBy([].concat.apply([], batches).filter(Boolean), function (item) {
                 return item && item.url;
             }).sort(function (a, b) {
                 return Number(b.quality || 0) - Number(a.quality || 0);
             });
+            if (!streams.length) throw new Error("No playable streams found" + (failures.length ? ": " + failures.join("; ") : " (unsupported or unavailable player)"));
             Analytics.logEvent('animewave_loadstreams', {});
             cb({ success: true, data: streams });
         } catch (error) {
