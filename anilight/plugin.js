@@ -44,6 +44,17 @@ function responseStatus(res) {
   return 0;
 }
 
+function jsonResponse(res, label) {
+  var status = responseStatus(res);
+  if (status && (status < 200 || status >= 300))
+    throw new Error(label + " returned HTTP " + status);
+  var data = parseJsonSafe(res && (res.body || res.text), null);
+  if (!data || typeof data !== "object")
+    throw new Error(label + " returned invalid JSON");
+  if (data.error) throw new Error(label + ": " + data.error);
+  return data;
+}
+
 function getTvType(format, type) {
   var ft = String(format || type || "").toUpperCase();
   if (ft === "MOVIE" || ft === "SPECIAL") return "movie";
@@ -79,6 +90,9 @@ function getQualityFromName(quality) {
 
 function resolveUrl(base, relative) {
   if (!relative) return base;
+  if (typeof URL === "function") {
+    try { return new URL(relative, base).toString(); } catch (_) {}
+  }
   if (relative.indexOf("http://") === 0 || relative.indexOf("https://") === 0)
     return relative;
   if (relative.indexOf("//") === 0) return "https:" + relative;
@@ -130,7 +144,7 @@ function parseHlsVariants(m3u8Content, baseUrl) {
 
       variants.push({
         url: vUrl,
-        height: currentInf.height || getQualityFromName(label) || 1080,
+        height: currentInf.height || getQualityFromName(label) || 0,
         bandwidth: currentInf.bandwidth,
         label: label,
       });
@@ -228,7 +242,7 @@ function mapMediaItem(item) {
   var score = item.averageScore
     ? parseFloat((item.averageScore / 10).toFixed(1))
     : 0;
-  var year = item.year ? parseInt(item.year, 10) : 0;
+  var year = parseInt(item.year || item.seasonYear || (item.startDate && item.startDate.year), 10) || 0;
   var status = item.status === "FINISHED" ? "completed" : "ongoing";
 
   return new MultimediaItem({
@@ -245,6 +259,81 @@ function mapMediaItem(item) {
     description: stripHtml(item.description || ""),
     headers: HEADERS,
   });
+}
+
+// Stream URLs must identify real native media, not an iframe or a guessed
+// quality path. VLC can play a master with audio renditions as one URL.
+function mediaStream(url, source, headers, subtitles, quality) {
+  var stream = new StreamResult({url: url, source: source + (quality ? " [" + quality + "p]" : " [Auto]"), headers: headers, subtitles: subtitles});
+  if (quality) stream.quality = quality;
+  return stream;
+}
+
+function normalizeTracks(tracks) {
+  return (Array.isArray(tracks) ? tracks : []).filter(function (track) {
+    return track && (track.file || track.url) && (!track.kind || /^(captions|subtitles)$/.test(track.kind));
+  }).map(function (track) {
+    return {url: track.file || track.url, label: track.label || track.lang || "English", language: track.label || track.lang || "English"};
+  });
+}
+
+async function expandMedia(url, source, headers, subtitles, quality) {
+  if (!/^https?:\/\//i.test(String(url || ""))) throw new Error("Invalid media URL");
+  if (!/\.m3u8(?:$|[?#])/i.test(url)) return [mediaStream(url, source, headers, subtitles, quality)];
+  var response = await http_get(url, headers);
+  var status = responseStatus(response);
+  if (status && (status < 200 || status >= 300)) throw new Error("Media playlist returned HTTP " + status);
+  var playlist = String(response && (response.body || response.text) || "");
+  if (playlist.indexOf("#EXTM3U") === -1) throw new Error("Media URL did not return HLS");
+  var rows = [mediaStream(url, source, headers, subtitles, quality)];
+  // Child playlists lose externally declared audio. Keep the original master
+  // whenever the upstream uses audio renditions; it already combines both.
+  if (/#EXT-X-MEDIA:[^\r\n]*TYPE=AUDIO/i.test(playlist)) return rows;
+  var variants = parseHlsVariants(playlist, url) || [];
+  for (var i = 0; i < variants.length; i++) rows.push(mediaStream(variants[i].url, source, headers, subtitles, variants[i].height));
+  return rows;
+}
+
+async function decodeEmbedSources(data) {
+  if (!data.enc) return data.sources;
+  var encrypted = String(data.enc).replace(/-/g, "+").replace(/_/g, "/");
+  while (encrypted.length % 4) encrypted += "=";
+  var encode = function (value) {
+    if (typeof btoa === "function") return btoa(value);
+    return Buffer.from(value, "binary").toString("base64");
+  };
+  // Public MegaPlay e1-player v1.8 source-response AES-256-CBC parameters.
+  var key = encode("i?LMTAx0Q6,:}50U" + "\0".repeat(16));
+  var iv = encode("W0;27ToaUpl_P%'c");
+  var plain = "";
+  if (typeof crypto !== "undefined" && typeof crypto.decryptAES === "function") {
+    try { plain = await crypto.decryptAES(encrypted, key, iv, {mode: "cbc"}); } catch (_) {}
+  }
+  if (!plain && typeof sendMessage === "function") plain = await sendMessage("crypto_decrypt_aes", JSON.stringify({data: encrypted, key: key, iv: iv}));
+  var decoded = parseJsonSafe(plain, null);
+  if (!decoded || !decoded.file) throw new Error("MegaPlay source decryption failed");
+  return decoded;
+}
+
+async function resolveEpisodeEmbed(embed, type) {
+  if (!/^https:\/\/megaplay\.buzz\//i.test(embed)) throw new Error("Unsupported episode embed host");
+  // MegaPlay requires the originating site's Referer to expose this episode.
+  var page = await http_get(embed, {"User-Agent": USER_AGENT, Referer: BASE_URL + "/", Accept: "text/html"});
+  var status = responseStatus(page);
+  if (status && (status < 200 || status >= 300)) throw new Error("Episode embed returned HTTP " + status);
+  var html = String(page && (page.body || page.text) || "");
+  var id = (html.match(/<title>\s*File\s+(\d+)/i) || [])[1] || (html.match(/data-id=["'](\d+)["']/i) || [])[1];
+  if (!id) throw new Error("MegaPlay episode embed is unavailable");
+  // Omit s=tcdn: that CDN wraps TS bytes in PNG and needs browser JS.
+  var data = jsonResponse(await http_get("https://megaplay.buzz/stream/getSourcesNew?id=" + encodeURIComponent(id) + "&platform=OTHER", {
+    "User-Agent": USER_AGENT, Referer: embed, "X-Requested-With": "XMLHttpRequest", Accept: "application/json"
+  }), "MegaPlay sources");
+  var sources = await decodeEmbedSources(data);
+  var file = sources && (sources.file || (sources[0] && sources[0].file));
+  if (!file) throw new Error("MegaPlay returned no native media URL");
+  return expandMedia(file.replace(/\\\//g, "/"), "Anilight MegaPlay " + type, {
+    "User-Agent": USER_AGENT, Referer: "https://megaplay.buzz/", Origin: "https://megaplay.buzz"
+  }, normalizeTracks(data.tracks), 0);
 }
 
 // ========== Core Functions ==========
@@ -285,7 +374,7 @@ async function getHome(cb) {
     for (var i = 0; i < categories.length; i++) {
       var cat = categories[i];
       var res = responses[i];
-      var data = parseJsonSafe(res && res.body, null);
+      var data = jsonResponse(res, cat.name);
       var mediaList = data && Array.isArray(data.media) ? data.media : [];
       var items = mediaList.map(mapMediaItem).filter(Boolean);
       if (items.length > 0) {
@@ -293,6 +382,7 @@ async function getHome(cb) {
       }
     }
 
+    if (!Object.keys(homeData).length) throw new Error("No anime returned by home categories");
     cb({ success: true, data: homeData });
   } catch (e) {
     cb({
@@ -313,7 +403,7 @@ async function search(query, cb) {
     var searchUrl =
       API_URL + "/api/filter?page=1&search=" + encodeURIComponent(query || "");
     var res = await http_get(searchUrl, HEADERS);
-    var data = parseJsonSafe(res && (res.body || res.text), null);
+    var data = jsonResponse(res, "Search");
     var mediaList = data && Array.isArray(data.media) ? data.media : [];
     var results = mediaList.map(mapMediaItem).filter(Boolean);
 
@@ -350,14 +440,9 @@ async function load(url, cb) {
     ];
     var detailResponses = await httpParallelGet(detailRequests);
 
-    var animeData = parseJsonSafe(
-      detailResponses[0] && detailResponses[0].body,
-      {},
-    );
-    var watchData = parseJsonSafe(
-      detailResponses[1] && detailResponses[1].body,
-      {},
-    );
+    var animeData = jsonResponse(detailResponses[0], "Anime details");
+    var watchData = jsonResponse(detailResponses[1], "Episode list");
+    watchData = watchData.data || watchData;
 
     if (!animeData || !animeData.slug) {
       cb({
@@ -405,7 +490,7 @@ async function load(url, cb) {
     var score = animeData.averageScore
       ? parseFloat((animeData.averageScore / 10).toFixed(1))
       : 0;
-    var year = animeData.year ? parseInt(animeData.year, 10) : 0;
+    var year = parseInt(animeData.year || animeData.seasonYear || (animeData.startDate && animeData.startDate.year), 10) || 0;
     var duration = animeData.duration ? parseInt(animeData.duration, 10) : 0;
     var status = animeData.status === "FINISHED" ? "completed" : "ongoing";
     var genres = Array.isArray(animeData.genres) ? animeData.genres : [];
@@ -481,7 +566,9 @@ async function load(url, cb) {
           ? parseInt(anizipEp.runtime, 10)
           : duration;
 
-      if (subProviders.length > 0 || dubProviders.length === 0) {
+      var availableEmbeds = ep.embed_url || {};
+      var hasEmbedLanguages = Object.keys(availableEmbeds).length > 0;
+      if (availableEmbeds.sub || subProviders.length > 0 || (!hasEmbedLanguages && dubProviders.length === 0)) {
         episodes.push(
           new Episode({
             name: epTitle,
@@ -507,7 +594,7 @@ async function load(url, cb) {
         );
       }
 
-      if (dubProviders.length > 0) {
+      if (availableEmbeds.dub || dubProviders.length > 0) {
         episodes.push(
           new Episode({
             name: epTitle,
@@ -534,6 +621,7 @@ async function load(url, cb) {
       }
     }
 
+    if (!episodes.length) throw new Error("No playable episodes listed for " + title);
     var syncDataObj = {};
     if (malId) syncDataObj.mal = String(malId);
     if (anilistId) syncDataObj.anilist = String(anilistId);
@@ -631,179 +719,53 @@ async function loadStreams(url, cb) {
       }
     }
 
-    var watchData = null;
-    if (!animeId && slug) {
-      var watchRes = await http_get(API_URL + "/api/watch/" + slug, HEADERS);
-      watchData = parseJsonSafe(
-        watchRes && (watchRes.body || watchRes.text),
-        null,
-      );
-      if (watchData && watchData.id) {
-        animeId = parseInt(watchData.id, 10);
-      }
-    }
+    if (!slug) throw new Error("A watch/anime slug is required to select an episode");
+    var watchData = jsonResponse(await http_get(API_URL + "/api/watch/" + slug, HEADERS), "Episode list");
+    watchData = watchData.data || watchData;
+    animeId = parseInt(watchData.id, 10) || animeId;
+    if (!animeId) throw new Error("Could not determine anime ID for streaming");
+    if (type !== "sub" && type !== "dub") throw new Error("Unsupported episode language");
 
-    if (!animeId) {
-      cb({
-        success: false,
-        errorCode: "STREAM_ERROR",
-        message: "Could not determine anime ID for streaming",
-      });
-      return;
-    }
-
-    var providers = [];
-    if (!watchData && slug) {
-      var wRes = await http_get(API_URL + "/api/watch/" + slug, HEADERS);
-      watchData = parseJsonSafe(wRes && (wRes.body || wRes.text), null);
-    }
-
-    if (watchData && watchData.servers) {
-      var serverList =
-        type === "dub"
-          ? watchData.servers.dubProviders
-          : watchData.servers.subProviders;
-      if (Array.isArray(serverList) && serverList.length > 0) {
-        providers = serverList;
-      }
-    }
-
-    if (!providers.length) {
-      providers = [
-        { id: "light", tip: "Hard Sub, Fast" },
-        { id: "mello", tip: "Hard Sub, Fast" },
-        { id: "misa", tip: "Soft Sub, Fast" },
-        { id: "misora", tip: "Hard Sub, Fast" },
-        { id: "near", tip: "Hard Sub, Fast" },
-        { id: "rem", tip: "Soft Sub, Fast" },
-        { id: "ryu", tip: "Hard sub, Fast" },
-      ];
-    }
-
-    // Concurrently fetch sources from ALL providers via http_parallel
-    var sourceRequests = providers.map(function (p) {
-      return {
-        url:
-          API_URL +
-          "/api/sources?id=" +
-          animeId +
-          "&epNum=" +
-          epNum +
-          "&type=" +
-          type +
-          "&providerId=" +
-          p.id,
-      };
-    });
-
-    var sourceResponses = await httpParallelGet(sourceRequests);
-
+    var episode = (watchData.episodes || []).filter(function (ep) {
+      return Number(ep.number || ep.epNum) === epNum;
+    })[0];
+    if (!episode) throw new Error("Episode " + epNum + " is not listed by AniLight");
     var allStreams = [];
+    var failures = [];
+    var embed = episode.embed_url && episode.embed_url[type];
+    if (embed) {
+      try {
+        allStreams = await resolveEpisodeEmbed(embed, type);
+      } catch (error) { failures.push(String(error.message || error)); }
+    }
 
+    // Legacy API responses may still list direct providers. New responses
+    // expose an official per-episode embed instead; never invent provider IDs.
+    var serverList = watchData.servers && watchData.servers[type === "dub" ? "dubProviders" : "subProviders"];
+    var providers = Array.isArray(serverList) ? serverList : [];
+    var responses = await httpParallelGet(providers.map(function (provider) {
+      return {url: API_URL + "/api/sources?id=" + animeId + "&epNum=" + epNum + "&type=" + type + "&providerId=" + encodeURIComponent(provider.id)};
+    }));
     for (var pIdx = 0; pIdx < providers.length; pIdx++) {
-      var provider = providers[pIdx];
-      var sRes = sourceResponses[pIdx];
-      var srcData = parseJsonSafe(sRes && sRes.body, {});
-      var sources = Array.isArray(srcData.sources) ? srcData.sources : [];
-      var tracks = Array.isArray(srcData.tracks) ? srcData.tracks : [];
-
-      var subtitles = [];
-      for (var t = 0; t < tracks.length; t++) {
-        var trk = tracks[t];
-        if (
-          trk &&
-          trk.url &&
-          (trk.kind === "captions" || trk.kind === "subtitles" || !trk.kind)
-        ) {
-          subtitles.push({
-            url: trk.url,
-            label: trk.label || trk.lang || "English",
-          });
+      try {
+        var provider = providers[pIdx];
+        var sourceData = jsonResponse(responses[pIdx], "Provider " + provider.id);
+        var sources = Array.isArray(sourceData.sources) ? sourceData.sources : [];
+        var subtitles = normalizeTracks(sourceData.tracks);
+        for (var si = 0; si < sources.length; si++) {
+          var src = sources[si];
+          if (!src || !src.url || src.type === "embed") continue;
+          var urls = Array.isArray(src.url) ? src.url : [src.url];
+          for (var ui = 0; ui < urls.length; ui++) {
+            var headers = Object.assign({}, STREAM_HEADERS, sourceData.headers || {}, src.headers || {});
+            var rows = await expandMedia(urls[ui], "Anilight " + provider.id + " " + type, headers, subtitles, getQualityFromName(src.quality));
+            allStreams = allStreams.concat(rows);
+          }
         }
-      }
-
-      var providerName =
-        provider.id.charAt(0).toUpperCase() + provider.id.slice(1);
-      var subType =
-        type === "dub"
-          ? "Dub"
-          : provider.tip && /soft/i.test(provider.tip)
-            ? "Soft Sub"
-            : provider.tip && /hard/i.test(provider.tip)
-              ? "Hard Sub"
-              : "Sub";
-
-      var baseSourceName = "Anilight " + providerName + " " + subType;
-
-      for (var sIdx = 0; sIdx < sources.length; sIdx++) {
-        var src = sources[sIdx];
-        if (!src || !src.url) continue;
-
-        // Skip embed links per instructions
-        if (src.type === "embed") continue;
-
-        var isHls = src.type === "hls" || /\.m3u8(?:$|[?#])/i.test(src.url);
-
-        // Fast direct unpacking for vibevibe master streams
-        if (
-          isHls &&
-          src.url.indexOf("vibevibe.workers.dev") !== -1 &&
-          src.url.indexOf("master.m3u8") !== -1
-        ) {
-          allStreams.push(
-            new StreamResult({
-              url: src.url.replace(/master\.m3u8$/, "1080p/index.m3u8"),
-              source: baseSourceName + " [1080p]",
-              quality: 1080,
-              type: "hls",
-              headers: STREAM_HEADERS,
-              subtitles: subtitles.length > 0 ? subtitles : undefined,
-            }),
-          );
-          allStreams.push(
-            new StreamResult({
-              url: src.url.replace(/master\.m3u8$/, "720p/index.m3u8"),
-              source: baseSourceName + " [720p]",
-              quality: 720,
-              type: "hls",
-              headers: STREAM_HEADERS,
-              subtitles: subtitles.length > 0 ? subtitles : undefined,
-            }),
-          );
-          allStreams.push(
-            new StreamResult({
-              url: src.url.replace(/master\.m3u8$/, "360p/index.m3u8"),
-              source: baseSourceName + " [360p]",
-              quality: 360,
-              type: "hls",
-              headers: STREAM_HEADERS,
-              subtitles: subtitles.length > 0 ? subtitles : undefined,
-            }),
-          );
-          continue;
-        }
-
-        var qual = getQualityFromName(src.quality);
-        if (isHls && !qual) qual = 1080;
-
-        var qualLabel =
-          qual > 0
-            ? " [" + qual + "p]"
-            : src.quality
-              ? " [" + src.quality + "]"
-              : "";
-
-        allStreams.push(
-          new StreamResult({
-            url: src.url,
-            source: baseSourceName + qualLabel,
-            quality: qual || undefined,
-            type: isHls ? "hls" : undefined,
-            headers: STREAM_HEADERS,
-            subtitles: subtitles.length > 0 ? subtitles : undefined,
-          }),
-        );
-      }
+      } catch (error) { failures.push(String(error.message || error)); }
+    }
+    if (!allStreams.length) {
+      throw new Error(failures.join("; ") || "No native media source is available for episode " + epNum + " (" + type + ")");
     }
 
     // Deduplicate streams by URL
