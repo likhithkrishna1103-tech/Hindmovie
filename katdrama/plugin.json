@@ -1,0 +1,19 @@
+{
+  "packageName": "com.igris.repo.katdrama",
+  "name": "Katdrama",
+  "version": 1,
+  "baseUrl": "https://new.katdrama.my",
+  "description": "Korean and Asian dramas and movies from KatDrama",
+  "authors": [
+    "Developer"
+  ],
+  "languages": [
+    "hi",
+    "en",
+    "ko"
+  ],
+  "categories": [
+    "Movies",
+    "Series"
+  ]
+}
