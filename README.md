@@ -26,7 +26,7 @@ If you find this project helpful, consider supporting its development!
 | CineStream | 28 | 🛠️ plugin is under Maintenance and will be fixed soon | Movies, Series, Anime | en, hi, ja |
 | HiAnime | 3 | Working ✅️ | Anime | en, ja |
 | HindMoviez | 17 | Working ✅️ | Movies, Series | hi, en, ta, te, ml, kn |
-| Katdrama | 1 | Working ✅️ | Movies, Series | hi, en, ko |
+| Katdrama | 2 | Working ✅️ | Movies, Series | hi, en, ko |
 | Live Sports 🏏 | 11 | Working ✅️ | LiveTv | en, hi |
 | Movies4U | 54 | Working ✅️ | Movies | hi, en, ta, te, ml, kn |
 | Mplayer | 2 | Working ✅️ | Movies, Series | hi, en, te |
