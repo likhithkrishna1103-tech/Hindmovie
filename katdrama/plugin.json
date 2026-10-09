@@ -4,16 +4,7 @@
   "version": 1,
   "baseUrl": "https://new.katdrama.my",
   "description": "Korean and Asian dramas and movies from KatDrama",
-  "authors": [
-    "Developer"
-  ],
-  "languages": [
-    "hi",
-    "en",
-    "ko"
-  ],
-  "categories": [
-    "Movies",
-    "Series"
-  ]
+  "authors": ["Developer"],
+  "languages": ["hi", "en", "ko"],
+  "categories": ["Movies", "Series"]
 }
