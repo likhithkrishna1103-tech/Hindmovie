@@ -269,6 +269,26 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.hindmoviez.sky"
   },
   {
+    "packageName": "com.igris.repo.katdrama",
+    "name": "Katdrama",
+    "version": 1,
+    "baseUrl": "https://new.katdrama.my",
+    "description": "Korean and Asian dramas and movies from KatDrama",
+    "authors": [
+      "Developer"
+    ],
+    "languages": [
+      "hi",
+      "en",
+      "ko"
+    ],
+    "categories": [
+      "Movies",
+      "Series"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.katdrama.sky"
+  },
+  {
     "packageName": "com.igris.repo.movies4u",
     "name": "Movies4U",
     "version": 54,
