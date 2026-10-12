@@ -7,7 +7,10 @@ ZORO is an extension repo for [SkyStream](https://github.com/akashdh11/skystream
 If you find this project helpful, consider supporting its development!
 
 Via UPI 🇮🇳
+
 <a href="https://kulhad.co/likhith73"><img src="https://kulhad.co/api/button.png?text=Buy%20me%20a%20coffee%20&amp;color=%230E7A80" alt="Buy me a coffee " height="57"></a>
+
+For international 🌎
 
 <a href="https://buymeacoffee.com/likhith73" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
