@@ -33,7 +33,7 @@ Via UPI 🇮🇳
 | HindMoviez | 17 | Working ✅️ | Movies, Series | hi, en, ta, te, ml, kn |
 | Katdrama | 2 | Working ✅️ | Movies, Series | hi, en, ko |
 | Live Sports 🏏 | 11 | Working ✅️ | LiveTv | en, hi |
-| Lunar | 2 | Working ✅️ | Anime | en |
+| Lunar | 3 | Working ✅️ | Anime | en, ja |
 | Movies4U | 54 | Working ✅️ | Movies | hi, en, ta, te, ml, kn |
 | Mplayer | 2 | Working ✅️ | Movies, Series | hi, en, te |
 | Netmirror | 5 | Working ✅️ | Movies, TV Shows | en, hi |
