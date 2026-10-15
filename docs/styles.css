@@ -201,15 +201,6 @@ h1 {
   white-space: nowrap;
 }
 
-.hello-arrow {
-  display: inline-block;
-  color: #8f8c87;
-  font-size: .47em;
-  vertical-align: top;
-  margin: .2em 0 0 .05em;
-  letter-spacing: 0;
-}
-
 .intro-text {
   max-width: 500px;
   margin-top: 30px;
@@ -242,7 +233,6 @@ h1 {
   line-height: .9;
   letter-spacing: -.055em;
   margin: 0 .04em 0 .02em;
-  transform: rotate(-5deg);
   color: var(--accent);
 }
 
