@@ -1,0 +1,560 @@
+@font-face {
+  font-family: 'Red Hat';
+  src: url('./assets/fonts/red-hat-display.ttf') format('truetype');
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: Editorial;
+  src: url('./assets/fonts/editorial-italic.ttf') format('truetype');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+  --background: #171717;
+  --text: #f1eee8;
+  --muted: #b0ada8;
+  --accent: #d5f895;
+  --font: 'Red Hat', Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-padding-top: 24px;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: #ded8ce;
+  color: #171717;
+}
+
+p, h1 {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button, a {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 5px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+svg {
+  display: block;
+}
+
+.icon-library {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  transform: translateY(-160%);
+  padding: 12px 20px;
+  background: var(--text);
+  color: var(--background);
+  z-index: 10;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.page-shell {
+  width: min(100% - 112px, 1280px);
+  min-height: 100svh;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 108px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -1.7px;
+}
+
+.brand-mark {
+  width: 33px;
+  height: 33px;
+  color: var(--accent);
+}
+
+.brand-period {
+  color: var(--accent);
+}
+
+.header-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  min-width: 44px;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.header-link .icon {
+  width: 25px;
+  height: 25px;
+}
+
+.header-link:hover {
+  color: var(--text);
+}
+
+main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  padding: 68px 0 80px;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1.08fr 1fr;
+  align-items: center;
+  gap: 40px;
+  width: 100%;
+}
+
+.hero-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 570px;
+}
+
+h1 {
+  font-size: clamp(38px, 4.2vw, 63px);
+  line-height: 1.15;
+  font-weight: 500;
+  letter-spacing: -.055em;
+  white-space: nowrap;
+}
+
+.hello-arrow {
+  display: inline-block;
+  color: #8f8c87;
+  font-size: .47em;
+  vertical-align: top;
+  margin: .2em 0 0 .05em;
+  letter-spacing: 0;
+}
+
+.intro-text {
+  max-width: 500px;
+  margin-top: 30px;
+  font-size: 16px;
+  line-height: 1.95;
+  color: var(--muted);
+}
+
+.intro-text p + p {
+  margin-top: 20px;
+}
+
+.intro-text a {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-color: #827d75;
+}
+
+.intro-text a:hover {
+  text-decoration-color: var(--text);
+}
+
+.signature {
+  display: inline-block;
+  font-family: Editorial, Georgia, serif;
+  font-size: 1.22em;
+  font-style: italic;
+  font-weight: 400;
+  line-height: .9;
+  letter-spacing: -.055em;
+  margin: 0 .04em 0 .02em;
+  transform: rotate(-5deg);
+  color: var(--accent);
+}
+
+.donation-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 38px;
+}
+
+.donation-button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 11px;
+  min-height: 62px;
+  padding: 16px 20px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 650;
+  white-space: nowrap;
+  transition: background-color .15s, border-color .15s;
+}
+
+.donation-upi {
+  background: #eee9df;
+  color: #22201d;
+}
+
+.donation-upi:hover {
+  background: #fffaf2;
+}
+
+.donation-coffee {
+  border-color: #63605b;
+  background: #222222;
+  color: var(--text);
+}
+
+.donation-coffee:hover {
+  background: #2b2b2b;
+  border-color: #9b958a;
+}
+
+.rupee-icon {
+  width: 22px;
+  text-align: center;
+  font-family: Arial, sans-serif;
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.coffee-icon {
+  width: 23px;
+  height: 23px;
+  color: #f0cf76;
+}
+
+.link-arrow {
+  width: 15px;
+  height: 15px;
+  margin-left: 4px;
+  opacity: .75;
+}
+
+.hero-art {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  aspect-ratio: 1;
+  overflow: clip;
+}
+
+.cup-shadow {
+  position: absolute;
+  left: 20%;
+  bottom: 15%;
+  width: 62%;
+  height: 9%;
+  background: #000;
+  opacity: .5;
+  border-radius: 50%;
+  filter: blur(20px);
+}
+
+.sculpture-fallback {
+  position: absolute;
+  inset: 5%;
+  width: 90%;
+  height: 90%;
+}
+
+#sculpture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity .5s;
+}
+
+.sculpture-ready #sculpture {
+  opacity: 1;
+}
+
+.sculpture-ready .sculpture-fallback {
+  visibility: hidden;
+}
+
+.motion-toggle {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 14px;
+  transform: translateX(-50%);
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #a6a29b;
+  font-family: var(--font);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.motion-toggle:hover {
+  color: var(--text);
+  background: #ffffff06;
+}
+
+.motion-toggle:focus-visible {
+  outline-offset: -2px;
+}
+
+@media (min-width: 1600px) {
+  .hero {
+    gap: 64px;
+  }
+
+  .hero-art {
+    margin-block: 10px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .page-shell {
+    width: calc(100% - 80px);
+  }
+
+  .hero {
+    grid-template-columns: 1.1fr 1fr;
+    gap: 24px;
+  }
+
+  h1 {
+    font-size: 4.3vw;
+  }
+
+  .intro-text {
+    font-size: 15px;
+    line-height: 1.9;
+  }
+
+  .donation-button {
+    padding-inline: 15px;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  .donation-options {
+    gap: 10px;
+  }
+
+  .link-arrow {
+    display: none;
+  }
+}
+
+@media (max-width: 850px) {
+  .page-shell {
+    width: calc(100% - 56px);
+  }
+
+  .site-header {
+    min-height: 88px;
+  }
+
+  main {
+    padding-block: 52px;
+  }
+
+  .hero {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  h1 {
+    font-size: 4.5vw;
+  }
+
+  .intro-text {
+    font-size: 14px;
+    line-height: 1.85;
+    margin-top: 25px;
+  }
+
+
+  .donation-options {
+    flex-direction: column;
+    align-items: flex-start;
+    margin-top: 29px;
+  }
+
+  .donation-button {
+    min-width: 216px;
+    min-height: 56px;
+    justify-content: flex-start;
+    padding-inline: 20px;
+    font-size: 14px;
+    gap: 12px;
+  }
+
+  .hero-art {
+    align-self: center;
+  }
+}
+
+@media (max-width: 600px) {
+  .page-shell {
+    width: calc(100% - 40px);
+  }
+
+  .site-header {
+    min-height: 78px;
+    gap: 16px;
+  }
+
+  .brand {
+    font-size: 24px;
+    gap: 7px;
+  }
+
+  .brand-mark {
+    width: 28px;
+    height: 28px;
+  }
+
+  .header-link {
+    font-size: 11px;
+    gap: 8px;
+  }
+
+  main {
+    display: block;
+    padding: 46px 0 30px;
+  }
+
+  .hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 25px;
+  }
+
+  h1 {
+    font-size: clamp(29px, 7.9vw, 47px);
+    letter-spacing: -.05em;
+  }
+
+  .intro-text {
+    font-size: 15px;
+    line-height: 1.85;
+    margin-top: 25px;
+    max-width: 480px;
+  }
+
+  .intro-text p + p {
+    margin-top: 17px;
+  }
+
+
+  .donation-options {
+    margin-top: 30px;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .donation-button {
+    width: 100%;
+    min-height: 60px;
+    justify-content: center;
+    font-size: 15px;
+  }
+
+  .link-arrow {
+    display: block;
+  }
+
+  .hero-art {
+    width: min(100%, 400px);
+    margin-inline: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
