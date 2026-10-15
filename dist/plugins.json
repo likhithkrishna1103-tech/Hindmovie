@@ -289,6 +289,23 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.katdrama.sky"
   },
   {
+    "packageName": "com.igris.repo.lunar",
+    "name": "Lunar",
+    "version": 2,
+    "baseUrl": "https://lunarx.to",
+    "description": "LunarX anime catalog, sub/dub episodes, and verified native HLS streams",
+    "authors": [
+      "Developer"
+    ],
+    "languages": [
+      "en"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.lunar.sky"
+  },
+  {
     "packageName": "com.igris.repo.movies4u",
     "name": "Movies4U",
     "version": 54,
