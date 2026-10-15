@@ -14,6 +14,7 @@
     <link rel="preload" href="./assets/fonts/editorial-italic.ttf" as="font" type="font/ttf" crossorigin>
     <link rel="stylesheet" href="./styles.css">
     <script src="./sculpture.js" defer></script>
+    <script src="./plugins.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -35,6 +36,7 @@
       </header>
 
       <main id="main">
+        <div class="intro-stage">
         <section class="hero" aria-labelledby="intro-title">
           <div class="hero-copy">
             <h1 id="intro-title">Hey, I’m <span class="signature">Likhith</span></h1>
@@ -79,6 +81,48 @@
             </svg>
             <canvas id="sculpture" aria-hidden="true"></canvas>
           </div>
+        </section>
+        </div>
+
+        <section class="plugin-directory" id="plugins" aria-labelledby="plugins-title">
+          <div class="directory-heading">
+            <div>
+              <h2 id="plugins-title">Plugins<span>.</span></h2>
+            </div>
+            <div class="directory-overview" id="plugin-overview" hidden>
+              <p class="directory-health" id="plugin-health"></p>
+              <p class="directory-updated">Repository status · <time id="plugin-updated"></time></p>
+            </div>
+          </div>
+
+          <form class="directory-controls" id="plugin-controls" role="search" aria-label="Find a plugin" hidden>
+            <div class="directory-search-row">
+              <label class="directory-search">
+                <svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
+                <span class="sr-only">Search plugins, categories, or languages</span>
+                <input id="plugin-search" type="search" placeholder="Search plugins…" autocomplete="off" spellcheck="false" aria-controls="plugin-grid">
+              </label>
+              <label class="directory-status-select">
+                <span class="sr-only">Filter by plugin status</span>
+                <select id="plugin-status" aria-controls="plugin-grid">
+                  <option value="all">All statuses</option>
+                  <option value="working">Working</option>
+                  <option value="maintenance">Maintenance</option>
+                  <option value="issues">Reported issues</option>
+                  <option value="unknown">Unknown</option>
+                </select>
+                <svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+              </label>
+            </div>
+            <div class="directory-filter-row">
+              <div class="category-filters" id="plugin-categories" role="group" aria-label="Filter by category"></div>
+              <p class="directory-result-count" id="plugin-result-count" role="status" aria-live="polite" aria-atomic="true"></p>
+            </div>
+          </form>
+
+          <div class="directory-feedback" id="plugin-feedback" role="status" hidden></div>
+          <div class="plugin-grid" id="plugin-grid" aria-busy="true"></div>
+          <noscript><p class="directory-feedback">View <a href="https://github.com/likhithkrishna1103-tech/Hindmovie#-plugins-status">plugin status on GitHub</a>.</p></noscript>
         </section>
       </main>
     </div>

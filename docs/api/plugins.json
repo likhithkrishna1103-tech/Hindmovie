@@ -1,0 +1,448 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-15T13:10:05Z",
+  "revision": "d8905e2f7660224b0069f65a7dda9b13fd382b54377a5ce3bc49b0c9baff4685",
+  "summary": {
+    "total": 21,
+    "working": 20,
+    "maintenance": 1,
+    "issues": 0,
+    "unknown": 0
+  },
+  "plugins": [
+    {
+      "id": "com.igris.repo.anikage",
+      "name": "Anikage",
+      "version": "11",
+      "categories": [
+        "Anime"
+      ],
+      "languages": [
+        "en",
+        "ja"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.anilight",
+      "name": "Anilight",
+      "version": "2",
+      "categories": [
+        "Anime"
+      ],
+      "languages": [
+        "en",
+        "ja"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.animedekho",
+      "name": "Animedekho",
+      "version": "3",
+      "categories": [
+        "Anime"
+      ],
+      "languages": [
+        "hi",
+        "ta",
+        "te",
+        "en"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.animedubhindi",
+      "name": "AnimeDubHindi",
+      "version": "5",
+      "categories": [
+        "Anime"
+      ],
+      "languages": [
+        "hi",
+        "en",
+        "ja",
+        "ta",
+        "te",
+        "ml",
+        "bn",
+        "kn"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.animewave",
+      "name": "AnimeWave + AniKoto",
+      "version": "11",
+      "categories": [
+        "Anime"
+      ],
+      "languages": [
+        "en",
+        "ja"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.anisuge",
+      "name": "AniSuge",
+      "version": "5",
+      "categories": [
+        "Anime"
+      ],
+      "languages": [
+        "en",
+        "ja"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.castletv",
+      "name": "Castle TV",
+      "version": "9",
+      "categories": [
+        "Movies",
+        "Series"
+      ],
+      "languages": [
+        "en",
+        "hi"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.cinefreak",
+      "name": "Cinefreak",
+      "version": "13",
+      "categories": [
+        "Other"
+      ],
+      "languages": [
+        "en",
+        "hi",
+        "ta",
+        "te",
+        "ml",
+        "kn",
+        "bn"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.cinestream",
+      "name": "CineStream",
+      "version": "28",
+      "categories": [
+        "Movies",
+        "Series",
+        "Anime"
+      ],
+      "languages": [
+        "en",
+        "hi",
+        "ja"
+      ],
+      "status": {
+        "state": "maintenance",
+        "label": "Maintenance",
+        "message": "🛠️ plugin is under Maintenance and will be fixed soon",
+        "note": "Plugin is under Maintenance and will be fixed soon"
+      }
+    },
+    {
+      "id": "com.igris.repo.hianime",
+      "name": "HiAnime",
+      "version": "3",
+      "categories": [
+        "Anime"
+      ],
+      "languages": [
+        "en",
+        "ja"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.hindmoviez",
+      "name": "HindMoviez",
+      "version": "17",
+      "categories": [
+        "Movies",
+        "Series"
+      ],
+      "languages": [
+        "hi",
+        "en",
+        "ta",
+        "te",
+        "ml",
+        "kn"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.katdrama",
+      "name": "Katdrama",
+      "version": "2",
+      "categories": [
+        "Movies",
+        "Series"
+      ],
+      "languages": [
+        "hi",
+        "en",
+        "ko"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.playeztvliveevents",
+      "name": "Live Sports 🏏",
+      "version": "11",
+      "categories": [
+        "Live TV"
+      ],
+      "languages": [
+        "en",
+        "hi"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.lunar",
+      "name": "Lunar",
+      "version": "3",
+      "categories": [
+        "Anime"
+      ],
+      "languages": [
+        "en",
+        "ja"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.movies4u",
+      "name": "Movies4U",
+      "version": "54",
+      "categories": [
+        "Movies"
+      ],
+      "languages": [
+        "hi",
+        "en",
+        "ta",
+        "te",
+        "ml",
+        "kn"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.mplayer",
+      "name": "Mplayer",
+      "version": "2",
+      "categories": [
+        "Movies",
+        "Series"
+      ],
+      "languages": [
+        "hi",
+        "en",
+        "te"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.netmirror",
+      "name": "Netmirror",
+      "version": "5",
+      "categories": [
+        "Movies",
+        "Series"
+      ],
+      "languages": [
+        "en",
+        "hi"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.netmirrormobile",
+      "name": "NetMirrorMobile",
+      "version": "17",
+      "categories": [
+        "Movies",
+        "Series",
+        "Anime"
+      ],
+      "languages": [
+        "en",
+        "hi",
+        "ta",
+        "te",
+        "ml",
+        "kn",
+        "bn",
+        "mr",
+        "pa",
+        "gu"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️ but you may face few errors based on your isp provider or geo-blocking in that case using a vpn is recommended",
+        "note": "You may face few errors based on your isp provider or geo-blocking in that case using a vpn is recommended"
+      }
+    },
+    {
+      "id": "com.igris.repo.playztv",
+      "name": "PlayZTV",
+      "version": "13",
+      "categories": [
+        "Live TV"
+      ],
+      "languages": [
+        "en",
+        "hi",
+        "ta",
+        "te",
+        "ml",
+        "kn",
+        "bn",
+        "mr",
+        "pa"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.vegamovies",
+      "name": "VegaMovies & RogMovies",
+      "version": "4",
+      "categories": [
+        "Movies",
+        "Series"
+      ],
+      "languages": [
+        "hi",
+        "en",
+        "te",
+        "ta",
+        "ma"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.youtube",
+      "name": "YouTube",
+      "version": "35",
+      "categories": [
+        "Other"
+      ],
+      "languages": [
+        "te",
+        "ta",
+        "hi",
+        "ml",
+        "kn",
+        "en"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    }
+  ]
+}
