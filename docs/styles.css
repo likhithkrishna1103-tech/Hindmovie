@@ -321,14 +321,14 @@ h1 {
 
 .cup-shadow {
   position: absolute;
-  left: 20%;
-  bottom: 15%;
-  width: 62%;
-  height: 9%;
+  left: 22%;
+  bottom: 14%;
+  width: 56%;
+  height: 6%;
   background: #000;
-  opacity: .5;
+  opacity: .65;
   border-radius: 50%;
-  filter: blur(20px);
+  filter: blur(15px);
 }
 
 .sculpture-fallback {
@@ -353,35 +353,6 @@ h1 {
 
 .sculpture-ready .sculpture-fallback {
   visibility: hidden;
-}
-
-.motion-toggle {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 44px;
-  padding: 10px 14px;
-  transform: translateX(-50%);
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: #a6a29b;
-  font-family: var(--font);
-  font-size: 11px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.motion-toggle:hover {
-  color: var(--text);
-  background: #ffffff06;
-}
-
-.motion-toggle:focus-visible {
-  outline-offset: -2px;
 }
 
 @media (min-width: 1600px) {

@@ -9,7 +9,7 @@
     <meta property="og:description" content="I build and maintain ZORO, a plugin repository for SkyStream. Support my work through UPI or Buy Me a Coffee.">
     <meta property="og:type" content="website">
     <title>Likhith — Support ZORO</title>
-    <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="./assets/zoro-green.svg" type="image/svg+xml" sizes="any">
     <link rel="preload" href="./assets/fonts/red-hat-display.ttf" as="font" type="font/ttf" crossorigin>
     <link rel="preload" href="./assets/fonts/editorial-italic.ttf" as="font" type="font/ttf" crossorigin>
     <link rel="stylesheet" href="./styles.css">
@@ -59,24 +59,25 @@
             </div>
           </div>
 
-          <div class="hero-art" role="group" aria-label="Interactive charcoal coffee cup with a green ZORO mark">
+          <div class="hero-art" role="img" aria-label="Coffee pouring into a charcoal takeaway cup with a green ZORO mark and a soft reflection">
             <div class="cup-shadow" aria-hidden="true"></div>
             <svg class="sculpture-fallback" viewBox="0 0 520 520" aria-hidden="true">
               <defs>
-                <linearGradient id="ceramic" x1="0" y1="0" x2="1" y2=".3"><stop stop-color="#616267"/><stop offset=".16" stop-color="#3c3c40"/><stop offset=".55" stop-color="#242426"/><stop offset="1" stop-color="#46474b"/></linearGradient>
-                <linearGradient id="handle" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#65666b"/><stop offset=".5" stop-color="#262628"/><stop offset="1" stop-color="#525357"/></linearGradient>
+                <linearGradient id="ceramic" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#55565a"/><stop offset=".2" stop-color="#303133"/><stop offset=".65" stop-color="#202122"/><stop offset="1" stop-color="#414245"/></linearGradient>
+                <linearGradient id="sleeve" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#363738"/><stop offset=".6" stop-color="#212223"/><stop offset="1" stop-color="#313234"/></linearGradient>
+                <linearGradient id="pour" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#271b14"/><stop offset=".5" stop-color="#76604a"/><stop offset="1" stop-color="#241c17"/></linearGradient>
               </defs>
-              <g transform="rotate(-9 260 260)">
-                <path d="M360 205c107-35 111 143 3 116" fill="none" stroke="url(#handle)" stroke-width="24"/>
-                <path d="M126 190h254l-8 150c-3 82-229 82-234 0Z" fill="url(#ceramic)"/>
-                <ellipse cx="253" cy="190" rx="127" ry="47" fill="#626267"/>
-                <ellipse cx="253" cy="189" rx="116" ry="36" fill="#161516"/>
-                <ellipse cx="253" cy="197" rx="108" ry="27" fill="#26201c"/>
-                <path d="M223 267h58l-39 40h39v13h-58l39-40h-39Z" fill="#d5f895"/>
+              <g transform="rotate(-3 260 270)">
+                <path d="M147 171h226l-31 223c-3 29-162 29-165 0Z" fill="url(#ceramic)"/>
+                <path d="m158 248 202 0-14 112c-48 16-110 16-174 0Z" fill="url(#sleeve)"/>
+                <ellipse cx="260" cy="171" rx="113" ry="35" fill="#4d4e51"/>
+                <ellipse cx="260" cy="170" rx="104" ry="27" fill="#121211"/>
+                <ellipse cx="260" cy="176" rx="99" ry="22" fill="#30261d"/>
+                <path d="M5 7h24L13 23h16v5H5l16-16H5Z" transform="translate(212.4 267) scale(2.8)" fill="#d5f895"/>
+                <path d="M252-35c-6 85 15 132 8 210" fill="none" stroke="url(#pour)" stroke-width="8"/>
               </g>
             </svg>
             <canvas id="sculpture" aria-hidden="true"></canvas>
-            <button class="motion-toggle" type="button" aria-pressed="false" hidden>Pause animation <span aria-hidden="true">Ⅱ</span></button>
           </div>
         </section>
       </main>
