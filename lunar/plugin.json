@@ -1,10 +1,10 @@
 {
   "packageName": "com.igris.repo.lunar",
   "name": "Lunar",
-  "version": 2,
+  "version": 3,
   "baseUrl": "https://lunarx.to",
   "description": "LunarX anime catalog, sub/dub episodes, and verified native HLS streams",
-  "authors": ["Developer"],
-  "languages": ["en"],
+  "authors": ["Igris"],
+  "languages": ["en", "ja"],
   "categories": ["Anime"]
 }
