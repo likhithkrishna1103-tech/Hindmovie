@@ -1,407 +1,545 @@
-/* Dependency-free WebGL takeaway cup, pouring coffee, and a floor reflection.
-   Decorative only; page content and donations work without graphics or JS. */
+/* Original </> sculpture. Continuous, filleted, bevelled solid meshes; a small
+   physically based studio renderer; and a blurred reflection. No dependencies.
+   This file owns its accessible label and vector fallback as well as WebGL. */
 (() => {
   'use strict';
 
   const canvas = document.getElementById('sculpture');
   const art = canvas?.closest('.hero-art');
   if (!canvas || !art) return;
+  art.setAttribute('aria-label', 'Sculpted charcoal code brackets with a green forward slash');
+  const oldShadow = art.querySelector('.cup-shadow');
+  if (oldShadow) oldShadow.hidden = true;
+  const fallback = art.querySelector('.sculpture-fallback');
+  if (fallback) {
+    fallback.innerHTML = `
+      <defs>
+        <linearGradient id="code-graphite" x1="0" y1="0" x2="1" y2="1">
+          <stop stop-color="#65696c"/><stop offset=".25" stop-color="#303337"/>
+          <stop offset=".7" stop-color="#1e2124"/><stop offset="1" stop-color="#4c5053"/>
+        </linearGradient>
+        <linearGradient id="code-jade" x1="0" y1="0" x2="1" y2="1">
+          <stop stop-color="#e0ffb1"/><stop offset=".4" stop-color="#c0eb7e"/><stop offset="1" stop-color="#729b46"/>
+        </linearGradient>
+        <radialGradient id="code-shadow"><stop stop-color="#000" stop-opacity=".55"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+      </defs>
+      <ellipse cx="260" cy="400" rx="190" ry="29" fill="url(#code-shadow)"/>
+      <g stroke-linejoin="round" stroke-width="8">
+        <path d="m169 157-81 91 81 90-24 24L43 248l102-115Z" fill="#52575a" stroke="#52575a" transform="translate(12 10)"/>
+        <path d="m169 157-81 91 81 90-24 24L43 248l102-115Z" fill="url(#code-graphite)" stroke="url(#code-graphite)"/>
+        <path d="m355 145 101 110-101 107-24-25 80-82-80-84Z" fill="#4a4f51" stroke="#4a4f51" transform="translate(12 9)"/>
+        <path d="m355 145 101 110-101 107-24-25 80-82-80-84Z" fill="url(#code-graphite)" stroke="url(#code-graphite)"/>
+      </g>
+      <rect x="247" y="119" width="33" height="264" rx="16.5" fill="#4b6937" transform="rotate(18 264 251) translate(10 8)"/>
+      <rect x="247" y="119" width="33" height="264" rx="16.5" fill="url(#code-jade)" transform="rotate(18 264 251)"/>
+    `;
+  }
+
   const gl = canvas.getContext('webgl', {
     alpha: true, antialias: true, premultipliedAlpha: true, powerPreference: 'low-power',
   });
   if (!gl) return;
 
-  const vertexSource = `
-    attribute vec3 aPosition;
-    attribute vec3 aNormal;
-    attribute float aMaterial;
-    uniform mat4 uProjection;
-    uniform mat3 uRotation;
-    uniform mediump float uTime;
-    uniform float uReflection;
-    varying mediump vec3 vPosition;
-    varying mediump vec3 vNormal;
-    varying mediump vec3 vLocal;
-    varying mediump float vMaterial;
-    varying mediump float vAlpha;
-    const float PI = 3.14159265;
-    const float FLOOR = -0.985;
-
-    void main() {
-      vec3 p = aPosition;
-      vec3 n = aNormal;
-      float kind = floor(aMaterial + 0.001);
-      float phase = fract(aMaterial);
-      vAlpha = 1.0;
-
-      if (kind == 1.0) {
-        float r = length(p.xz);
-        float wave = r * 38.0 - uTime * 5.5;
-        p.y += sin(wave) * 0.003 * smoothstep(0.03, 0.18, r);
-        n = normalize(vec3(-cos(wave) * p.x * 0.025, 1.0, -cos(wave) * p.z * 0.025));
-      } else if (kind == 3.0) {
-        // Irregular highlights and a changing cross-section travel downward.
-        float wobble = sin(p.y * 13.0 + uTime * 6.0);
-        p.xz *= 1.0 + wobble * 0.12;
-        p.x += sin(p.y * 5.5 + uTime * 2.3) * 0.009;
-        p.z += cos(p.y * 6.0 + uTime * 2.0) * 0.008;
-        n = normalize(n + vec3(wobble * 0.12, 0.0, 0.0));
-      } else if (kind == 4.0) {
-        // Each ring expands from the point where the stream meets the coffee.
-        float age = fract(uTime * 0.38 + phase);
-        p.xz *= 0.035 + age * 0.66;
-        p.y = 0.845 + sin(age * PI) * 0.001;
-        vAlpha = pow(1.0 - age, 1.6) * 0.48;
-      } else if (kind == 6.0) {
-        float age = fract(uTime * 0.48 + phase);
-        float angle = phase * PI * 6.0 + 0.5;
-        float reach = 0.02 + age * 0.21;
-        p += vec3(cos(angle) * reach, 0.845 + sin(age * PI) * 0.11, sin(angle) * reach);
-        vAlpha = sin(age * PI) * 0.8;
-      }
-
-      vLocal = p;
-      if (uReflection > 0.5) {
-        vAlpha *= pow(clamp(1.0 - (p.y - FLOOR) / 2.0, 0.0, 1.0), 2.1) * 0.26;
-        p.y = 2.0 * FLOOR - p.y;
-        n.y = -n.y;
-      }
-      vPosition = uRotation * p * 1.08;
-      vPosition.y -= 0.04;
-      vNormal = uRotation * n;
-      vMaterial = aMaterial;
-      gl_Position = uProjection * vec4(vPosition - vec3(0.0, 0.0, 5.1), 1.0);
-      float screenY = gl_Position.y / gl_Position.w;
-      if (uReflection > 0.5) vAlpha *= smoothstep(-0.98, -0.58, screenY);
-      if (kind == 3.0) vAlpha *= 1.0 - smoothstep(0.65, 0.98, screenY);
-    }
-  `;
-
-  const fragmentSource = `
-    precision mediump float;
-    uniform mediump float uTime;
-    uniform sampler2D uLogo;
-    varying mediump vec3 vPosition;
-    varying mediump vec3 vNormal;
-    varying mediump vec3 vLocal;
-    varying mediump float vMaterial;
-    varying mediump float vAlpha;
-
-    vec3 studio(vec3 r) {
-      vec3 color = mix(vec3(0.035), vec3(0.44, 0.45, 0.47), smoothstep(-0.65, 0.95, r.y));
-      float broad = pow(max(dot(r, normalize(vec3(-0.7, 0.85, 0.65))), 0.0), 4.0);
-      float edge = pow(max(dot(r, normalize(vec3(0.95, 0.1, 0.8))), 0.0), 16.0);
-      float rim = pow(max(dot(r, normalize(vec3(-0.6, -0.7, -0.5))), 0.0), 9.0);
-      color += vec3(0.95, 0.94, 0.92) * broad * 1.15;
-      color += vec3(0.98, 0.99, 1.0) * edge * 1.35;
-      color += vec3(0.64, 0.66, 0.69) * rim * 0.8;
-      return color;
-    }
-
-    void main() {
-      if (vAlpha < 0.002) discard;
-      vec3 n = normalize(vNormal);
-      vec3 view = normalize(vec3(0.0, 0.0, 5.1) - vPosition);
-      vec3 reflected = reflect(-view, n);
-      float diffuse = max(dot(n, normalize(vec3(-0.4, 0.8, 1.0))), 0.0);
-      float fresnel = pow(1.0 - max(dot(n, view), 0.0), 4.0);
-      float shine = pow(max(dot(reflected, normalize(vec3(-0.5, 0.7, 1.0))), 0.0), 48.0);
-      float kind = floor(vMaterial + 0.001);
-      vec3 color;
-
-      if (kind == 3.0 || kind == 6.0) {
-        // Near-black espresso with warm, moving specular reflections.
-        color = vec3(0.035, 0.021, 0.012) + studio(reflected) * 0.16;
-        float flow = pow(0.5 + 0.5 * sin(vLocal.y * 30.0 + uTime * 8.0), 7.0);
-        color += vec3(0.15, 0.09, 0.04) * flow * 0.45;
-        color += vec3(0.50, 0.35, 0.19) * shine;
-        color = pow(color, vec3(0.82));
-      } else if (kind == 4.0) {
-        color = vec3(0.29, 0.23, 0.16) + studio(reflected) * 0.12;
-      } else if (kind == 1.0) {
-        color = vec3(0.035, 0.023, 0.016) + studio(reflected) * 0.065;
-        color += vec3(0.45, 0.40, 0.33) * shine * 0.3;
-      } else {
-        float sleeve = step(4.5, kind);
-        vec3 base = mix(vec3(0.065, 0.067, 0.070), vec3(0.040, 0.041, 0.042), sleeve);
-        color = base * (0.75 + diffuse * 1.2);
-        color += studio(reflected) * (0.07 + fresnel * 0.24) * (1.0 - sleeve * 0.3);
-        color += vec3(0.36, 0.37, 0.39) * shine * (1.0 - sleeve * 0.65);
-        color = pow(color, vec3(0.82));
-        if (kind == 5.0 && vLocal.z > 0.0) {
-          // One continuous print on the sleeve: no raised or overlapping edges.
-          vec2 uv = vec2(vLocal.x / 0.75 + 0.5, (vLocal.y - 0.0125) / 0.85 + 0.5);
-          if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
-            float ink = texture2D(uLogo, uv).a;
-            vec3 green = vec3(0.835, 0.973, 0.584) * (0.86 + diffuse * 0.14);
-            color = mix(color, green, ink);
-          }
-        }
-      }
-      gl_FragColor = vec4(color, vAlpha);
-    }
-  `;
-
-  function shader(type, source) {
-    const result = gl.createShader(type);
-    if (!result) throw new Error('Unable to allocate decorative shader');
-    gl.shaderSource(result, source);
-    gl.compileShader(result);
-    if (!gl.getShaderParameter(result, gl.COMPILE_STATUS)) {
-      gl.deleteShader(result);
-      throw new Error('Decorative shader unavailable');
-    }
-    return result;
-  }
-
-  let program;
-  const allocatedShaders = [];
-  try {
-    program = gl.createProgram();
-    if (!program) return;
-    allocatedShaders.push(shader(gl.VERTEX_SHADER, vertexSource));
-    allocatedShaders.push(shader(gl.FRAGMENT_SHADER, fragmentSource));
-    allocatedShaders.forEach((part) => gl.attachShader(program, part));
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error('Link failed');
-  } catch {
-    allocatedShaders.forEach((part) => gl.deleteShader(part));
-    if (program) gl.deleteProgram(program);
-    return;
-  }
-  gl.useProgram(program);
-  allocatedShaders.forEach((part) => gl.deleteShader(part));
-
-  // Rasterize the exact header SVG into a high-resolution alpha mask. Applying
-  // the print in the sleeve shader avoids seams, overlaps, and depth fighting.
-  const logoCanvas = document.createElement('canvas');
-  logoCanvas.width = logoCanvas.height = 512;
-  const logoContext = logoCanvas.getContext('2d');
-  const logoPath = document.querySelector('.brand-mark path')?.getAttribute('d');
-  if (!logoContext || !logoPath) return;
-  logoContext.setTransform(512 / 34, 0, 0, 512 / 34, 0, 0);
-  logoContext.fillStyle = '#fff';
-  logoContext.fill(new Path2D(logoPath));
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, logoCanvas);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-  gl.generateMipmap(gl.TEXTURE_2D);
-  gl.uniform1i(gl.getUniformLocation(program, 'uLogo'), 0);
-
+  const FLOOR = -1.22;
+  const TAU = Math.PI * 2;
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const normalize = (v) => {
     const length = Math.hypot(...v) || 1;
     return v.map((value) => value / length);
   };
-  const positions = [], normals = [], materials = [], indices = [];
-  function vertex(position, normal, material = 0) {
-    const index = positions.length / 3;
-    positions.push(...position);
-    normals.push(...normal);
-    materials.push(material);
-    return index;
-  }
+  const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const dot = (a, b) => a.reduce((sum, value, i) => sum + value * b[i], 0);
+  const cross2 = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
 
-  function smoothProfile(profile) {
-    const result = [];
-    for (let i = 0; i < profile.length - 1; i++) {
-      const a = profile[Math.max(0, i - 1)], b = profile[i];
-      const c = profile[i + 1], d = profile[Math.min(profile.length - 1, i + 2)];
-      for (let step = 0; step < 5; step++) {
-        const t = step / 5;
-        result.push([0, 1].map((axis) => 0.5 * (
-          2 * b[axis] + (-a[axis] + c[axis]) * t
-          + (2 * a[axis] - 5 * b[axis] + 4 * c[axis] - d[axis]) * t * t
-          + (-a[axis] + 3 * b[axis] - 3 * c[axis] + d[axis]) * t * t * t
-        )));
+  function multiply(a, b) {
+    const result = new Float32Array(16);
+    for (let col = 0; col < 4; col++) {
+      for (let row = 0; row < 4; row++) {
+        for (let k = 0; k < 4; k++) result[col * 4 + row] += a[k * 4 + row] * b[col * 4 + k];
       }
     }
-    result.push(profile[profile.length - 1]);
     return result;
   }
-
-  function lathe(section, material = 0, segments = 96) {
-    const start = positions.length / 3;
-    for (let i = 0; i < section.length; i++) {
-      const [radius, height] = section[i];
-      const before = section[Math.max(0, i - 1)];
-      const after = section[Math.min(section.length - 1, i + 1)];
-      const dr = after[0] - before[0], dy = after[1] - before[1];
-      for (let j = 0; j <= segments; j++) {
-        const angle = j / segments * Math.PI * 2;
-        const c = Math.cos(angle), s = Math.sin(angle);
-        vertex([Math.max(0, radius) * c, height, Math.max(0, radius) * s], normalize([dy * c, -dr, dy * s]), material);
-        if (i < section.length - 1 && j < segments) {
-          const a = start + i * (segments + 1) + j, b = a + segments + 1;
-          indices.push(a, b, a + 1, b, b + 1, a + 1);
-        }
-      }
-    }
-  }
-
-  // Taller, tapered takeaway silhouette, a rolled lip, and a rounded base.
-  const cup = smoothProfile([
-    [0, -0.98], [0.44, -0.98], [0.53, -0.975], [0.565, -0.95],
-    [0.58, -0.91], [0.585, -0.83], [0.765, 0.72], [0.793, 0.865],
-    [0.816, 0.9], [0.824, 0.938], [0.807, 0.964], [0.781, 0.968],
-    [0.755, 0.947], [0.748, 0.906], [0.74, 0.854], [0.72, 0.72],
-    [0.54, -0.78], [0.50, -0.85], [0.3, -0.86], [0, -0.86],
-  ]);
-  lathe(cup);
-  const sleeve = smoothProfile([
-    [0.65, -0.46], [0.655, -0.445], [0.663, -0.43],
-    [0.757, 0.39], [0.755, 0.414], [0.742, 0.425],
-    [0.735, 0.41], [0.642, -0.42], [0.65, -0.46],
-  ]);
-  lathe(sleeve, 5);
-
-  const coffeeCenter = vertex([0, 0.835, 0], [0, 1, 0], 1);
-  const coffeeStart = positions.length / 3;
-  for (let i = 0; i <= 96; i++) {
-    const angle = i / 96 * Math.PI * 2;
-    vertex([0.729 * Math.cos(angle), 0.835, 0.729 * Math.sin(angle)], [0, 1, 0], 1);
-    if (i < 96) indices.push(coffeeCenter, coffeeStart + i, coffeeStart + i + 1);
-  }
-
-  // A fine stream extends out of frame and ends inside the cup.
-  const streamStart = positions.length / 3, streamSteps = 80, streamSides = 12;
-  for (let i = 0; i <= streamSteps; i++) {
-    const t = i / streamSteps, y = 0.835 + t * 2.5;
-    const radius = 0.027 + (1 - t) * 0.006;
-    for (let j = 0; j <= streamSides; j++) {
-      const angle = j / streamSides * Math.PI * 2;
-      const c = Math.cos(angle), s = Math.sin(angle);
-      vertex([radius * c, y, radius * s], [c, 0, s], 3);
-      if (i < streamSteps && j < streamSides) {
-        const a = streamStart + i * (streamSides + 1) + j, b = a + streamSides + 1;
-        indices.push(a, b, a + 1, b, b + 1, a + 1);
-      }
-    }
-  }
-
-  // Four fine rings expand and fade into the coffee surface.
-  for (let ring = 0; ring < 4; ring++) {
-    const start = positions.length / 3;
-    for (let i = 0; i <= 96; i++) {
-      const angle = i / 96 * Math.PI * 2;
-      for (const radius of [0.986, 1.014]) {
-        vertex([radius * Math.cos(angle), 0.845, radius * Math.sin(angle)], [0, 1, 0], 4 + ring / 4);
-      }
-      if (i < 96) {
-        const a = start + i * 2;
-        indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-      }
-    }
-  }
-
-  // Tiny droplets stay close to the impact, avoiding a large splash.
-  for (let drop = 0; drop < 4; drop++) {
-    const start = positions.length / 3, rings = 8, sides = 12;
-    for (let i = 0; i <= rings; i++) {
-      const phi = i / rings * Math.PI;
-      for (let j = 0; j <= sides; j++) {
-        const theta = j / sides * Math.PI * 2;
-        const normal = [Math.sin(phi) * Math.cos(theta), Math.cos(phi), Math.sin(phi) * Math.sin(theta)];
-        vertex(normal.map((v) => v * 0.014), normal, 6 + drop / 4);
-        if (i < rings && j < sides) {
-          const a = start + i * (sides + 1) + j, b = a + sides + 1;
-          indices.push(a, b, a + 1, b, b + 1, a + 1);
-        }
-      }
-    }
-  }
-
-  // Uint16 indices are deliberately used for WebGL 1 compatibility.
-  if (positions.length / 3 >= 65536) return;
-  function attribute(name, data, size = 3) {
-    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
-    const location = gl.getAttribLocation(program, name);
-    gl.enableVertexAttribArray(location);
-    gl.vertexAttribPointer(location, size, gl.FLOAT, false, 0, 0);
-  }
-  attribute('aPosition', positions);
-  attribute('aNormal', normals);
-  attribute('aMaterial', materials, 1);
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer());
-  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
-  gl.enable(gl.DEPTH_TEST);
-  gl.enable(gl.BLEND);
-  gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-  gl.clearColor(0, 0, 0, 0);
-
-  const uniform = (name) => gl.getUniformLocation(program, name);
-  const projectionLocation = uniform('uProjection'), rotationLocation = uniform('uRotation');
-  const timeLocation = uniform('uTime'), reflectionLocation = uniform('uReflection');
-  const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
-  let inView = true, contextLost = false, frame = 0, projectionReady = false;
-  let previousTime = 0, lastRenderedTime = 0, activeTime = 0;
-  let pointerX = 0, pointerY = 0, smoothX = 0, smoothY = 0;
-
-  function resize() {
-    const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
-    const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
-    const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
-    if (projectionReady && canvas.width === width && canvas.height === height) return;
-    canvas.width = width;
-    canvas.height = height;
-    gl.viewport(0, 0, width, height);
-    const f = 1 / Math.tan(38 * Math.PI / 360), near = 0.1, far = 20;
-    gl.uniformMatrix4fv(projectionLocation, false, new Float32Array([
-      f / (width / height), 0, 0, 0, 0, f, 0, 0,
-      0, 0, (far + near) / (near - far), -1,
-      0, 0, 2 * far * near / (near - far), 0,
-    ]));
-    projectionReady = true;
-  }
-
-  function rotation(x, y, z) {
+  function transform(x, y, z, translation = [0, 0, 0], scale = 1) {
     const cx = Math.cos(x), sx = Math.sin(x), cy = Math.cos(y), sy = Math.sin(y);
     const cz = Math.cos(z), sz = Math.sin(z);
     return new Float32Array([
-      cz * cy, sz * cy, -sy,
-      cz * sy * sx - sz * cx, sz * sy * sx + cz * cx, cy * sx,
-      cz * sy * cx + sz * sx, sz * sy * cx - cz * sx, cy * cx,
+      cz * cy * scale, sz * cy * scale, -sy * scale, 0,
+      (cz * sy * sx - sz * cx) * scale, (sz * sy * sx + cz * cx) * scale, cy * sx * scale, 0,
+      (cz * sy * cx + sz * sx) * scale, (sz * sy * cx - cz * sx) * scale, cy * cx * scale, 0,
+      ...translation, 1,
+    ]);
+  }
+  function lookAt(eye, target) {
+    const z = normalize(eye.map((value, i) => value - target[i]));
+    const x = normalize(cross3([0, 1, 0], z)), y = cross3(z, x);
+    return new Float32Array([
+      x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0,
+      -dot(x, eye), -dot(y, eye), -dot(z, eye), 1,
+    ]);
+  }
+  function perspective(aspect) {
+    const f = 1 / Math.tan(38 * Math.PI / 360), near = 0.1, far = 30;
+    return new Float32Array([
+      f / aspect, 0, 0, 0, 0, f, 0, 0,
+      0, 0, (far + near) / (near - far), -1, 0, 0, 2 * far * near / (near - far), 0,
     ]);
   }
 
-  function draw(time) {
-    frame = 0;
-    if (contextLost || !inView || document.hidden) { previousTime = 0; return; }
-    // Cap decorative rendering at 30 fps, including on high-refresh screens.
-    if (!motionPreference.matches && time - lastRenderedTime < 1000 / 30) {
-      frame = requestAnimationFrame(draw);
-      return;
+  // Circular fillets give every contour a continuous tangent. Offset contours
+  // then make the front bevel: neither glyph is assembled from intersecting bars.
+  function filletPolygon(input, requestedRadius) {
+    let points = input.map((p) => [...p]);
+    const area = points.reduce((sum, p, i) => {
+      const q = points[(i + 1) % points.length];
+      return sum + p[0] * q[1] - q[0] * p[1];
+    }, 0);
+    if (area < 0) points.reverse();
+    const contour = [];
+    let smallestRadius = Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const p = points[(i - 1 + points.length) % points.length], v = points[i], q = points[(i + 1) % points.length];
+      const incoming = normalize([v[0] - p[0], v[1] - p[1]]);
+      const outgoing = normalize([q[0] - v[0], q[1] - v[1]]);
+      const turn = Math.atan2(incoming[0] * outgoing[1] - incoming[1] * outgoing[0], dot(incoming, outgoing));
+      const sign = Math.sign(turn) || 1;
+      const tangent = Math.tan(Math.abs(turn) / 2);
+      const trim = Math.min(requestedRadius * tangent, Math.hypot(v[0] - p[0], v[1] - p[1]) * .34, Math.hypot(q[0] - v[0], q[1] - v[1]) * .34);
+      const radius = trim / Math.max(tangent, 0.0001);
+      smallestRadius = Math.min(smallestRadius, radius);
+      const entry = [v[0] - incoming[0] * trim, v[1] - incoming[1] * trim];
+      const center = [entry[0] - incoming[1] * radius * sign, entry[1] + incoming[0] * radius * sign];
+      const start = Math.atan2(entry[1] - center[1], entry[0] - center[0]);
+      const steps = Math.max(8, Math.ceil(Math.abs(turn) * 10));
+      for (let step = 0; step <= steps; step++) {
+        const angle = start + turn * step / steps;
+        const c = Math.cos(angle), s = Math.sin(angle);
+        contour.push({ p: [center[0] + radius * c, center[1] + radius * s], inward: [-c * sign, -s * sign] });
+      }
     }
-    lastRenderedTime = time;
-    resize();
-    if (!motionPreference.matches) {
-      if (previousTime) activeTime += Math.min(time - previousTime, 50) / 1000;
-      previousTime = time;
-      smoothX += (pointerX - smoothX) * 0.035;
-      smoothY += (pointerY - smoothY) * 0.035;
-    } else {
-      activeTime = 0;
-      smoothX = smoothY = 0;
-    }
-    gl.uniformMatrix3fv(rotationLocation, false, rotation(0.5 + smoothY * 0.035, -0.32 + smoothX * 0.07, -0.025));
-    gl.uniform1f(timeLocation, activeTime);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    gl.uniform1f(reflectionLocation, 1);
-    gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
-    gl.clear(gl.DEPTH_BUFFER_BIT);
-    gl.uniform1f(reflectionLocation, 0);
-    gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
-    if (!gl.isContextLost()) art.classList.add('sculpture-ready');
-    if (!motionPreference.matches) frame = requestAnimationFrame(draw);
+    return { contour, smallestRadius };
   }
 
+  function triangulate(points) {
+    const remaining = points.map((_, i) => i), triangles = [];
+    const inside = (p, a, b, c) => cross2(a, b, p) >= -1e-9 && cross2(b, c, p) >= -1e-9 && cross2(c, a, p) >= -1e-9;
+    let attempts = 0;
+    while (remaining.length > 3 && attempts++ < points.length * points.length) {
+      let clipped = false;
+      for (let i = 0; i < remaining.length; i++) {
+        const a = remaining[(i - 1 + remaining.length) % remaining.length], b = remaining[i], c = remaining[(i + 1) % remaining.length];
+        if (cross2(points[a], points[b], points[c]) <= 1e-10) continue;
+        if (remaining.some((j) => j !== a && j !== b && j !== c && inside(points[j], points[a], points[b], points[c]))) continue;
+        triangles.push(a, b, c);
+        remaining.splice(i, 1);
+        clipped = true;
+        break;
+      }
+      if (!clipped) throw new Error('Unable to close sculpture face');
+    }
+    if (remaining.length === 3) triangles.push(...remaining);
+    return triangles;
+  }
+
+  function extrude(points, { radius = .09, depth = .34, bevel = .055 } = {}) {
+    const shape = filletPolygon(points, radius);
+    const b = Math.min(bevel, shape.smallestRadius * .62);
+    const n = shape.contour.length, positions = [], normals = [], indices = [];
+    const profile = [];
+    const bevelSteps = 12;
+    for (let i = bevelSteps; i >= 0; i--) {
+      const theta = i / bevelSteps * Math.PI / 2;
+      profile.push([b * (1 - Math.cos(theta)), -depth / 2 + b - b * Math.sin(theta), Math.cos(theta), -Math.sin(theta)]);
+    }
+    for (let i = 0; i <= bevelSteps; i++) {
+      const theta = i / bevelSteps * Math.PI / 2;
+      profile.push([b * (1 - Math.cos(theta)), depth / 2 - b + b * Math.sin(theta), Math.cos(theta), Math.sin(theta)]);
+    }
+    for (let ring = 0; ring < profile.length; ring++) {
+      const [inset, z, sideNormal, frontNormal] = profile[ring];
+      for (const { p, inward } of shape.contour) {
+        positions.push(p[0] + inward[0] * inset, p[1] + inward[1] * inset, z);
+        normals.push(-inward[0] * sideNormal, -inward[1] * sideNormal, frontNormal);
+      }
+      if (ring < profile.length - 1) {
+        for (let i = 0; i < n; i++) {
+          const a = ring * n + i, next = ring * n + (i + 1) % n, upper = a + n, upperNext = next + n;
+          indices.push(a, next, upper, next, upperNext, upper);
+        }
+      }
+    }
+    const face = shape.contour.map(({ p, inward }) => [p[0] + inward[0] * b, p[1] + inward[1] * b]);
+    const cap = triangulate(face), front = (profile.length - 1) * n;
+    for (let i = 0; i < cap.length; i += 3) {
+      indices.push(front + cap[i], front + cap[i + 1], front + cap[i + 2]);
+      indices.push(cap[i + 2], cap[i + 1], cap[i]);
+    }
+    return { positions: new Float32Array(positions), normals: new Float32Array(normals), indices: new Uint16Array(indices) };
+  }
+
+  let geometry;
+  try {
+    const chevron = [[.44, .61], [-.16, 0], [.44, -.61], [.25, -.80], [-.55, 0], [.25, .80]];
+    geometry = [
+      extrude(chevron),
+      extrude(chevron.map(([x, y]) => [-x, y])),
+      extrude([[-.115, -.98], [.115, -.98], [.115, .98], [-.115, .98]], { radius: .115, depth: .38, bevel: .052 }),
+    ];
+  } catch (error) {
+    console.warn('Sculpture geometry:', error.message);
+    return;
+  }
+
+  function createRenderer() {
+    const resources = { programs: [], buffers: [], targets: [] };
+    const precision = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT).precision ? 'highp' : 'mediump';
+    function program(vertex, fragment) {
+      const parts = [];
+      try {
+        for (const [type, source] of [[gl.VERTEX_SHADER, vertex], [gl.FRAGMENT_SHADER, `precision ${precision} float;\n${fragment}`]]) {
+          const part = gl.createShader(type);
+          gl.shaderSource(part, source);
+          gl.compileShader(part);
+          if (!gl.getShaderParameter(part, gl.COMPILE_STATUS)) {
+            const message = gl.getShaderInfoLog(part);
+            gl.deleteShader(part);
+            throw new Error(message);
+          }
+          parts.push(part);
+        }
+        const result = gl.createProgram();
+        parts.forEach((part) => gl.attachShader(result, part));
+        gl.bindAttribLocation(result, 0, 'aPosition');
+        gl.bindAttribLocation(result, 1, 'aNormal');
+        gl.linkProgram(result);
+        if (!gl.getProgramParameter(result, gl.LINK_STATUS)) {
+          const message = gl.getProgramInfoLog(result);
+          gl.deleteProgram(result);
+          throw new Error(message);
+        }
+        resources.programs.push(result);
+        return result;
+      } finally {
+        parts.forEach((part) => gl.deleteShader(part));
+      }
+    }
+    const meshProgram = program(`
+      attribute vec3 aPosition;
+      attribute vec3 aNormal;
+      uniform mat4 uViewProjection;
+      uniform mat4 uModel;
+      uniform float uReflection;
+      varying mediump vec3 vWorld;
+      varying mediump vec3 vNormal;
+      varying mediump vec3 vLocal;
+      varying mediump float vFront;
+      void main() {
+        vec4 world = uModel * vec4(aPosition, 1.0);
+        vWorld = world.xyz;
+        vNormal = mat3(uModel) * aNormal;
+        vLocal = aPosition;
+        vFront = abs(aNormal.z);
+        if (uReflection > 0.5) world.y = ${2 * FLOOR} - world.y;
+        gl_Position = uViewProjection * world;
+      }
+    `, `
+      uniform vec3 uCamera;
+      uniform float uJade;
+      uniform float uLightShift;
+      varying mediump vec3 vWorld;
+      varying mediump vec3 vNormal;
+      varying mediump vec3 vLocal;
+      varying mediump float vFront;
+      const float PI = 3.14159265;
+
+      vec3 fresnel(float cosine, vec3 f0) { return f0 + (1.0 - f0) * pow(1.0 - cosine, 5.0); }
+      vec3 brdf(vec3 n, vec3 v, vec3 light, vec3 energy, vec3 base, float metal, float roughness) {
+        vec3 l = normalize(light - vWorld), h = normalize(v + l);
+        float nl = max(dot(n, l), 0.0), nv = max(dot(n, v), 0.001);
+        float nh = max(dot(n, h), 0.0), vh = max(dot(v, h), 0.0);
+        float a = roughness * roughness, a2 = a * a;
+        float denominator = nh * nh * (a2 - 1.0) + 1.0;
+        float distribution = a2 / max(PI * denominator * denominator, 0.0001);
+        float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+        float visibility = (nv / (nv * (1.0 - k) + k)) * (nl / (nl * (1.0 - k) + k));
+        vec3 f = fresnel(vh, mix(vec3(0.04), base, metal));
+        vec3 specular = distribution * visibility * f / max(4.0 * nv * nl, 0.001);
+        vec3 diffuse = (1.0 - f) * (1.0 - metal) * base / PI;
+        return (diffuse + specular) * energy * nl;
+      }
+      float softbox(vec3 r, vec3 direction, vec2 size, float blur) {
+        vec3 d = normalize(direction), x = normalize(cross(vec3(0.0, 1.0, 0.0), d)), y = cross(d, x);
+        float facing = dot(r, d);
+        vec2 p = abs(vec2(dot(r, x), dot(r, y))) / max(facing, 0.001);
+        vec2 mask = 1.0 - smoothstep(size, size + vec2(blur), p);
+        return mask.x * mask.y * smoothstep(0.0, 0.15, facing);
+      }
+      vec3 environment(vec3 r, float roughness) {
+        float blur = .08 + roughness * .65;
+        vec3 color = mix(vec3(.025, .028, .032), vec3(.15, .16, .17), smoothstep(-.6, 1.0, r.y));
+        color += vec3(1.35, 1.31, 1.24) * softbox(r, vec3(-.75 + uLightShift, .65, 1.0), vec2(.24, .75), blur);
+        color += vec3(.75, .82, .88) * softbox(r, vec3(1.0, .1, .6), vec2(.12, .9), blur);
+        color += vec3(.9, .95, .84) * softbox(r, vec3(.15, 1.0, -.25), vec2(.8, .13), blur);
+        return color;
+      }
+      vec3 aces(vec3 x) { return clamp((x * (2.51 * x + .03)) / (x * (2.43 * x + .59) + .14), 0.0, 1.0); }
+      void main() {
+        vec3 n = normalize(vNormal), v = normalize(uCamera - vWorld);
+        float front = smoothstep(.7, .99, vFront);
+        float brush = sin(vLocal.y * 180.0) * .0015 * (1.0 - uJade) * front;
+        float roughness = mix(.17, .32, front) + brush;
+        roughness = mix(roughness, .23, uJade);
+        float metal = mix(.68, .16, uJade);
+        vec3 base = mix(vec3(.065, .071, .079), vec3(.49, .73, .245), uJade);
+        vec3 color = brdf(n, v, vec3(-3.5 + uLightShift, 4.0, 4.5), vec3(4.8, 4.65, 4.4), base, metal, roughness);
+        color += brdf(n, v, vec3(4.0, .6, 3.0), vec3(1.8, 1.95, 2.1), base, metal, roughness);
+        color += brdf(n, v, vec3(0.0, 4.5, -2.0), vec3(2.8, 3.0, 2.6), base, metal, roughness);
+        // Local green bounce ties the central slash to the two graphite pieces.
+        float distanceToSlash = length(vWorld - vec3(0.0, 0.05, .25));
+        color += brdf(n, v, vec3(0.0, .15, .9), vec3(.32, .55, .14) / (1.0 + distanceToSlash * 3.0), base, metal, roughness) * (1.0 - uJade);
+        vec3 f0 = mix(vec3(.04), base, metal);
+        vec3 f = fresnel(max(dot(n, v), 0.0), f0);
+        color += environment(reflect(-v, n), roughness) * f * .8;
+        color += base * vec3(.14, .15, .16) * (1.0 - metal);
+        // A resin-like green face stays clear while retaining specular depth.
+        color += base * .12 * uJade;
+        color = pow(aces(color * mix(1.15, .75, uJade)), vec3(1.0 / 2.2));
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `);
+
+    const floorProgram = program(`
+      attribute vec3 aPosition;
+      uniform mat4 uViewProjection;
+      varying mediump vec2 vFloor;
+      void main() { vFloor = aPosition.xz; gl_Position = uViewProjection * vec4(aPosition, 1.0); }
+    `, `
+      varying mediump vec2 vFloor;
+      void main() {
+        float left = exp(-pow((vFloor.x + .95) / .48, 2.0) - pow((vFloor.y + .02) / .44, 2.0));
+        float right = exp(-pow((vFloor.x - .95) / .48, 2.0) - pow((vFloor.y + .02) / .44, 2.0));
+        float center = exp(-pow(vFloor.x / .38, 2.0) - pow(vFloor.y / .32, 2.0));
+        float alpha = clamp((left + right) * .28 + center * .30, 0.0, .58);
+        vec3 light = vec3(.012, .021, .005) * center;
+        gl_FragColor = vec4(light, alpha);
+      }
+    `);
+
+    const postProgram = program(`
+      attribute vec2 aPosition;
+      varying mediump vec2 vUV;
+      void main() { vUV = aPosition * .5 + .5; gl_Position = vec4(aPosition, 0.0, 1.0); }
+    `, `
+      uniform sampler2D uImage;
+      uniform vec2 uDirection;
+      uniform float uComposite;
+      uniform float uFloorLine;
+      varying mediump vec2 vUV;
+      void main() {
+        if (uComposite > .5) {
+          vec4 color = texture2D(uImage, vUV);
+          float below = 1.0 - smoothstep(uFloorLine - .008, uFloorLine + .012, vUV.y);
+          float fade = pow(smoothstep(.015, max(.04, uFloorLine), vUV.y), 2.0);
+          gl_FragColor = color * below * fade * .23;
+        } else {
+          vec4 color = texture2D(uImage, vUV) * .227027;
+          color += texture2D(uImage, vUV + uDirection * 1.384615) * .316216;
+          color += texture2D(uImage, vUV - uDirection * 1.384615) * .316216;
+          color += texture2D(uImage, vUV + uDirection * 3.230769) * .070270;
+          color += texture2D(uImage, vUV - uDirection * 3.230769) * .070270;
+          gl_FragColor = color;
+        }
+      }
+    `);
+
+    function buffer(data, target = gl.ARRAY_BUFFER) {
+      const result = gl.createBuffer();
+      gl.bindBuffer(target, result);
+      gl.bufferData(target, data, gl.STATIC_DRAW);
+      resources.buffers.push(result);
+      return result;
+    }
+    const meshes = geometry.map((mesh) => ({
+      position: buffer(mesh.positions), normal: buffer(mesh.normals), index: buffer(mesh.indices, gl.ELEMENT_ARRAY_BUFFER), count: mesh.indices.length,
+    }));
+    const quad = buffer(new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]));
+    const floor = buffer(new Float32Array([-4, FLOOR, -3, 4, FLOOR, -3, -4, FLOOR, 3, -4, FLOOR, 3, 4, FLOOR, -3, 4, FLOOR, 3]));
+    const locations = (p, names) => Object.fromEntries(names.map((name) => [name, gl.getUniformLocation(p, name)]));
+    const meshUniforms = locations(meshProgram, ['uViewProjection', 'uModel', 'uReflection', 'uCamera', 'uJade', 'uLightShift']);
+    const floorUniforms = locations(floorProgram, ['uViewProjection']);
+    const postUniforms = locations(postProgram, ['uImage', 'uDirection', 'uComposite', 'uFloorLine']);
+    const camera = [0, .32, 4.9], view = lookAt(camera, [0, -.025, 0]);
+    let viewProjection, floorLine = .12, width = 0, height = 0, targets = null;
+
+    function deleteTarget(target) {
+      gl.deleteTexture(target.texture);
+      gl.deleteFramebuffer(target.framebuffer);
+      if (target.depth) gl.deleteRenderbuffer(target.depth);
+    }
+    function target(w, h, depth) {
+      const texture = gl.createTexture(), framebuffer = gl.createFramebuffer();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+      let attachment = null;
+      if (depth) {
+        attachment = gl.createRenderbuffer();
+        gl.bindRenderbuffer(gl.RENDERBUFFER, attachment);
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, attachment);
+      }
+      const result = { texture, framebuffer, depth: attachment, width: w, height: h };
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        deleteTarget(result);
+        throw new Error('Reflection framebuffer unavailable');
+      }
+      resources.targets.push(result);
+      return result;
+    }
+    function resize() {
+      const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
+      const w = Math.max(1, Math.round(canvas.clientWidth * ratio)), h = Math.max(1, Math.round(canvas.clientHeight * ratio));
+      if (w === width && h === height) return;
+      width = w; height = h;
+      canvas.width = w; canvas.height = h;
+      viewProjection = multiply(perspective(w / h), view);
+      const y = viewProjection[5] * FLOOR + viewProjection[13], clipW = viewProjection[7] * FLOOR + viewProjection[15];
+      floorLine = y / clipW * .5 + .5;
+      if (targets) targets.forEach(deleteTarget);
+      resources.targets = [];
+      const reflectionWidth = Math.min(512, Math.max(128, Math.round(w * .5)));
+      const reflectionHeight = Math.min(512, Math.max(128, Math.round(h * .5)));
+      targets = [target(reflectionWidth, reflectionHeight, true), target(reflectionWidth, reflectionHeight, false), target(reflectionWidth, reflectionHeight, false)];
+    }
+    function attribute(slot, data, size) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, data);
+      gl.enableVertexAttribArray(slot);
+      gl.vertexAttribPointer(slot, size, gl.FLOAT, false, 0, 0);
+    }
+    function drawMeshes(models, reflection, time) {
+      gl.useProgram(meshProgram);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthMask(true);
+      // The mirrored pass reverses winding, so both sides use depth testing.
+      gl.disable(gl.CULL_FACE);
+      gl.disable(gl.BLEND);
+      gl.uniformMatrix4fv(meshUniforms.uViewProjection, false, viewProjection);
+      gl.uniform3fv(meshUniforms.uCamera, camera);
+      gl.uniform1f(meshUniforms.uReflection, reflection ? 1 : 0);
+      gl.uniform1f(meshUniforms.uLightShift, Math.sin(time * .18) * .13);
+      for (let i = 0; i < meshes.length; i++) {
+        const mesh = meshes[i];
+        attribute(0, mesh.position, 3);
+        attribute(1, mesh.normal, 3);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.index);
+        gl.uniformMatrix4fv(meshUniforms.uModel, false, models[i]);
+        gl.uniform1f(meshUniforms.uJade, i === 2 ? 1 : 0);
+        gl.drawElements(gl.TRIANGLES, mesh.count, gl.UNSIGNED_SHORT, 0);
+      }
+    }
+    function post(image, destination, dx, dy, composite) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, destination?.framebuffer || null);
+      gl.viewport(0, 0, destination?.width || width, destination?.height || height);
+      gl.useProgram(postProgram);
+      gl.disable(gl.DEPTH_TEST);
+      gl.depthMask(false);
+      gl.disableVertexAttribArray(1);
+      attribute(0, quad, 2);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, image);
+      gl.uniform1i(postUniforms.uImage, 0);
+      gl.uniform2f(postUniforms.uDirection, dx, dy);
+      gl.uniform1f(postUniforms.uComposite, composite ? 1 : 0);
+      gl.uniform1f(postUniforms.uFloorLine, floorLine);
+      if (composite) { gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); }
+      else gl.disable(gl.BLEND);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+    function draw(time, pointer) {
+      resize();
+      const group = transform(.10 + pointer[1] * .10, -.20 + pointer[0] * .18, -.015, [0, .015, 0], 1.025);
+      const models = [
+        multiply(group, transform(.035, -.16 + Math.sin(time * .37) * .025, -.025, [-.98, Math.sin(time * .55) * .025, -.025])),
+        multiply(group, transform(-.025, .18 + Math.cos(time * .31) * .025, .025, [.98, Math.sin(time * .47 + 1.4) * .025, -.055])),
+        multiply(group, transform(.025, -.08 + Math.sin(time * .32) * .035, -.31, [0, .015 + Math.sin(time * .52 + .6) * .035, .14])),
+      ];
+      // Render a real mirrored scene, then blur it at half resolution in two passes.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, targets[0].framebuffer);
+      gl.viewport(0, 0, targets[0].width, targets[0].height);
+      gl.depthMask(true);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      drawMeshes(models, true, time);
+      post(targets[0].texture, targets[1], 1.1 / targets[0].width, 0, false);
+      post(targets[1].texture, targets[2], 0, 1.1 / targets[0].height, false);
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, width, height);
+      gl.depthMask(true);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.useProgram(floorProgram);
+      gl.disable(gl.DEPTH_TEST);
+      gl.depthMask(false);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.disableVertexAttribArray(1);
+      attribute(0, floor, 3);
+      gl.uniformMatrix4fv(floorUniforms.uViewProjection, false, viewProjection);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      post(targets[2].texture, null, 0, 0, true);
+      drawMeshes(models, false, time);
+    }
+    return {
+      draw,
+      dispose() {
+        resources.targets.forEach(deleteTarget);
+        resources.buffers.forEach((b) => gl.deleteBuffer(b));
+        resources.programs.forEach((p) => gl.deleteProgram(p));
+      },
+    };
+  }
+
+  let renderer;
+  try { renderer = createRenderer(); }
+  catch (error) { console.warn('Sculpture renderer:', error.message); return; }
+  const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let frame = 0, inView = true, lost = false, activeTime = 0, previousTime = 0, lastDraw = 0;
+  let pointerX = 0, pointerY = 0, smoothX = 0, smoothY = 0;
+
+  function draw(now) {
+    frame = 0;
+    if (lost || !inView || document.hidden) { previousTime = 0; return; }
+    if (!motionPreference.matches && now - lastDraw < 1000 / 30) { frame = requestAnimationFrame(draw); return; }
+    const dt = previousTime ? Math.min((now - previousTime) / 1000, .05) : 0;
+    previousTime = now;
+    lastDraw = now;
+    if (motionPreference.matches) {
+      activeTime = 0; smoothX = smoothY = 0;
+    } else {
+      activeTime += dt;
+      const damp = 1 - Math.exp(-dt * 6);
+      smoothX += (pointerX - smoothX) * damp;
+      smoothY += (pointerY - smoothY) * damp;
+    }
+    try {
+      renderer.draw(activeTime, [smoothX, smoothY]);
+      if (!gl.isContextLost()) art.classList.add('sculpture-ready');
+    } catch (error) {
+      console.warn('Sculpture rendering:', error.message);
+      art.classList.remove('sculpture-ready');
+      renderer.dispose();
+      lost = true;
+      return;
+    }
+    if (!motionPreference.matches) frame = requestAnimationFrame(draw);
+  }
   function requestDraw() {
-    if (!frame && !contextLost && inView && !document.hidden) frame = requestAnimationFrame(draw);
+    if (!frame && !lost && inView && !document.hidden) frame = requestAnimationFrame(draw);
   }
   if ('IntersectionObserver' in window) {
     const observer = new IntersectionObserver(([entry]) => {
@@ -413,9 +551,9 @@
   }
   art.addEventListener('pointermove', (event) => {
     if (event.pointerType === 'touch' || motionPreference.matches) return;
-    const rect = art.getBoundingClientRect();
-    pointerX = (event.clientX - rect.left) / rect.width * 2 - 1;
-    pointerY = (event.clientY - rect.top) / rect.height * 2 - 1;
+    const bounds = art.getBoundingClientRect();
+    pointerX = clamp((event.clientX - bounds.left) / bounds.width * 2 - 1, -1, 1);
+    pointerY = clamp((event.clientY - bounds.top) / bounds.height * 2 - 1, -1, 1);
   });
   art.addEventListener('pointerleave', () => { pointerX = pointerY = 0; });
   document.addEventListener('visibilitychange', () => {
@@ -426,10 +564,18 @@
   motionPreference.addEventListener('change', () => { previousTime = 0; requestDraw(); });
   canvas.addEventListener('webglcontextlost', (event) => {
     event.preventDefault();
-    contextLost = true;
+    lost = true;
     cancelAnimationFrame(frame);
     frame = 0;
     art.classList.remove('sculpture-ready');
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    try {
+      renderer = createRenderer();
+      lost = false;
+      previousTime = 0;
+      requestDraw();
+    } catch (error) { console.warn('Sculpture restoration:', error.message); }
   });
   requestDraw();
 })();
