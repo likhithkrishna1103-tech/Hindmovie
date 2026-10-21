@@ -27,7 +27,7 @@ Via UPI 🇮🇳
 | AnimeWave + AniKoto | 11 | Working ✅️ | Anime | en, ja |
 | AniSuge | 5 | Working ✅️ | Anime | en, ja |
 | Castle TV | 9 | Working ✅️ | Movies, Series | en, hi |
-| Cinefreak | 13 | Working ✅️ | Others | en, hi, ta, te, ml, kn, bn |
+| Cinefreak | 14 | Working ✅️ | Others | en, hi, ta, te, ml, kn, bn |
 | CineStream | 28 | 🛠️ plugin is under Maintenance and will be fixed soon | Movies, Series, Anime | en, hi, ja |
 | HiAnime | 3 | Working ✅️ | Anime | en, ja |
 | HindMoviez | 17 | Working ✅️ | Movies, Series | hi, en, ta, te, ml, kn |

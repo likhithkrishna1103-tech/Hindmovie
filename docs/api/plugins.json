@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-15T13:10:05Z",
-  "revision": "d8905e2f7660224b0069f65a7dda9b13fd382b54377a5ce3bc49b0c9baff4685",
+  "updatedAt": "2026-10-21T05:59:17Z",
+  "revision": "0d0af1cd34add3d4aef3b2d6033f6680dcd429f7a0a579b487c8cc25c09222f2",
   "summary": {
     "total": 21,
     "working": 20,
@@ -148,7 +148,7 @@
     {
       "id": "com.igris.repo.cinefreak",
       "name": "Cinefreak",
-      "version": "13",
+      "version": "14",
       "categories": [
         "Other"
       ],
