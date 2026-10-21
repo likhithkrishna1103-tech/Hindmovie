@@ -79,6 +79,7 @@
     var hubcloudCache = null;
     var gdflixDomainCache = null;
     var urlCache = {};
+    var cloudPageInflight = {};
     var tmdbJsonCache = {};
     var tmdbInflight = {};
     var CACHE_TTL = 300000;
@@ -480,6 +481,72 @@
         return request(url, { headers: headers }).then(function (res) {
             return parseJsonSafe(res.body, {});
         });
+    }
+
+    function getCloudDownloadPage(url, headers) {
+        if (cloudPageInflight[url]) return cloudPageInflight[url];
+        var pending = getText(url, headers).then(async function (html) {
+            var siteKey = firstMatch(html, [/\bdata-sitekey\s*=\s*["']([^"']+)["']/i]);
+            var unlockPath = firstMatch(html, [/fetch\(\s*["']([^"']+\/unlock)["']/i]);
+            if (!siteKey || !unlockPath || (urlCache[url] && urlCache[url].captchaSolved)) return html;
+
+            // A cached challenge must never masquerade as a resolved download page.
+            delete urlCache[url];
+            try {
+                if (typeof solveCaptcha !== "function") throw new Error("Update SkyStream to solve this site's captcha");
+                var unlockUrl = absoluteUrl(url, unlockPath);
+                var noncePath = firstMatch(html, [/fetch\(\s*["']([^"']+\/n)["']/i]);
+                var nonceUrl = noncePath ? absoluteUrl(url, noncePath) : unlockUrl.replace(/\/unlock$/, "/n");
+                if (baseOrigin(unlockUrl) !== baseOrigin(url) || baseOrigin(nonceUrl) !== baseOrigin(url)) {
+                    throw new Error("Invalid captcha verification endpoint");
+                }
+                var verifyHeaders = Object.assign({}, headers, { "Referer": url, "Origin": baseOrigin(url) });
+                var token = await solveCaptcha(siteKey, url);
+                if (typeof token !== "string" || !token.trim()) throw new Error("Captcha returned no token");
+
+                // CineCloud expects ts (Turnstile) and bc (a fresh browser nonce).
+                for (var attempt = 0; attempt < 3; attempt++) {
+                    var nonce = null;
+                    for (var retry = 0; retry < 2; retry++) {
+                        var nonceRes = await request(nonceUrl, { headers: verifyHeaders }).catch(function () { return null; });
+                        nonce = nonceRes && nonceRes.status >= 200 && nonceRes.status < 300 && !nonceRes.error ? parseJsonSafe(nonceRes.body, null) : null;
+                        if (nonce && nonce.n) break;
+                        if (!retry) await new Promise(function (resolve) { setTimeout(resolve, 600); });
+                    }
+                    if (!nonce || !nonce.n) throw new Error("Could not fetch the captcha verification nonce");
+                    var unlockedRes = await postForm(unlockUrl, { ts: token, bc: nonce.n }, verifyHeaders);
+                    var unlocked = parseJsonSafe(unlockedRes.body, null);
+                    if (unlockedRes.status >= 200 && unlockedRes.status < 300 && !unlockedRes.error && unlocked && unlocked.ok && typeof unlocked.html === "string" && unlocked.html.trim()) {
+                        var body = html + "\n" + unlocked.html;
+                        urlCache[url] = { body: body, time: Date.now(), captchaSolved: true };
+                        return body;
+                    }
+                    // A rejected nonce is checked before the token is consumed.
+                    if (unlocked && unlocked.renonce && attempt < 2) {
+                        await new Promise(function (resolve) { setTimeout(resolve, 800); });
+                        continue;
+                    }
+                    throw new Error(unlocked && unlocked.message || "Captcha verification failed");
+                }
+            } catch (error) {
+                var failure = new Error("Captcha verification for " + baseOrigin(url) + ": " + String(error && error.message || error));
+                failure.code = "CAPTCHA_ERROR";
+                throw failure;
+            }
+        });
+        cloudPageInflight[url] = pending.then(function (html) {
+            delete cloudPageInflight[url];
+            return html;
+        }, function (error) {
+            delete cloudPageInflight[url];
+            throw error;
+        });
+        return cloudPageInflight[url];
+    }
+
+    function emptyUnlessCaptchaError(error) {
+        if (error && error.code === "CAPTCHA_ERROR") throw error;
+        return [];
     }
 
     function postForm(url, form, headers, allowRedirects) {
@@ -2153,7 +2220,7 @@
     function resolveNeoDrive(url, refererLabel) {
         var ref = refererLabel || "Neodrive";
         var headers = defaultHeaders({ "Referer": baseOrigin(url) + "/" });
-        return getText(url, headers).then(function (html) {
+        return getCloudDownloadPage(url, headers).then(function (html) {
             var quality = getQualityFromText(firstMatch(html, [/<div\b[^>]*class=["'][^"']*mb-8[^"']*["'][^>]*>\s*<h2\b[^>]*>([\s\S]*?)<\/h2>/i])) || getQualityFromText(url);
             var sizeMatch = html.match(/class=["'][^"']*info-label[^"']*["'][^>]*>\s*File Size\s*<\/td>\s*<td\b[^>]*class=["'][^"']*info-value[^"']*["'][^>]*>([\s\S]*?)<\/td>/i)
                 || html.match(/File Size[\s\S]*?<td\b[^>]*>([\s\S]*?)<\/td>/i);
@@ -2175,9 +2242,7 @@
             })).then(flattenResults).then(function (results) {
                 return uniqueBy(results, function (item) { return item.url; });
             });
-        }).catch(function () {
-            return [];
-        });
+        }).catch(emptyUnlessCaptchaError);
     }
 
     function isCloudWrapperUrl(url) {
@@ -2224,9 +2289,13 @@
         var base = baseOrigin(url) || "https://new5.cinecloud.site";
         var targetUrl = url.replace("/x/", "/f/");
         var headers = defaultHeaders({ "Referer": base + "/" });
-        var downloads = getText(targetUrl, headers).then(function (html) {
+        var captchaFailure = null;
+        var downloads = getCloudDownloadPage(targetUrl, headers).then(function (html) {
             return parseCinecloudHtml(html, base, refererLabel);
-        }).catch(function () { return []; });
+        }).catch(function (error) {
+            if (error && error.code === "CAPTCHA_ERROR") captchaFailure = error;
+            return [];
+        });
         var streamPage = targetUrl.replace("/f/", "/x/");
         var watch = getText(streamPage, headers).then(function (html) {
             var iframe = firstMatch(html, [/<iframe\b[^>]*data-cf-src=["']([^"']+)["']/i, /<iframe\b[^>]*src=["']([^"']+)["']/i]);
@@ -2236,6 +2305,7 @@
             return [buildStreamResult(target, (refererLabel || "CineCloud") + " [FSL]", headers, getQualityFromText(refererLabel + " " + target))];
         }).catch(function () { return []; });
         return Promise.all([downloads, watch]).then(flattenResults).then(function (streams) {
+            if (!streams.length && captchaFailure) throw captchaFailure;
             return uniqueBy(streams, function (stream) { return stream.url; });
         });
     }
@@ -2267,7 +2337,7 @@
             return request(nextUrl, { headers: defaultHeaders({ "Referer": url }) }).then(function (res) {
                 return resolvePage(res, nextUrl);
             });
-        }).catch(function () { return []; });
+        }).catch(emptyUnlessCaptchaError);
     }
 
     function resolveHubCdn(url, refererLabel) {
@@ -2336,6 +2406,8 @@
 
     function resolveExtractorUrl(url, refererLabel) {
         if (!url) return Promise.resolve([]);
+        // Leave time for the SDK's interactive captcha sheet within the 90s runtime limit.
+        var cloudTimeout = typeof solveCaptcha === "function" ? 85000 : 25000;
         // Handle Cinefreak generate.php download links
         if (/generate\.php/i.test(url)) {
             var idMatch = String(url || "").match(/[?&]id=([^&\s"']+)/i);
@@ -2347,7 +2419,7 @@
                     return resolveExtractorUrl(decoded, refererLabel || "Cinefreak");
                 }
             }
-            return withTimeout(resolveCinefreakGenerate(url, refererLabel || "Cinefreak"), 25000, "CinefreakGenerate");
+            return withTimeout(resolveCinefreakGenerate(url, refererLabel || "Cinefreak"), cloudTimeout, "CinefreakGenerate");
         }
         // Handle id= query param base64 decode and newgo32 strip (as done in Cinefreak .cs3)
         var idMatch = String(url || "").match(/[?&]id=([^&\s"']+)/i);
@@ -2361,8 +2433,8 @@
         }
         if (isDirectMediaUrl(url)) return Promise.resolve([buildStreamResult(url, refererLabel || "Direct", {}, getQualityFromText(url))]);
         if (looksLikeGoogleDriveUrl(url)) return resolveGoogleDrive(url);
-        if (/neodrive/i.test(url)) return withTimeout(resolveNeoDrive(url, refererLabel || "Neodrive"), 25000, "Neodrive");
-        if (/cinecloud/i.test(url)) return withTimeout(resolveCinecloud(url, refererLabel || "CineCloud"), 25000, "CineCloud");
+        if (/neodrive/i.test(url)) return withTimeout(resolveNeoDrive(url, refererLabel || "Neodrive"), cloudTimeout, "Neodrive");
+        if (/cinecloud/i.test(url)) return withTimeout(resolveCinecloud(url, refererLabel || "CineCloud"), cloudTimeout, "CineCloud");
         if (/hubcdn/i.test(url)) return withTimeout(resolveHubCdn(url, refererLabel || "HUBCDN"), 20000, "HUBCDN");
         if (/gdflix|gdlink/i.test(url)) return withTimeout(resolveGdflix(url, refererLabel || "GDFlix"), 25000, "GDFlix");
         if (/hubcloud\.|gamerxyt\.com\/hubcloud\.php|shikshakdaak/i.test(url)) return withTimeout(resolveHubCloudWithFallback(url, refererLabel || "HubCloud"), 25000, "HubCloud");
@@ -2938,10 +3010,12 @@
             }
             if (!payload || !payload.links || !payload.links.length) {
                 if (/^https?:\/\//i.test(String(url || ""))) {
-                    var html = await getText(String(url), defaultHeaders());
+                    var targetUrl = String(url);
+                    var cloudLink = isCloudWrapperUrl(targetUrl) || /generate\.php/i.test(targetUrl);
+                    var html = cloudLink ? "" : await getText(targetUrl, defaultHeaders());
                     payload = {
-                        sourceUrl: String(url),
-                        links: extractDownloadLinks(html, baseOrigin(String(url))).map(function (l) { return { href: l }; }),
+                        sourceUrl: targetUrl,
+                        links: cloudLink ? [{ href: targetUrl }] : extractDownloadLinks(html, baseOrigin(targetUrl)).map(function (l) { return { href: l }; }),
                         type: "movie",
                         title: ""
                     };
@@ -2957,6 +3031,7 @@
                 return { href: link.href || link.url || "", label: label, quality: Number(link.quality) || getQualityFromText(label), mode: link.mode || (/\[Watch\]/i.test(label) ? "watch" : /\[Download\]/i.test(label) ? "download" : "") };
             }).filter(function (l) { return !!l.href; });
 
+            var captchaFailures = [];
             var resolved = await mapWithConcurrency(rawLinks, 3, function (link) {
                 var quality = link.quality || getQualityFromText(String(link.href || "") + " " + String(payload.title || ""));
                 var source = trim("Cinefreak " + (link.label || (link.mode ? "[" + (link.mode === "watch" ? "Watch" : "Download") + "]" : "")));
@@ -2971,7 +3046,11 @@
                     });
                     if (isRawExtractorCandidate(link.href)) return rawFallback;
                     return [];
-                }).catch(function () {
+                }).catch(function (error) {
+                    if (error && error.code === "CAPTCHA_ERROR") {
+                        captchaFailures.push(error.message);
+                        return [];
+                    }
                     if (isRawExtractorCandidate(link.href)) return rawFallback;
                     return [];
                 });
@@ -2984,7 +3063,7 @@
             });
 
             if (!streams.length) {
-                cb({ success: false, errorCode: "STREAM_EMPTY", message: "No playable streams resolved" });
+                cb({ success: false, errorCode: captchaFailures.length ? "CAPTCHA_ERROR" : "STREAM_EMPTY", message: captchaFailures[0] || "No playable streams resolved" });
                 return;
             }
             Analytics.logEvent('cinefreak_loadstreams', {});
