@@ -115,6 +115,29 @@
     "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animedubhindi.sky"
   },
   {
+    "packageName": "com.igris.repo.animesky",
+    "name": "AnimeSky",
+    "version": 1,
+    "baseUrl": "https://animesky.app",
+    "description": "Watch Anime & Cartoons in Hindi, Tamil, Telugu, English & Japanese from AnimeSky.",
+    "authors": [
+      "IGRIS"
+    ],
+    "languages": [
+      "hi",
+      "en",
+      "ja",
+      "ta",
+      "te",
+      "ml",
+      "kn"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/likhithkrishna1103-tech/Hindmovie/main/dist/com.igris.repo.animesky.sky"
+  },
+  {
     "packageName": "com.igris.repo.animewave",
     "name": "AnimeWave + AniKoto",
     "version": 11,

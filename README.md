@@ -24,6 +24,7 @@ Via UPI 🇮🇳
 | Anilight | 2 | Working ✅️ | Anime | en, ja |
 | Animedekho | 3 | Working ✅️ | Anime | hi, ta, te, en |
 | AnimeDubHindi | 5 | Working ✅️ | Anime | hi, en, ja, ta, te, ml, bn, kn |
+| AnimeSky | 1 | Working ✅️ | Anime | hi, en, ja, ta, te, ml, kn |
 | AnimeWave + AniKoto | 11 | Working ✅️ | Anime | en, ja |
 | AniSuge | 5 | Working ✅️ | Anime | en, ja |
 | Castle TV | 9 | Working ✅️ | Movies, Series | en, hi |

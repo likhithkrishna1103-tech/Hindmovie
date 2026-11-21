@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-21T05:59:17Z",
-  "revision": "0d0af1cd34add3d4aef3b2d6033f6680dcd429f7a0a579b487c8cc25c09222f2",
+  "updatedAt": "2026-11-21T05:30:05Z",
+  "revision": "c28f57e43e6547d687fea25cd258c276ec2eaf8c9b1e23a2ba97e72cbbb89575",
   "summary": {
-    "total": 21,
-    "working": 20,
+    "total": 22,
+    "working": 21,
     "maintenance": 1,
     "issues": 0,
     "unknown": 0
@@ -81,6 +81,29 @@
         "te",
         "ml",
         "bn",
+        "kn"
+      ],
+      "status": {
+        "state": "working",
+        "label": "Working",
+        "message": "Working ✅️",
+        "note": ""
+      }
+    },
+    {
+      "id": "com.igris.repo.animesky",
+      "name": "AnimeSky",
+      "version": "1",
+      "categories": [
+        "Anime"
+      ],
+      "languages": [
+        "hi",
+        "en",
+        "ja",
+        "ta",
+        "te",
+        "ml",
         "kn"
       ],
       "status": {
