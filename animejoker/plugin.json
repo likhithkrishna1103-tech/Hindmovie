@@ -1,0 +1,10 @@
+{
+  "packageName": "com.igris.repo.animejoker",
+  "name": "AnimeJoker",
+  "version": 1,
+  "baseUrl": "https://animejoker.com",
+  "description": "Watch Hindi, Tamil, Telugu, English & Japanese anime and cartoons from AnimeJoker",
+  "authors": ["IGRIS"],
+  "languages": ["hi", "ta", "te", "en", "ja"],
+  "categories": ["Anime", "Movies"]
+}
