@@ -1,0 +1,22 @@
+{
+  "packageName": "com.igris.repo.animesky",
+  "name": "AnimeSky",
+  "version": 1,
+  "baseUrl": "https://animesky.app",
+  "description": "Watch Anime & Cartoons in Hindi, Tamil, Telugu, English & Japanese from AnimeSky.",
+  "authors": [
+    "IGRIS"
+  ],
+  "languages": [
+    "hi",
+    "en",
+    "ja",
+    "ta",
+    "te",
+    "ml",
+    "kn"
+  ],
+  "categories": [
+    "Anime"
+  ]
+}
